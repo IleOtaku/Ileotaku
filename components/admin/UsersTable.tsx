@@ -23,8 +23,8 @@ import {
   verifyCreator,
   verifyPublisher,
 } from "@/lib/admin";
-import { initials, stringToColor } from "@/lib/utils";
 import { Skeleton } from "@/components/ui";
+import { Avatar } from "@/components/ui/Avatar";
 import type { UserProfile } from "@/types";
 import AddAdminRoleModal from "./AddAdminRoleModal";
 
@@ -193,22 +193,7 @@ export default function UsersTable({ users, loading, canManageAdmins = true, onU
               return (
                 <tr key={u.uid} className={`border-b border-bg4 last:border-0 ${rowTint}`}>
                   <td className="flex items-center gap-2.5 p-3">
-                    {u.photoURL ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-            loading="lazy"
-                        src={u.photoURL}
-                        alt=""
-                        className="h-8 w-8 shrink-0 rounded-full object-cover"
-                      />
-                    ) : (
-                      <span
-                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full font-syne text-xs font-bold text-ivory"
-                        style={{ backgroundColor: stringToColor(u.uid || u.displayName) }}
-                      >
-                        {initials(u.displayName)}
-                      </span>
-                    )}
+                    <Avatar uid={u.uid} photoURL={u.photoURL} displayName={u.displayName} size={32} />
                     <span className="font-noto text-sm text-text">{u.displayName}</span>
                   </td>
                   <td className="p-3 font-noto text-xs text-muted">{u.email}</td>

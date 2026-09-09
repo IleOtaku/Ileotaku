@@ -215,8 +215,11 @@ export default function PostComposer({ onPosted }: PostComposerProps) {
       toast.success("Posted!");
       resetComposer();
       onPosted?.();
-    } catch {
-      toast.error("Couldn't publish your post. Please try again.");
+    } catch (error) {
+      // Surfaces the actual failure (e.g. Firestore's "Missing or insufficient permissions")
+      // instead of a generic message — this exact spot was reported hard to diagnose for a
+      // non-admin account with no detail to go on.
+      toast.error(error instanceof Error ? error.message : "Couldn't publish your post. Please try again.");
     } finally {
       setPosting(false);
     }

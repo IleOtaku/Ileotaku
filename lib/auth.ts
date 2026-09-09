@@ -44,7 +44,37 @@ export async function signUpEmail(
 
 export async function signInEmail(email: string, password: string): Promise<UserCredential> {
   const cred = await signInWithEmailAndPassword(auth, email, password);
-  await updateLastActive(cred.user.uid);
+
+  // Backfills a profile a previous signup never finished writing (the tab closing, or a
+  // network drop, between createUserWithEmailAndPassword and upsertUserProfile leaves the
+  // Auth account signed-in-forever with no Firestore document at all) — confirmed live as the
+  // root cause behind two separately-reported symptoms: feed posts failing for "a regular
+  // user" (creatorFeed's create rule reads users/{uid} to check forYouEligible, which throws
+  // outright when the document doesn't exist, not just a missing field) and a hard error
+  // opening certain profiles. signInSocial already guards its existing-user branch the same
+  // way; mirrored here since updateLastActive's updateDoc silently no-ops (catches and logs,
+  // never rethrows) on a document that was never created, so nothing else would ever surface
+  // this or self-heal it.
+  const existing = await getUserProfile(cred.user.uid);
+  if (existing) {
+    await updateLastActive(cred.user.uid);
+  } else {
+    await upsertUserProfile(cred.user.uid, {
+      uid: cred.user.uid,
+      displayName: cred.user.displayName ?? "ÍléOtaku Fan",
+      email: cred.user.email ?? email,
+      photoURL: cred.user.photoURL ?? "",
+      role: "reader",
+      tier: "free",
+      coins: 0,
+      favorites: [],
+      following: [],
+      followers: [],
+      isCreator: false,
+      isAdmin: false,
+      isPlatinum: false,
+    });
+  }
   return cred;
 }
 

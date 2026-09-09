@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { BadgeCheck, Sparkles } from "lucide-react";
+import { getCoverGradient } from "@/components/profile/CoverStylePicker";
 import { getUserByHandle } from "@/lib/firestore";
 import { getPostsByCreator } from "@/lib/creatorFeed";
 import { getPublishedSeriesByAuthor } from "@/lib/publishedSeries";
@@ -79,14 +80,10 @@ export default async function CreatorProfilePage({ params }: CreatorProfilePageP
   return (
     <BlockedContentGate targetUid={creator.uid}>
     <div className="relative">
-      <div className="relative h-48 w-full overflow-hidden bg-bg2 sm:h-64">
-        <div
-          className="absolute inset-0 opacity-30"
-          style={{
-            backgroundImage:
-              "radial-gradient(circle at 20% 30%, #c4622d, transparent 45%), radial-gradient(circle at 80% 70%, #3d6b4f, transparent 45%)",
-          }}
-        />
+      <div
+        className="relative h-48 w-full overflow-hidden bg-bg2 sm:h-64"
+        style={{ backgroundImage: getCoverGradient(creator.coverStyle) }}
+      >
         <div className="kente-bar absolute inset-x-0 top-0" />
       </div>
 

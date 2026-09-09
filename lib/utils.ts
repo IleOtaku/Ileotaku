@@ -50,6 +50,19 @@ export function truncate(text: string, length: number): string {
   return `${text.slice(0, length).trimEnd()}…`;
 }
 
+/** Where tapping a user's avatar or name should go — a creator's public page is keyed by their
+ * @handle, everyone else's by uid. Takes a loose shape (rather than the full UserProfile) so it
+ * also works from the partial, denormalized user info this app stores in other places — a DM
+ * conversation's participantNames, a feed post's author fields, a search result — without
+ * forcing every call site to first fetch a complete profile just to build a link. Falls back to
+ * /profile/{uid} if a creator's handle is missing (shouldn't happen — creator signup requires
+ * one — but a straight uid-keyed page still resolves rather than producing a broken /creator/
+ * link with an empty segment). */
+export function getUserProfileUrl(user: { uid: string; isCreator?: boolean; handle?: string }): string {
+  if (user.isCreator && user.handle) return `/creator/${user.handle}`;
+  return `/profile/${user.uid}`;
+}
+
 /** Parses view-count strings like "812K" or "1.2M" into a plain number for sorting/math. */
 export function parseViewCount(view: string | undefined): number {
   if (!view) return 0;

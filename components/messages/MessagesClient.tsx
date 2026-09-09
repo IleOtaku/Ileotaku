@@ -7,29 +7,35 @@ import toast from "react-hot-toast";
 import { ArrowLeft, Loader2, Plus, Search, Send, ShieldOff, Smile } from "lucide-react";
 import BlockButton from "@/components/social/BlockButton";
 import { Modal, Skeleton } from "@/components/ui";
+import { Avatar } from "@/components/ui/Avatar";
 import { useAuth } from "@/hooks/useAuth";
 import { getBlockedUsers, isBlockedBy } from "@/lib/blocking";
 import {
   markDMRead,
   sendDM,
+  setTyping,
   startConversation,
   subscribeToConversation,
   subscribeToConversations,
+  subscribeToTyping,
 } from "@/lib/dms";
 import { getUserProfile, searchUsers } from "@/lib/firestore";
 import { getNowPlayingOnce } from "@/lib/nowPlaying";
+import { subscribeToUserStatus, type OnlineStatus } from "@/lib/onlineStatus";
 import SpotifyMiniPlayer from "@/components/spotify/SpotifyMiniPlayer";
-import { formatTime, initials, stringToColor, truncate } from "@/lib/utils";
+import { formatTime, truncate } from "@/lib/utils";
 import type { Conversation, DMMessage, UserProfile } from "@/types";
 
 const MAX_TEXTAREA_HEIGHT = 112; // ~4 lines at this input's font/line-height + padding
+/** How long to wait after the last keystroke before clearing our own typing flag. */
+const TYPING_CLEAR_DELAY_MS = 2000;
 
-/** A viewer counts as "online" if their last recorded activity was within this window. */
-const ONLINE_WINDOW_MS = 5 * 60 * 1000;
-
-function isOnline(lastActiveAt: string | undefined): boolean {
-  if (!lastActiveAt) return false;
-  return Date.now() - new Date(lastActiveAt).getTime() < ONLINE_WINDOW_MS;
+/** "Online" / "Last seen 3 minutes ago" / "Last seen a while ago" for the thread header. */
+function statusLabel(status: OnlineStatus | null): string {
+  if (!status) return "";
+  if (status.isOnline) return "Online";
+  if (!status.lastSeen) return "";
+  return `Last seen ${formatTime(status.lastSeen)}`;
 }
 
 /** "Today" / "Yesterday" / a weekday name / a short date — for the separators between messages
@@ -62,7 +68,7 @@ export default function MessagesClient() {
   const [messages, setMessages] = useState<DMMessage[]>([]);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const handledWithParam = useRef(false);
   // uid -> currently-playing, for the sidebar's green dot. Deliberately a plain poll (not a
@@ -75,6 +81,16 @@ export default function MessagesClient() {
   // Whether the other participant in the currently-open conversation has blocked ME —
   // checked per-conversation (not worth prefetching for every contact in the sidebar).
   const [blockingMe, setBlockingMe] = useState(false);
+
+  // uid -> real-time online status, one subscription per contact currently in the sidebar (see
+  // the effect below that opens/closes these as `conversations` changes) — the conversation
+  // list's dot and the active thread's "Online"/"Last seen" line both read from this.
+  const [statusByUid, setStatusByUid] = useState<Record<string, OnlineStatus>>({});
+  const statusUnsubsRef = useRef<Record<string, () => void>>({});
+  // Who's currently typing in the OPEN conversation (never includes my own uid).
+  const [typingUids, setTypingUids] = useState<string[]>([]);
+  const typingClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const amTypingRef = useRef(false);
 
   // New-message compose modal: search real ÍléOtaku accounts by name/@handle, start (or resume)
   // a conversation with whoever's picked.
@@ -153,10 +169,73 @@ export default function MessagesClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, user, conversations.length]);
 
+  // Real-time typing indicator for whichever conversation is open — torn down and re-subscribed
+  // whenever the selected conversation changes, and cleared (both locally and via setTyping)
+  // when leaving one so a stale "typing..." can never linger in a conversation you've left.
   useEffect(() => {
-    // "instant" snaps to the latest message with no animation, unlike "smooth" — the exact
-    // behavior wanted on every new message, not just the thread's initial load.
-    bottomRef.current?.scrollIntoView({ behavior: "instant" });
+    setTypingUids([]);
+    if (!selectedId) return;
+    const unsub = subscribeToTyping(selectedId, (uids) =>
+      setTypingUids(user ? uids.filter((uid) => uid !== user.uid) : uids)
+    );
+    return () => {
+      unsub();
+      if (amTypingRef.current && user) {
+        setTyping(selectedId, user.uid, false);
+        amTypingRef.current = false;
+      }
+      if (typingClearTimerRef.current) clearTimeout(typingClearTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
+
+  // One real-time online-status subscription per contact currently in the sidebar, opened and
+  // closed as `conversations` changes rather than a fixed poll — presence is cheap to listen to
+  // (a single small doc per uid) and this list is rarely more than a handful of people.
+  useEffect(() => {
+    if (!user) return;
+    const otherUids = new Set(
+      conversations.map((c) => c.participants.find((id) => id !== user.uid)).filter((id): id is string => !!id)
+    );
+    const subs = statusUnsubsRef.current;
+    for (const uid of Array.from(otherUids)) {
+      if (subs[uid]) continue;
+      subs[uid] = subscribeToUserStatus(uid, (status) => {
+        setStatusByUid((prev) => ({ ...prev, [uid]: status }));
+      });
+    }
+    for (const uid of Object.keys(subs)) {
+      if (otherUids.has(uid)) continue;
+      subs[uid]();
+      delete subs[uid];
+      setStatusByUid((prev) => {
+        if (!(uid in prev)) return prev;
+        const next = { ...prev };
+        delete next[uid];
+        return next;
+      });
+    }
+  }, [conversations, user]);
+
+  // Unsubscribes every open online-status listener on unmount (the effect above only closes
+  // ones for contacts that dropped OUT of the list, not the whole set when the page itself
+  // unmounts).
+  useEffect(() => {
+    return () => {
+      Object.values(statusUnsubsRef.current).forEach((unsub) => unsub());
+      statusUnsubsRef.current = {};
+    };
+  }, []);
+
+  useEffect(() => {
+    // Set scrollTop directly on the message pane itself rather than bottomRef.scrollIntoView() —
+    // confirmed live that scrollIntoView() was walking past this container to the outer PAGE's
+    // own scroll position (since the 600px box isn't always fully within the viewport when a
+    // thread opens), landing well past the input and into the site footer instead of just
+    // snapping the message list to its latest message. Setting scrollTop only ever touches this
+    // one element, so it can't leak into page scroll no matter where the box sits on screen.
+    const el = messagesContainerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
   // Sidebar Spotify dots: poll every 60s rather than subscribing per-contact in real time —
@@ -237,6 +316,12 @@ export default function MessagesClient() {
     const value = text;
     setText("");
     if (textareaRef.current) textareaRef.current.style.height = "auto";
+    // Sending counts as "done typing" — clear immediately rather than waiting out the debounce.
+    if (typingClearTimerRef.current) clearTimeout(typingClearTimerRef.current);
+    if (amTypingRef.current) {
+      amTypingRef.current = false;
+      setTyping(selectedId, user.uid, false);
+    }
     // Optimistic: show the message immediately, before Firestore's real-time listener confirms
     // it — subscribeToConversation will replace this with the server-confirmed list the moment
     // it comes back, but the sender shouldn't have to wait a round-trip to see their own message.
@@ -274,6 +359,17 @@ export default function MessagesClient() {
     const el = e.target;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT)}px`;
+
+    if (!user || !selectedId) return;
+    if (!amTypingRef.current) {
+      amTypingRef.current = true;
+      setTyping(selectedId, user.uid, true);
+    }
+    if (typingClearTimerRef.current) clearTimeout(typingClearTimerRef.current);
+    typingClearTimerRef.current = setTimeout(() => {
+      amTypingRef.current = false;
+      setTyping(selectedId, user.uid, false);
+    }, TYPING_CLEAR_DELAY_MS);
   }
 
   if (authLoading || !user) {
@@ -376,22 +472,17 @@ export default function MessagesClient() {
                   }`}
                 >
                   <div className="relative shrink-0">
-                    {photo ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-            loading="lazy" src={photo} alt={name} className="h-10 w-10 rounded-full object-cover" />
-                    ) : (
-                      <span
-                        className="flex h-10 w-10 items-center justify-center rounded-full font-syne text-xs font-bold text-ivory"
-                        style={{ backgroundColor: stringToColor(name) }}
-                      >
-                        {initials(name)}
-                      </span>
-                    )}
+                    <Avatar uid={other} photoURL={photo} displayName={name} size={40} />
                     {playingByUid[other] && (
                       <span
                         aria-label="Currently playing on Spotify"
                         className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-bg2 bg-green-500"
+                      />
+                    )}
+                    {statusByUid[other]?.isOnline && (
+                      <span
+                        aria-label="Online"
+                        className="absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full border-2 border-bg2 bg-gold"
                       />
                     )}
                   </div>
@@ -403,8 +494,16 @@ export default function MessagesClient() {
                       </span>
                     </div>
                     <div className="flex items-center justify-between gap-2">
-                      <span className="truncate font-noto text-xs text-muted">
-                        {c.lastMessage ? truncate(c.lastMessage, 40) : "Say hello 👋"}
+                      <span
+                        className={`truncate font-noto text-xs ${
+                          c.id === selectedId && typingUids.length > 0 ? "italic text-text" : "text-muted"
+                        }`}
+                      >
+                        {c.id === selectedId && typingUids.length > 0
+                          ? `${name} is typing...`
+                          : c.lastMessage
+                            ? truncate(c.lastMessage, 40)
+                            : "Say hello 👋"}
                       </span>
                       {unread > 0 && (
                         <span className="flex h-4 min-w-[16px] shrink-0 items-center justify-center rounded-full bg-clay px-1 font-syne text-[10px] font-bold text-ivory">
@@ -439,22 +538,13 @@ export default function MessagesClient() {
                   <ArrowLeft className="h-5 w-5" />
                 </button>
                 <div className="relative shrink-0">
-                  {otherPhoto ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-            loading="lazy" src={otherPhoto} alt={otherName} className="h-8 w-8 rounded-full object-cover" />
-                  ) : (
-                    <span
-                      className="flex h-8 w-8 items-center justify-center rounded-full font-syne text-[10px] font-bold text-ivory"
-                      style={{ backgroundColor: stringToColor(otherName) }}
-                    >
-                      {initials(otherName)}
-                    </span>
-                  )}
-                  {isOnline(otherProfile?.lastActiveAt) && (
+                  <Avatar uid={otherUid} photoURL={otherPhoto} displayName={otherName} size={32} />
+                  {otherUid && statusByUid[otherUid]?.isOnline && (
                     <span
                       aria-label="Online"
-                      className="absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full border-2 border-bg bg-green-500"
+                      className={`absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full border-2 border-bg ${
+                        otherProfile?.isPlatinum ? "bg-plat" : "bg-gold"
+                      }`}
                     />
                   )}
                 </div>
@@ -465,6 +555,14 @@ export default function MessagesClient() {
                       <span className="ml-1.5 font-noto text-xs font-normal text-muted">@{otherProfile.handle}</span>
                     )}
                   </Link>
+                  {typingUids.length > 0 ? (
+                    <p className="font-noto text-xs italic text-clay2">typing...</p>
+                  ) : (
+                    otherUid &&
+                    statusByUid[otherUid] && (
+                      <p className="font-noto text-xs text-muted">{statusLabel(statusByUid[otherUid])}</p>
+                    )
+                  )}
                   {otherUid && <SpotifyMiniPlayer uid={otherUid} />}
                 </div>
                 {otherUid && !blockedByMe && (
@@ -477,7 +575,7 @@ export default function MessagesClient() {
                 )}
               </div>
 
-              <div className="flex-1 overflow-y-auto overscroll-contain p-4">
+              <div ref={messagesContainerRef} className="flex-1 overflow-y-auto overscroll-contain p-4">
                 <div className="flex flex-col gap-2">
                   {messageItems.map((item) => {
                     if (item.kind === "separator") {
@@ -508,7 +606,19 @@ export default function MessagesClient() {
                       </div>
                     );
                   })}
-                  <div ref={bottomRef} />
+                  {typingUids.length > 0 && (
+                    <div className="flex justify-start">
+                      <div className="flex items-center gap-1 rounded-tr-2xl rounded-br-2xl rounded-tl-sm bg-bg3 px-4 py-3">
+                        {[0, 1, 2].map((i) => (
+                          <span
+                            key={i}
+                            className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted"
+                            style={{ animationDelay: `${i * 150}ms` }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -583,17 +693,7 @@ export default function MessagesClient() {
                 disabled={composeStartingUid !== null}
                 className="flex items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-bg3 disabled:opacity-60"
               >
-                {u.photoURL ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img loading="lazy" src={u.photoURL} alt={u.displayName} className="h-10 w-10 shrink-0 rounded-full object-cover" />
-                ) : (
-                  <span
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full font-syne text-xs font-bold text-ivory"
-                    style={{ backgroundColor: stringToColor(u.displayName) }}
-                  >
-                    {initials(u.displayName)}
-                  </span>
-                )}
+                <Avatar uid={u.uid} photoURL={u.photoURL} displayName={u.displayName} size={40} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-syne text-sm font-semibold text-text">{u.displayName}</span>
                   {u.handle && <span className="block truncate font-noto text-xs text-muted">@{u.handle}</span>}

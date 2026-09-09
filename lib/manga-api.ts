@@ -32,6 +32,15 @@ import type { ChapterPagesResponse, MangaDetailData, MangaDetailResponse, MangaL
  * fast, which doesn't apply to an asset already sitting on a CDN this app controls, and
  * double-proxying would only add latency for no benefit.
  *
+ * MangaDex's own `uploads.mangadex.org` cover CDN is confirmed live to reject wsrv.nl's own
+ * fetch the same way it once rejected Vercel's — wsrv.nl still answers 200, but with its blank
+ * default placeholder instead of the actual cover, since it degrades a failed upstream fetch
+ * rather than propagating the error. Fed through our Cloudflare Worker first (same one
+ * lib/proxy-fetch.ts already uses for the JSON API calls — a plain server-side fetch, so
+ * neither this nor MangaDex's IP block ever come into play for it) and *then* into wsrv.nl,
+ * covers resize/cache normally while the actual upstream fetch happens from a path MangaDex
+ * doesn't reject.
+ *
  * `hd`, when the url turns out to be a Cloudinary one, requests Cloudinary's full-quality
  * 1920px delivery instead of the default auto-quality — used by the reader's Platinum HD
  * toggle. It's a no-op for every url this proxy actually sees today (reader pages are always
@@ -42,7 +51,13 @@ export function proxyImg(url: string, hd = false): string {
   if (url.includes("res.cloudinary.com")) {
     return hd ? getOptimizedImageUrl(url, 1920, 100) : getOptimizedImageUrl(url);
   }
-  return `https://wsrv.nl/?url=${encodeURIComponent(url)}&default=1`;
+
+  const proxyBase = process.env.NEXT_PUBLIC_MANGA_PROXY_URL;
+  const upstream =
+    proxyBase && url.includes("uploads.mangadex.org")
+      ? `${proxyBase}?url=${encodeURIComponent(url)}`
+      : url;
+  return `https://wsrv.nl/?url=${encodeURIComponent(upstream)}&default=1`;
 }
 
 /* ============================== Health tracking ============================== */

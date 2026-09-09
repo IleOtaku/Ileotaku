@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { Globe2 } from "lucide-react";
 import FollowButton from "@/components/social/FollowButton";
+import { Avatar } from "@/components/ui/Avatar";
 import { getCreatorStats, getPopularCreators } from "@/lib/firestore";
-import { initials, stringToColor } from "@/lib/utils";
 import type { UserProfile } from "@/types";
 
 /**
@@ -50,22 +50,13 @@ export default function SpotlightCreatorLive() {
 
   return (
     <div className="grid gap-6 rounded-2xl border border-bg4 bg-bg2 p-6 sm:grid-cols-[auto_1fr_auto] sm:items-center">
-      {creator.photoURL ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          loading="lazy"
-          src={creator.photoURL}
-          alt={creator.displayName}
-          className="h-16 w-16 shrink-0 rounded-full object-cover"
-        />
-      ) : (
-        <span
-          className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full font-cinzel text-xl font-bold text-ivory"
-          style={{ backgroundColor: stringToColor(creator.displayName) }}
-        >
-          {initials(creator.displayName)}
-        </span>
-      )}
+      <Avatar
+        uid={creator.uid}
+        photoURL={creator.photoURL}
+        displayName={creator.displayName}
+        size={64}
+        className="font-cinzel text-xl"
+      />
       <div>
         <p className="flex items-center gap-2 font-syne text-base font-semibold text-text">
           {creator.displayName}

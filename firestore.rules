@@ -25,10 +25,23 @@ service cloud.firestore {
     // `isBanned` was never written) is a rules EVALUATION ERROR, not `null`/`undefined` — one
     // that surfaces to the client as a blanket "Missing or insufficient permissions" with no
     // hint it was actually a missing-field issue in the rule itself.
+    //
+    // The same class of problem applies one level up: get() on a users/{uid} path that doesn't
+    // exist AT ALL throws too, not just a missing field on an existing doc — confirmed live as
+    // the actual cause of "posting fails for a regular user": an account whose upsertUserProfile
+    // call never finished right after signup (tab closed, network drop) stays signed into
+    // Firebase Auth indefinitely with no Firestore profile at all, since the old signInEmail
+    // only ever ran updateDoc (which needs the doc to already exist) and swallowed its own
+    // failure. lib/auth.ts's signInEmail now backfills a missing profile the same way
+    // signInSocial already did for its existing-user branch, but this function guards
+    // independently too — every other allow-create rule that calls it should get a real
+    // false/true answer instead of an opaque permission error, regardless of what state a
+    // profile document happens to be in.
     function computedForYouEligible() {
-      let p = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-      return (p.get('isCreator', false) == true || p.get('isPublisher', false) == true)
-        && p.get('isBanned', false) != true;
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('isCreator', false) == true ||
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('isPublisher', false) == true) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('isBanned', false) != true;
     }
 
     // ---------------------------- users ----------------------------
@@ -421,6 +434,29 @@ service cloud.firestore {
           || !("uploadedBy" in resource.data)
           || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["usageCount"]));
       allow delete: if isSignedIn() && (resource.data.uploadedBy == request.auth.uid || isAdmin());
+    }
+
+    // ---------------------------- online status (Sprint Final, Part 9) ----------------------------
+    // One doc per user — read by anyone signed in (a DM list needs everyone's dot, a profile
+    // page needs its owner's, same "activity data is public to signed-in readers" precedent as
+    // `history` above), written only by the owner's own client via lib/onlineStatus.ts's
+    // setOnline/setOffline (called on auth state change and on window beforeunload).
+    match /onlineStatus/{uid} {
+      allow read: if isSignedIn();
+      allow write: if isOwner(uid);
+    }
+
+    // ---------------------------- typing indicators (Part 10) ----------------------------
+    // One doc per conversation, a map of participant uid -> timestamp (or null once they stop).
+    // Not scoped to actual conversation membership — a get() on the conversation doc on every
+    // keystroke would be expensive, and this app's DM messages already trust senderId alone with
+    // no membership check (see chatRooms/messages above) — instead every write may only touch
+    // the CALLER'S OWN key, so nobody can spoof someone else's typing state even without one.
+    match /typing/{conversationId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.keys().hasOnly([request.auth.uid]);
+      allow update: if isSignedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([request.auth.uid]);
     }
 
     // Deny everything else by default.

@@ -20,11 +20,12 @@ import {
 } from "lucide-react";
 import BoostModal from "./BoostModal";
 import EditingAppBadge from "./EditingAppBadge";
+import { Avatar } from "@/components/ui/Avatar";
 import { getOptimizedImageUrl } from "@/lib/cloudinary";
 import { deletePost, incrementPostViews, incrementViewCount, likePost, trackWatchTime } from "@/lib/creatorFeed";
 import { useAuth } from "@/hooks/useAuth";
 import { useFeedAudio } from "@/lib/audioContext";
-import { formatTime, initials, stringToColor } from "@/lib/utils";
+import { formatTime } from "@/lib/utils";
 import ReportButton from "@/components/social/ReportButton";
 import type { CreatorPost, CreatorPostType } from "@/types";
 
@@ -266,18 +267,7 @@ function FeedPostCard({ post, onDeleted }: FeedPostCardProps) {
 
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
-          {post.photoURL ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-            loading="lazy" src={post.photoURL} alt={post.displayName} className="h-11 w-11 shrink-0 rounded-full object-cover" />
-          ) : (
-            <span
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full font-syne text-sm font-bold text-ivory"
-              style={{ backgroundColor: stringToColor(post.displayName) }}
-            >
-              {initials(post.displayName)}
-            </span>
-          )}
+          <Avatar uid={post.uid} photoURL={post.photoURL} displayName={post.displayName} size={44} />
 
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-1.5">

@@ -5,8 +5,9 @@ import Link from "next/link";
 import { BadgeCheck, Sparkles } from "lucide-react";
 import FollowButton from "@/components/social/FollowButton";
 import MessageButton from "@/components/social/MessageButton";
+import { Avatar } from "@/components/ui/Avatar";
 import { getCreatorStats } from "@/lib/firestore";
-import { initials, stringToColor, truncate } from "@/lib/utils";
+import { truncate } from "@/lib/utils";
 import type { UserProfile } from "@/types";
 
 export interface PersonCardProps {
@@ -39,22 +40,7 @@ export default function PersonCard({ person }: PersonCardProps) {
     <div className="flex flex-col gap-3 rounded-2xl border border-bg4 bg-bg2 p-5">
       <div className="flex items-start gap-3">
         <Link href={profileHref} className="shrink-0">
-          {person.photoURL ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-            loading="lazy"
-              src={person.photoURL}
-              alt={person.displayName}
-              className="h-12 w-12 rounded-full object-cover"
-            />
-          ) : (
-            <span
-              className="flex h-12 w-12 items-center justify-center rounded-full font-syne text-sm font-bold text-ivory"
-              style={{ backgroundColor: stringToColor(person.displayName) }}
-            >
-              {initials(person.displayName)}
-            </span>
-          )}
+          <Avatar uid={person.uid} photoURL={person.photoURL} displayName={person.displayName} size={48} />
         </Link>
 
         <div className="min-w-0 flex-1">

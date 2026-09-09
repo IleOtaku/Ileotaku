@@ -41,6 +41,33 @@ body {
     }
   }
 
+  /* Breathing scale pulse for the initial-load Preloader's eye icon. */
+  .animate-preloader-breathe {
+    animation: preloader-breathe 1.5s ease-in-out infinite;
+  }
+  @keyframes preloader-breathe {
+    0%,
+    100% {
+      transform: scale(0.8);
+    }
+    50% {
+      transform: scale(1);
+    }
+  }
+
+  /* Preloader wordmark's fade-in, separate from the breathe animation on the icon above it. */
+  .animate-preloader-fade-in {
+    animation: preloader-fade-in 1s ease-out forwards;
+  }
+  @keyframes preloader-fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
   /* Gentle vertical bob for the 404/error pages' floating emoji */
   .animate-float {
     animation: float 3s ease-in-out infinite;

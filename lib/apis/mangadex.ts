@@ -16,6 +16,27 @@ function fromMangaDexId(id: string): string {
   return `${PREFIX}${id}`;
 }
 
+/** MangaDex tags a manga with its own genre-tag UUIDs, not plain names like Comick/MangaHook
+ * take — so the genre chips in components/reader/MangaList.tsx (READER_GENRES) need mapping to
+ * these before they mean anything as an `includedTags[]` filter. Kept here rather than in
+ * lib/manga-api.ts (the orchestrator) since it's purely this client's own translation of its
+ * own upstream API, and lib/manga-api.ts already imports FROM this file — a mapping used only
+ * here living there instead would just be an import cycle for no benefit. Keyed by the exact
+ * chip label text ("Sci-fi", not "Sci-Fi") so a lookup by `genre` never silently misses.
+ * "Manhwa" has no entry: it's a MangaDex *format* tag, not a genre one, and guessing at an id
+ * would risk quietly filtering to the wrong (or an empty) set rather than just not filtering —
+ * selecting it currently falls through to unfiltered, same as before this mapping existed. */
+const MANGADEX_GENRE_MAP: Record<string, string> = {
+  Action: "391b0423-d847-456f-aff0-8b0cfc03066b",
+  Romance: "423e2eae-a7a2-4a8b-ac03-a8351462d71d",
+  Fantasy: "cdc58593-87dd-415e-bbc0-2ec27bf404cc",
+  Drama: "b9af3a63-f058-46de-a9a0-e0c13906197a",
+  Adventure: "87cc87cd-a395-47af-b27a-93258283bbc6",
+  Horror: "cdad7e68-1419-41dd-bdce-27753074a640",
+  Comedy: "4d32cc48-9f00-4cca-9b5a-a56702952f17",
+  "Sci-fi": "256c8bd9-4904-4360-bf4f-508a76d67183",
+};
+
 /** Builds a query string, repeating the key for array values (MangaDex's `field[]=a&field[]=b`
  * convention) rather than comma-joining them. */
 function buildQuery(params: Record<string, string | number | string[] | undefined>): string {
@@ -125,13 +146,15 @@ function chapterToSummary(c: MdxChapter): MangaChapterSummary {
   };
 }
 
-async function getMangaList(_page = 1): Promise<MangaListItem[]> {
+async function getMangaList(_page = 1, genre?: string): Promise<MangaListItem[]> {
+  const genreId = genre ? MANGADEX_GENRE_MAP[genre] : undefined;
   const query =
     buildQuery({
       limit: 20,
       contentRating: ["safe", "suggestive"],
       availableTranslatedLanguage: ["en"],
       includes: ["cover_art", "author"],
+      includedTags: genreId ? [genreId] : undefined,
     }) + "&order[latestUploadedChapter]=desc";
 
   const res = await mdxFetch<MdxMangaListResponse>(`/manga?${query}`);
@@ -192,7 +215,17 @@ async function getMangaDetail(id: string): Promise<MangaDetailData> {
 async function getChapterPages(chapterId: string): Promise<string[]> {
   const rawId = toMangaDexId(chapterId);
   const res = await mdxFetch<MdxAtHomeResponse>(`/at-home/server/${rawId}`);
-  return res.chapter.data.map((fileName) => `${res.baseUrl}/data/${res.chapter.hash}/${fileName}`);
+  const pageUrls = res.chapter.data.map((fileName) => `${res.baseUrl}/data/${res.chapter.hash}/${fileName}`);
+
+  // Same at-home data host as the cover CDN, same rejection of a non-Worker fetcher — proxy
+  // every page through the Cloudflare Worker (lib/proxy-fetch.ts's NEXT_PUBLIC_MANGA_PROXY_URL)
+  // so the reader's <img> tags resolve instead of silently failing to load. Unlike proxyImg's
+  // cover path, pages aren't also run through wsrv.nl — at-home page urls are already
+  // one-time-use/session-scoped, and wsrv.nl's own resize/cache would just add latency for a
+  // full-resolution image the reader wants to display close to as-is.
+  const proxyBase = process.env.NEXT_PUBLIC_MANGA_PROXY_URL;
+  if (!proxyBase) return pageUrls;
+  return pageUrls.map((pageUrl) => `${proxyBase}?url=${encodeURIComponent(pageUrl)}`);
 }
 
 export const mangaDexClient: MangaApiClient = {

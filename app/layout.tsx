@@ -6,6 +6,7 @@ import BetaFeedback from "@/components/layout/BetaFeedback";
 import ErrorBoundary from "@/components/layout/ErrorBoundary";
 import InstallPrompt from "@/components/layout/InstallPrompt";
 import MaintenanceGate from "@/components/layout/MaintenanceGate";
+import Preloader from "@/components/layout/Preloader";
 import ServiceWorkerRegister from "@/components/layout/ServiceWorkerRegister";
 import SiteChrome from "@/components/layout/SiteChrome";
 import { FeedAudioProvider } from "@/lib/audioContext";
@@ -91,6 +92,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="bg-bg font-noto text-text antialiased">
+        <Preloader />
         <ErrorBoundary>
           <AuthProvider>
             <BetaFeedback />

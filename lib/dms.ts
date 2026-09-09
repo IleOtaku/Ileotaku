@@ -7,6 +7,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  serverTimestamp,
   setDoc,
   updateDoc,
   where,
@@ -18,6 +19,12 @@ import { getUserProfile, updateLastActive } from "./firestore";
 import type { Conversation, DMMessage } from "@/types";
 
 const CONVERSATIONS = "conversations";
+const TYPING = "typing";
+/** A "typing" flag older than this reads as not-typing — the safety net for a client that set
+ * isTyping:true and never got to clear it (tab closed, crash) rather than "[Name] is typing..."
+ * showing forever. The UI itself also debounces isTyping:false after 3s of no keystrokes; this
+ * is the server-side backstop for when even that never runs. */
+const TYPING_STALE_MS = 5000;
 
 /** Deterministic id from the two participant uids, sorted — so re-starting a conversation
  * between the same two people always resolves to the same document instead of duplicating it. */
@@ -158,5 +165,40 @@ export function subscribeToUnreadDMCount(
       callback(total);
     },
     () => callback(0)
+  );
+}
+
+/** Marks (or clears) `uid` as typing in `conversationId`. Writes only the caller's own key on
+ * the shared `typing/{conversationId}` doc — firestore.rules enforces that at the write level
+ * too, so no participant can ever spoof someone else's typing state. */
+export async function setTyping(conversationId: string, uid: string, isTyping: boolean): Promise<void> {
+  try {
+    await setDoc(doc(db, TYPING, conversationId), { [uid]: isTyping ? serverTimestamp() : null }, { merge: true });
+  } catch (error) {
+    await logError(error, { operation: "setTyping", conversationId, uid });
+  }
+}
+
+/** Real-time list of every uid currently (non-stale) typing in a conversation — callers filter
+ * out their own uid before rendering, since a viewer never needs to see their own typing state
+ * reflected back at them. */
+export function subscribeToTyping(
+  conversationId: string,
+  callback: (typingUids: string[]) => void
+): Unsubscribe {
+  return onSnapshot(
+    doc(db, TYPING, conversationId),
+    (snap) => {
+      const data = snap.data() ?? {};
+      const now = Date.now();
+      const typingUids = Object.entries(data)
+        .filter(([, value]) => {
+          const ts = (value as { toMillis?: () => number } | null)?.toMillis?.();
+          return ts !== undefined && now - ts < TYPING_STALE_MS;
+        })
+        .map(([uid]) => uid);
+      callback(typingUids);
+    },
+    () => callback([])
   );
 }

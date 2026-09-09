@@ -18,10 +18,10 @@ import {
 import MobileNavSearch from "@/components/layout/MobileNavSearch";
 import NavSearch from "@/components/layout/NavSearch";
 import NotificationBell from "@/components/layout/NotificationBell";
+import { Avatar } from "@/components/ui/Avatar";
 import { useAuth } from "@/hooks/useAuth";
 import { logout } from "@/lib/auth";
 import { subscribeToUnreadDMCount } from "@/lib/dms";
-import { initials, stringToColor } from "@/lib/utils";
 
 const NAV_LINKS = [
   { label: "Browse", href: "/reader" },
@@ -111,23 +111,12 @@ export default function Navbar() {
                 onClick={() => setDropdownOpen((o) => !o)}
                 className="flex items-center gap-2 rounded-full border border-muted2 bg-bg3 py-1.5 pl-1.5 pr-3 transition-colors hover:border-gold"
               >
-                {avatarURL ? (
-                  <Image
-                    src={avatarURL}
-                    alt={user.displayName ?? "avatar"}
-                    width={28}
-                    height={28}
-                    unoptimized
-                    className="h-7 w-7 rounded-full object-cover"
-                  />
-                ) : (
-                  <span
-                    className="flex h-7 w-7 items-center justify-center rounded-full font-syne text-xs font-bold text-ivory"
-                    style={{ backgroundColor: stringToColor(user.displayName ?? user.email ?? "U") }}
-                  >
-                    {initials(user.displayName ?? user.email ?? "U")}
-                  </span>
-                )}
+                <Avatar
+                  uid={user.uid}
+                  photoURL={avatarURL}
+                  displayName={user.displayName ?? user.email ?? "U"}
+                  size={28}
+                />
                 <span className="font-syne text-sm text-text">{user.displayName ?? "Reader"}</span>
                 {isPlatinum && <span className="badge-plat">Platinum</span>}
                 <ChevronDown className="h-4 w-4 text-muted" />
