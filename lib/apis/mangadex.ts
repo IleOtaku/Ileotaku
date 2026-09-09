@@ -1,3 +1,4 @@
+import { proxyFetch } from "../proxy-fetch";
 import type { MangaApiClient, MangaChapterSummary, MangaDetailData, MangaListItem } from "./types";
 
 const BASE_URL = "https://api.mangadex.org";
@@ -30,23 +31,12 @@ function buildQuery(params: Record<string, string | number | string[] | undefine
   return parts.join("&");
 }
 
-// Identifying headers MangaDex asks API consumers to send. Only take effect when this module
-// runs server-side (Node's fetch sends whatever headers it's given) — every real call site in
-// this app now runs client-side instead (see lib/manga-api.ts's orchestrator comment for why:
-// MangaDex/Comick/MangaHook block requests from datacenter IP ranges, Vercel's included, but not
-// ordinary browser traffic), and browsers silently strip User-Agent/Referer from fetch() calls
-// as a forbidden-header protection no page's own JS can override — so in the browser these three
-// reduce to just Accept, which does still apply. Kept anyway for the one remaining server-side
-// caller (generateMetadata in app/manga/[id]/page.tsx has no client-side equivalent) and as
-// correct, harmless practice everywhere else.
-const API_HEADERS = {
-  "User-Agent": "ÍléOtaku/1.0 (https://ileotaku.vercel.app)",
-  Accept: "application/json",
-  Referer: "https://ileotaku.vercel.app",
-};
-
+// Every call goes through proxyFetch (lib/proxy-fetch.ts) — a Cloudflare Worker that both
+// escapes MangaDex's IP block on server-side calls and sidesteps the CORS rejection MangaDex
+// gives client-side calls, confirmed live as the actual cause of "MangaDex loads locally but
+// not in production" surviving the earlier move-fetch-to-the-client fix.
 async function mdxFetch<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, { headers: API_HEADERS, next: { revalidate: 300 } });
+  const res = await proxyFetch(`${BASE_URL}${path}`);
   if (!res.ok) throw new Error(`MangaDex API error ${res.status} for ${path}`);
   return res.json() as Promise<T>;
 }

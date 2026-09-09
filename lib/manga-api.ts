@@ -49,10 +49,16 @@ export function proxyImg(url: string, hd = false): string {
 
 export type ApiName = "mangadex" | "comick" | "mangahook";
 
-/** Source priority: MangaDex and Comick are the two full, actively-maintained catalogs;
- * MangaHook (the original single-source API this app shipped with) stays in the rotation as
- * a third fallback rather than being dropped, so existing content keeps resolving. */
-const PRIORITY: ApiName[] = ["mangadex", "comick", "mangahook"];
+/** Source priority for active discovery (getMangaList's merge, searchManga's tryAPIs, the
+ * admin health check): MangaDex first, then Comick. MangaHook is deliberately left out —
+ * confirmed live that mangahook-api.vercel.app has been fully decommissioned (it's now a
+ * marketing site; every /api/* route 404s), so retrying it here would only ever waste a
+ * request. `clients.mangahook` stays wired below purely for backward compatibility: any
+ * "mhk-"-prefixed id already saved in a user's library/history/reading-progress (from before
+ * this change) still resolves through detectSource()'s direct getMangaDetail/getChapterPages
+ * path — which isn't gated by PRIORITY — and fails gracefully to the fallback catalog exactly
+ * like an unreachable source always has, instead of throwing on an id type this app once issued. */
+const PRIORITY: ApiName[] = ["mangadex", "comick"];
 
 const clients: Record<ApiName, MangaApiClient> = {
   mangadex: mangaDexClient,
@@ -60,8 +66,12 @@ const clients: Record<ApiName, MangaApiClient> = {
   mangahook: mangaHookClient,
 };
 
-/** How long a source stays marked unhealthy before we automatically give it another chance. */
-const UNHEALTHY_RESET_MS = 5 * 60 * 1000;
+/** How long a source stays marked unhealthy before we automatically give it another chance.
+ * Tightened from 5 minutes: now that both active sources go through the Cloudflare proxy
+ * (lib/proxy-fetch.ts), a failure is far more likely to be a brief upstream blip than a
+ * lasting block, so it's worth checking back sooner rather than serving fallback data for a
+ * full 5 minutes after one bad response. */
+const UNHEALTHY_RESET_MS = 60 * 1000;
 
 const apiHealth = {
   mangadex: true,

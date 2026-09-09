@@ -1,3 +1,4 @@
+import { proxyFetch } from "../proxy-fetch";
 import type { MangaApiClient, MangaChapterSummary, MangaDetailData, MangaListItem } from "./types";
 
 const BASE_URL = "https://api.comick.io";
@@ -27,17 +28,9 @@ function fromComickChapterHid(hid: string): string {
   return `${PREFIX}${hid}`;
 }
 
-// See lib/apis/mangadex.ts's API_HEADERS comment — same rationale, same caveat (User-Agent and
-// Referer only actually take effect for the one remaining server-side caller; the browser
-// controls both of those on every client-side fetch and silently ignores whatever's set here).
-const API_HEADERS = {
-  "User-Agent": "ÍléOtaku/1.0 (https://ileotaku.vercel.app)",
-  Accept: "application/json",
-  Referer: "https://ileotaku.vercel.app",
-};
-
+// See lib/apis/mangadex.ts's mdxFetch comment — same proxyFetch rationale applies here.
 async function cmkFetch<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, { headers: API_HEADERS, next: { revalidate: 300 } });
+  const res = await proxyFetch(`${BASE_URL}${path}`);
   if (!res.ok) throw new Error(`Comick API error ${res.status} for ${path}`);
   return res.json() as Promise<T>;
 }
