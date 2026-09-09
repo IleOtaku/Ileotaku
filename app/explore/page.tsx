@@ -1,16 +1,17 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { BadgeCheck, Globe2, Lock, Sparkles, TrendingUp, UserPlus } from "lucide-react";
+import { BadgeCheck, Globe2, Sparkles, TrendingUp, UserPlus } from "lucide-react";
 import EmailSignupForm from "@/components/explore/EmailSignupForm";
 import GenreBrowser from "@/components/explore/GenreBrowser";
-import NewReleasesSection from "@/components/explore/NewReleasesSection";
+import NewReleasesLive from "@/components/explore/NewReleasesLive";
+import PlatinumExclusivesLive from "@/components/explore/PlatinumExclusivesLive";
 import TrendingSoundsSection, { TrendingSoundsEmpty } from "@/components/explore/TrendingSoundsSection";
 import Trending from "@/components/landing/Trending";
 import Reveal from "@/components/landing/Reveal";
 import { SectionEyebrow } from "@/components/ui";
 import { getMangaIdsByTier } from "@/lib/contentLocking";
 import { FALLBACK_SUMMARIES } from "@/lib/fallback-manga";
-import { getMangaList, proxyImg, type MangaListItem } from "@/lib/manga-api";
+import { proxyImg } from "@/lib/manga-api";
 import { getAfricanOriginals } from "@/lib/publishedSeries";
 import { getTrendingSounds } from "@/lib/sounds";
 import { initials, parseViewCount, stringToColor } from "@/lib/utils";
@@ -54,39 +55,6 @@ function SectionHeader({
 }
 
 export default async function ExplorePage() {
-  // Kept separate from `newReleases` (below): this raw MangaListItem[] is what
-  // NewReleasesSection needs for its live 🔥/⚡ badges and Free-to-Read toggle — those only
-  // mean anything against real mangadex/comick/mangahook ids, never the offline demo catalog's
-  // "fallback-N" ones, so this is intentionally NOT merged with FALLBACK_SUMMARIES the way the
-  // display-only `newReleases` list below is.
-  let liveMangaList: MangaListItem[] = [];
-  let newReleases = FALLBACK_SUMMARIES;
-  try {
-    const res = await getMangaList(1);
-    if (res.data.mangaList.length > 0) {
-      liveMangaList = res.data.mangaList;
-      newReleases = res.data.mangaList.map((item) => {
-        const match = FALLBACK_SUMMARIES.find((f) => f.id === item.id);
-        return (
-          match ?? {
-            id: item.id,
-            title: item.title,
-            image: item.image,
-            author: "Unknown",
-            genres: [],
-            status: "Ongoing",
-            views: item.view ?? "0",
-            chapters: 0,
-            rating: 4.0,
-            description: "",
-          }
-        );
-      });
-    }
-  } catch {
-    newReleases = FALLBACK_SUMMARIES;
-  }
-
   const hallOfFame = [...FALLBACK_SUMMARIES]
     .sort((a, b) => parseViewCount(b.views) - parseViewCount(a.views))
     .slice(0, 3);
@@ -98,18 +66,10 @@ export default async function ExplorePage() {
 
   const editorsPicks = FALLBACK_SUMMARIES.slice(0, 3);
 
-  // Sprint 9c: real high/viral-tier titles, resolved against the live New Releases pool (the
-  // only place ids with real mangaStats docs can appear). Backfilled with the old static
-  // placeholders whenever there isn't yet enough real engagement data to fill the rail — e.g.
-  // a fresh mangaStats collection, or before this app has any real reader traffic — so the
-  // section never renders visibly empty.
+  // Sprint 9c: real high/viral-tier titles — the ids themselves come from Firestore (unaffected
+  // by the MangaDex IP block, so this stays server-side), resolved against the live New Releases
+  // pool client-side by PlatinumExclusivesLive below (see its own comment for why).
   const highViralIds = await getMangaIdsByTier(["high", "viral"], 6);
-  const realExclusives = highViralIds
-    .map((id) => liveMangaList.find((m) => m.id === id))
-    .filter((m): m is MangaListItem => !!m)
-    .map((m) => ({ id: m.id, title: m.title, image: m.image }));
-  const platinumExclusives =
-    realExclusives.length >= 3 ? realExclusives : FALLBACK_SUMMARIES.slice(3, 6);
 
   const spotlight = FALLBACK_SUMMARIES[1];
   const trendingSounds = await getTrendingSounds(6);
@@ -247,7 +207,7 @@ export default async function ExplorePage() {
       <Reveal>
         <section id="new-releases" className="mb-16 scroll-mt-24">
           <SectionHeader eyebrow="🆕 New Releases" title="Fresh off the press" viewAllHref="/search?sort=newest" />
-          <NewReleasesSection items={liveMangaList.length > 0 ? liveMangaList : newReleases} />
+          <NewReleasesLive />
         </section>
       </Reveal>
 
@@ -363,27 +323,7 @@ export default async function ExplorePage() {
       <Reveal>
         <section className="mb-16">
           <SectionHeader eyebrow="💎 Platinum Exclusives" title="Read it before anyone else" />
-          <div className="grid gap-4 sm:grid-cols-3">
-            {platinumExclusives.map((item) => (
-              <div key={item.id} className="group relative overflow-hidden rounded-2xl border border-plat/30 bg-bg2">
-                <div className="aspect-[3/4] overflow-hidden bg-bg3">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-            loading="lazy"
-                    src={proxyImg(item.image)}
-                    alt={item.title}
-                    className="h-full w-full object-cover blur-sm scale-105"
-                  />
-                </div>
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-bg/60">
-                  <Lock className="h-6 w-6 text-plat2" />
-                  <p className="px-4 text-center font-syne text-xs font-semibold text-ivory">
-                    {item.title}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
+          <PlatinumExclusivesLive highViralIds={highViralIds} />
           <div className="mt-6 flex flex-col items-center gap-3 rounded-2xl border border-plat/30 bg-plat/5 p-6 text-center">
             <p className="font-syne text-sm font-semibold text-text">
               Get Platinum to access early chapters

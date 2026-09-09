@@ -18,8 +18,15 @@ function fromMangaHookId(id: string): string {
   return `${PREFIX}${id}`;
 }
 
+// See lib/apis/mangadex.ts's API_HEADERS comment for the same rationale/caveat.
+const API_HEADERS = {
+  "User-Agent": "ÍléOtaku/1.0 (https://ileotaku.vercel.app)",
+  Accept: "application/json",
+  Referer: "https://ileotaku.vercel.app",
+};
+
 async function mhkFetch<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, { next: { revalidate: 300 } });
+  const res = await fetch(`${BASE_URL}${path}`, { headers: API_HEADERS, next: { revalidate: 300 } });
   if (!res.ok) throw new Error(`MangaHook API error ${res.status} for ${path}`);
   return res.json() as Promise<T>;
 }
