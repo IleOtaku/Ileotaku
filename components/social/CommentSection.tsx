@@ -10,6 +10,7 @@ import {
   Flag,
   Loader2,
   MessageCircle,
+  Pencil,
   ShieldOff,
   ThumbsUp,
   Trash2,
@@ -17,7 +18,7 @@ import {
 import { Avatar } from "@/components/ui/Avatar";
 import { useAuth } from "@/hooks/useAuth";
 import { getBlockedUsers } from "@/lib/blocking";
-import { deleteComment, postComment, subscribeToComments, toggleCommentLike } from "@/lib/firestore";
+import { deleteComment, editComment, postComment, subscribeToComments, toggleCommentLike } from "@/lib/firestore";
 import { formatTime } from "@/lib/utils";
 import BlockUserModal from "./BlockUserModal";
 import ReportModal from "./ReportModal";
@@ -53,6 +54,8 @@ interface CommentRowProps {
   replyOpen: boolean;
   replyText: string;
   menuOpen: boolean;
+  isEditing: boolean;
+  editDraft: string;
   onLike: () => void;
   onReplyToggle: () => void;
   onReplyTextChange: (v: string) => void;
@@ -61,6 +64,10 @@ interface CommentRowProps {
   onShowReplies: () => void;
   onMenuToggle: () => void;
   onDelete: () => void;
+  onEditStart: () => void;
+  onEditDraftChange: (v: string) => void;
+  onEditSave: () => void;
+  onEditCancel: () => void;
   onReport: () => void;
   onBlock: () => void;
   renderReply: (reply: SeriesComment) => React.ReactNode;
@@ -78,6 +85,8 @@ const CommentRow = memo(function CommentRow({
   replyOpen,
   replyText,
   menuOpen,
+  isEditing,
+  editDraft,
   onLike,
   onReplyToggle,
   onReplyTextChange,
@@ -86,6 +95,10 @@ const CommentRow = memo(function CommentRow({
   onShowReplies,
   onMenuToggle,
   onDelete,
+  onEditStart,
+  onEditDraftChange,
+  onEditSave,
+  onEditCancel,
   onReport,
   onBlock,
   renderReply,
@@ -112,9 +125,32 @@ const CommentRow = memo(function CommentRow({
             {comment.isVerified && <BadgeCheck className="h-3.5 w-3.5 text-plat" />}
             {comment.isPlatinum && <span className="badge-plat text-[10px]">Platinum</span>}
             <span className="font-noto text-[11px] text-muted">{formatTime(comment.createdAt)}</span>
+            {comment.isEdited && !comment.isDeleted && (
+              <span className="font-noto text-[11px] text-muted">(edited)</span>
+            )}
           </div>
 
-          {comment.isSpoiler && !spoilerRevealed ? (
+          {comment.isDeleted ? (
+            <p className="mt-1 font-noto text-sm italic text-muted">{comment.text}</p>
+          ) : isEditing ? (
+            <div className="mt-1.5 flex flex-col gap-2">
+              <textarea
+                autoFocus
+                value={editDraft}
+                onChange={(e) => onEditDraftChange(e.target.value)}
+                rows={2}
+                className="input-base w-full resize-none text-sm"
+              />
+              <div className="flex gap-2">
+                <button type="button" onClick={onEditSave} className="btn-primary px-3 py-1.5 text-xs">
+                  Save
+                </button>
+                <button type="button" onClick={onEditCancel} className="btn-ghost px-3 py-1.5 text-xs">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : comment.isSpoiler && !spoilerRevealed ? (
             <button
               type="button"
               onClick={onRevealSpoiler}
@@ -126,6 +162,7 @@ const CommentRow = memo(function CommentRow({
             <p className="mt-1 font-noto text-sm text-text">{comment.text}</p>
           )}
 
+          {!comment.isDeleted && (
           <div className="mt-1 flex items-center gap-1 font-noto text-xs text-muted">
             <button
               type="button"
@@ -157,6 +194,15 @@ const CommentRow = memo(function CommentRow({
                   {isOwn && (
                     <button
                       type="button"
+                      onClick={onEditStart}
+                      className="flex min-h-[44px] w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-xs text-text hover:bg-bg4"
+                    >
+                      <Pencil className="h-3.5 w-3.5" /> Edit
+                    </button>
+                  )}
+                  {isOwn && (
+                    <button
+                      type="button"
                       onClick={onDelete}
                       className="flex min-h-[44px] w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-xs text-clay2 hover:bg-bg4"
                     >
@@ -183,6 +229,7 @@ const CommentRow = memo(function CommentRow({
               )}
             </div>
           </div>
+          )}
 
           {replyOpen && (
             <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-start">
@@ -234,6 +281,8 @@ export default function CommentSection({ mangaId, chapterId, variant = "page" }:
   const [expandedReplies, setExpandedReplies] = useState<Set<string>>(new Set());
   const [revealedSpoilers, setRevealedSpoilers] = useState<Set<string>>(new Set());
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
   const [reportTarget, setReportTarget] = useState<{ id: string; userId: string } | null>(null);
   const [blockedUids, setBlockedUids] = useState<Set<string>>(new Set());
   const [blockTarget, setBlockTarget] = useState<{ uid: string; name: string } | null>(null);
@@ -344,6 +393,15 @@ export default function CommentSection({ mangaId, chapterId, variant = "page" }:
     setOpenMenuId(null);
   }
 
+  async function handleSaveEdit(commentId: string) {
+    try {
+      await editComment(mangaId, chapterId, commentId, editDraft);
+      setEditingId(null);
+    } catch {
+      toast.error("Couldn't save your edit.");
+    }
+  }
+
   function renderRow(comment: SeriesComment, isReply?: boolean) {
     return (
       <CommentRow
@@ -359,6 +417,8 @@ export default function CommentSection({ mangaId, chapterId, variant = "page" }:
         replyOpen={replyTo === comment.id}
         replyText={replyText}
         menuOpen={openMenuId === comment.id}
+        isEditing={editingId === comment.id}
+        editDraft={editDraft}
         onLike={() => handleLike(comment)}
         onReplyToggle={() => setReplyTo(replyTo === comment.id ? null : comment.id)}
         onReplyTextChange={setReplyText}
@@ -367,6 +427,14 @@ export default function CommentSection({ mangaId, chapterId, variant = "page" }:
         onShowReplies={() => setExpandedReplies((s) => new Set(s).add(comment.id))}
         onMenuToggle={() => setOpenMenuId(openMenuId === comment.id ? null : comment.id)}
         onDelete={() => handleDelete(comment.id)}
+        onEditStart={() => {
+          setEditingId(comment.id);
+          setEditDraft(comment.text);
+          setOpenMenuId(null);
+        }}
+        onEditDraftChange={setEditDraft}
+        onEditSave={() => handleSaveEdit(comment.id)}
+        onEditCancel={() => setEditingId(null)}
         onReport={() => {
           setReportTarget({ id: comment.id, userId: comment.userId });
           setOpenMenuId(null);

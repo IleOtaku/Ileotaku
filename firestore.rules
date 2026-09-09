@@ -199,7 +199,14 @@ service cloud.firestore {
           && request.resource.data.text is string
           && request.resource.data.text.size() > 0
           && request.resource.data.text.size() < 500;
-        allow update, delete: if isAdmin();
+        // Admin moderation keeps full rights; the sender may additionally edit or soft-delete
+        // their own message, scoped to exactly the fields lib/firestore.ts's
+        // editChatMessage/deleteChatMessage ever touch — same pattern as DM messages above.
+        allow update: if isAdmin()
+          || (isSignedIn() && resource.data.senderId == request.auth.uid
+            && (request.resource.data.diff(resource.data).affectedKeys().hasOnly(["text", "isEdited", "editedAt"])
+              || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["text", "isDeleted", "deletedAt"])));
+        allow delete: if isAdmin();
       }
     }
 
@@ -305,6 +312,26 @@ service cloud.firestore {
           && request.auth.uid in
             get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
         allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid;
+
+        // Four distinct update shapes, each scoped to exactly the field(s) that operation
+        // touches so none of them can be used to smuggle a change to anything else on the
+        // message — editMessage/deleteMessage/addReaction/removeReaction in lib/dms.ts are the
+        // only callers, and none of them ever sends a diff wider than its own case below.
+        allow update: if isSignedIn()
+          && request.auth.uid in
+            get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants
+          && (
+            // Edit own message text.
+            (resource.data.senderId == request.auth.uid
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["text", "isEdited", "editedAt"]))
+            // Delete for everyone — own message only, content replaced with the placeholder.
+            || (resource.data.senderId == request.auth.uid
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["text", "isDeleted", "deletedAt"]))
+            // Delete for me — any participant, and only their OWN view is affected.
+            || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["deletedFor"])
+            // React / un-react — any participant.
+            || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["reactions"])
+          );
       }
     }
 

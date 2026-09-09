@@ -3,9 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import toast from "react-hot-toast";
-import { BookOpen, MessagesSquare, Send } from "lucide-react";
+import { BookOpen, Ellipsis, MessagesSquare, Pencil, Send, Trash2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
-import { sendChatMessage, subscribeToChat } from "@/lib/firestore";
+import { deleteChatMessage, editChatMessage, sendChatMessage, subscribeToChat } from "@/lib/firestore";
 import { proxyImg, type ContentSource, type MangaDetailResponse } from "@/lib/manga-api";
 import { formatTime } from "@/lib/utils";
 import { Skeleton } from "@/components/ui";
@@ -253,6 +253,9 @@ export function ChatTab({ mangaId, mangaTitle }: { mangaId: string | null; manga
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [menuForId, setMenuForId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

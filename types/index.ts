@@ -222,6 +222,10 @@ export interface ChatMessage {
   senderIsPlatinum?: boolean;
   text: string;
   createdAt: string;
+  isEdited?: boolean;
+  editedAt?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
 }
 
 export type WorkStatus = "pending" | "approved" | "published" | "rejected";
@@ -544,6 +548,12 @@ export interface SeriesComment {
   /** UIDs who liked this comment — count is `likes.length`. */
   likes: string[];
   createdAt: string;
+  isEdited?: boolean;
+  editedAt?: string;
+  /** Set (with `text` replaced by the UI's placeholder) on a soft delete — the doc itself stays
+   * so any replies under it keep a parent to render against. */
+  isDeleted?: boolean;
+  deletedAt?: string;
 }
 
 export interface SeriesRating {
@@ -576,12 +586,36 @@ export interface Conversation {
   createdAt: string;
 }
 
+/** One emoji's worth of reactions on a message — every uid who reacted with that emoji. */
+export interface MessageReaction {
+  emoji: string;
+  uids: string[];
+}
+
+/** The message being replied to, denormalized onto the reply so the thread can render a quoted
+ * preview without a lookup — kept short and immutable even if the original is later edited. */
+export interface MessageReplyTo {
+  messageId: string;
+  senderName: string;
+  preview: string;
+}
+
 export interface DMMessage {
   id: string;
   conversationId: string;
   senderId: string;
   text: string;
   createdAt: string;
+  isEdited?: boolean;
+  editedAt?: string;
+  /** Set (with `content` replaced by the UI) when the sender chose "delete for everyone". */
+  isDeleted?: boolean;
+  deletedAt?: string;
+  /** Uids who chose "delete for me" — hidden from their own view only; the message itself, and
+   * everyone else's view of it, is untouched. */
+  deletedFor?: string[];
+  reactions?: MessageReaction[];
+  replyTo?: MessageReplyTo;
 }
 
 /* ---------------------------- Creator feed ---------------------------- */

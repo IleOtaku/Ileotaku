@@ -371,6 +371,27 @@ export async function sendChatMessage(
   }
 }
 
+/** Edits a live-chat message's own text — the sender only (enforced in firestore.rules too). */
+export async function editChatMessage(roomId: string, messageId: string, newContent: string): Promise<void> {
+  const trimmed = newContent.trim();
+  if (!trimmed) return;
+  await updateDoc(doc(db, "chatRooms", roomId, "messages", messageId), {
+    text: trimmed,
+    isEdited: true,
+    editedAt: new Date().toISOString(),
+  });
+}
+
+/** Soft-deletes a live-chat message: the doc stays with its text replaced by a placeholder,
+ * same pattern as DM messages' "delete for everyone" in lib/dms.ts. */
+export async function deleteChatMessage(roomId: string, messageId: string): Promise<void> {
+  await updateDoc(doc(db, "chatRooms", roomId, "messages", messageId), {
+    isDeleted: true,
+    deletedAt: new Date().toISOString(),
+    text: "This message was deleted",
+  });
+}
+
 /** Live-updates with just the single newest message — cheap enough to run alongside the full
  * subscribeToChat() listener, used to power the "unread chat" dot without re-fetching the
  * whole room's history. */
@@ -506,12 +527,35 @@ export async function toggleCommentLike(
   });
 }
 
+/** Edits a comment's own text — the author only (enforced in firestore.rules too). */
+export async function editComment(
+  mangaId: string,
+  chapterId: string | undefined,
+  commentId: string,
+  newText: string
+): Promise<void> {
+  const trimmed = newText.trim();
+  if (!trimmed) return;
+  await updateDoc(doc(commentsCollection(mangaId, chapterId), commentId), {
+    text: trimmed,
+    isEdited: true,
+    editedAt: new Date().toISOString(),
+  });
+}
+
+/** Soft-deletes a comment: the doc stays (so any replies under it keep a parent to render
+ * against) with its text replaced by a placeholder, rather than a hard delete — same pattern
+ * as DM messages' "delete for everyone" in lib/dms.ts. */
 export async function deleteComment(
   mangaId: string,
   chapterId: string | undefined,
   commentId: string
 ): Promise<void> {
-  await deleteDoc(doc(commentsCollection(mangaId, chapterId), commentId));
+  await updateDoc(doc(commentsCollection(mangaId, chapterId), commentId), {
+    isDeleted: true,
+    deletedAt: new Date().toISOString(),
+    text: "Comment deleted",
+  });
 }
 
 /* ---------------------------- Ratings ---------------------------- */

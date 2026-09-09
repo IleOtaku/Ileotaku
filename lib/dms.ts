@@ -1,5 +1,6 @@
 import {
   addDoc,
+  arrayUnion,
   collection,
   doc,
   getDoc,
@@ -16,7 +17,7 @@ import {
 import { logError } from "./errorLogger";
 import { db } from "./firebase";
 import { getUserProfile, updateLastActive } from "./firestore";
-import type { Conversation, DMMessage } from "@/types";
+import type { Conversation, DMMessage, MessageReplyTo } from "@/types";
 
 const CONVERSATIONS = "conversations";
 const TYPING = "typing";
@@ -68,7 +69,8 @@ export async function startConversation(uid1: string, uid2: string): Promise<str
 export async function sendDM(
   conversationId: string,
   senderId: string,
-  text: string
+  text: string,
+  replyTo?: MessageReplyTo
 ): Promise<void> {
   const trimmed = text.trim();
   if (!trimmed) return;
@@ -85,6 +87,7 @@ export async function sendDM(
       senderId,
       text: trimmed,
       createdAt: new Date().toISOString(),
+      ...(replyTo ? { replyTo } : {}),
     });
 
     await updateDoc(convoRef, {
@@ -114,6 +117,92 @@ export function subscribeToConversation(
     (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as DMMessage)),
     onError
   );
+}
+
+function messageRef(conversationId: string, messageId: string) {
+  return doc(db, CONVERSATIONS, conversationId, "messages", messageId);
+}
+
+/** Edits a message's own text — the sender only (enforced in firestore.rules, not just here). */
+export async function editMessage(
+  conversationId: string,
+  messageId: string,
+  newContent: string
+): Promise<void> {
+  const trimmed = newContent.trim();
+  if (!trimmed) return;
+  try {
+    await updateDoc(messageRef(conversationId, messageId), {
+      text: trimmed,
+      isEdited: true,
+      editedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    await logError(error, { operation: "editMessage", conversationId, messageId });
+    throw error;
+  }
+}
+
+/** "Delete for me" (uid-scoped, adds to `deletedFor` — anyone in the conversation may do this to
+ * their own view) vs "delete for everyone" (sender only, enforced in firestore.rules — replaces
+ * the content so deletedFor readers, if any, and everyone else both see the same placeholder). */
+export async function deleteMessage(
+  conversationId: string,
+  messageId: string,
+  uid: string,
+  deleteForEveryone: boolean
+): Promise<void> {
+  try {
+    if (deleteForEveryone) {
+      await updateDoc(messageRef(conversationId, messageId), {
+        isDeleted: true,
+        deletedAt: new Date().toISOString(),
+        text: "This message was deleted",
+      });
+    } else {
+      await updateDoc(messageRef(conversationId, messageId), { deletedFor: arrayUnion(uid) });
+    }
+  } catch (error) {
+    await logError(error, { operation: "deleteMessage", conversationId, messageId, deleteForEveryone });
+    throw error;
+  }
+}
+
+/** Adds `uid` to the given emoji's reactor list, creating that reaction entry if it's the first
+ * one — reactions are a plain array (not a map), so this reads-then-writes the whole field
+ * rather than a single arrayUnion, same tradeoff CommentSection.tsx's like-toggle already makes. */
+export async function addReaction(conversationId: string, messageId: string, uid: string, emoji: string): Promise<void> {
+  try {
+    const ref = messageRef(conversationId, messageId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return;
+    const reactions = ((snap.data() as DMMessage).reactions ?? []).map((r) => ({ ...r, uids: [...r.uids] }));
+    const existing = reactions.find((r) => r.emoji === emoji);
+    if (existing) {
+      if (!existing.uids.includes(uid)) existing.uids.push(uid);
+    } else {
+      reactions.push({ emoji, uids: [uid] });
+    }
+    await updateDoc(ref, { reactions });
+  } catch (error) {
+    await logError(error, { operation: "addReaction", conversationId, messageId, emoji });
+    throw error;
+  }
+}
+
+export async function removeReaction(conversationId: string, messageId: string, uid: string, emoji: string): Promise<void> {
+  try {
+    const ref = messageRef(conversationId, messageId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return;
+    const reactions = ((snap.data() as DMMessage).reactions ?? [])
+      .map((r) => (r.emoji === emoji ? { ...r, uids: r.uids.filter((id) => id !== uid) } : r))
+      .filter((r) => r.uids.length > 0);
+    await updateDoc(ref, { reactions });
+  } catch (error) {
+    await logError(error, { operation: "removeReaction", conversationId, messageId, emoji });
+    throw error;
+  }
 }
 
 export async function getConversations(uid: string): Promise<Conversation[]> {

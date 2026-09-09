@@ -4,14 +4,32 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
-import { ArrowLeft, Loader2, Plus, Search, Send, ShieldOff, Smile } from "lucide-react";
+import {
+  ArrowLeft,
+  Copy,
+  Loader2,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Reply,
+  Search,
+  Send,
+  ShieldOff,
+  Smile,
+  Trash2,
+  X,
+} from "lucide-react";
 import BlockButton from "@/components/social/BlockButton";
 import { Modal, Skeleton } from "@/components/ui";
 import { Avatar } from "@/components/ui/Avatar";
 import { useAuth } from "@/hooks/useAuth";
 import { getBlockedUsers, isBlockedBy } from "@/lib/blocking";
 import {
+  addReaction,
+  deleteMessage,
+  editMessage,
   markDMRead,
+  removeReaction,
   sendDM,
   setTyping,
   startConversation,
@@ -24,11 +42,14 @@ import { getNowPlayingOnce } from "@/lib/nowPlaying";
 import { subscribeToUserStatus, type OnlineStatus } from "@/lib/onlineStatus";
 import SpotifyMiniPlayer from "@/components/spotify/SpotifyMiniPlayer";
 import { formatTime, truncate } from "@/lib/utils";
-import type { Conversation, DMMessage, UserProfile } from "@/types";
+import type { Conversation, DMMessage, MessageReplyTo, UserProfile } from "@/types";
 
 const MAX_TEXTAREA_HEIGHT = 112; // ~4 lines at this input's font/line-height + padding
 /** How long to wait after the last keystroke before clearing our own typing flag. */
 const TYPING_CLEAR_DELAY_MS = 2000;
+/** Long-press duration (mobile) before the message context menu opens. */
+const LONG_PRESS_MS = 450;
+const REACTION_EMOJIS = ["❤️", "🔥", "😂", "😮", "😢", "👏"];
 
 /** "Online" / "Last seen 3 minutes ago" / "Last seen a while ago" for the thread header. */
 function statusLabel(status: OnlineStatus | null): string {
@@ -56,7 +77,7 @@ function dayLabel(iso: string): string {
 
 /** Full DM page: conversation list + message thread. Protected — redirects to login if signed out. */
 export default function MessagesClient() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, profile, loading: authLoading } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -91,6 +112,17 @@ export default function MessagesClient() {
   const [typingUids, setTypingUids] = useState<string[]>([]);
   const typingClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const amTypingRef = useRef(false);
+
+  // Per-message interactions: which message's context menu is open, which one (if any) is being
+  // inline-edited, the draft text for that edit, which reply this thread's draft is attached to,
+  // and which message+emoji's reactor list is currently being shown.
+  const [menuForId, setMenuForId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+  const [replyingTo, setReplyingTo] = useState<MessageReplyTo | null>(null);
+  const [reactionViewer, setReactionViewer] = useState<{ emoji: string; uids: string[] } | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFiredRef = useRef(false);
 
   // New-message compose modal: search real ÍléOtaku accounts by name/@handle, start (or resume)
   // a conversation with whoever's picked.
@@ -314,7 +346,9 @@ export default function MessagesClient() {
     }
     setSending(true);
     const value = text;
+    const replyTo = replyingTo ?? undefined;
     setText("");
+    setReplyingTo(null);
     if (textareaRef.current) textareaRef.current.style.height = "auto";
     // Sending counts as "done typing" — clear immediately rather than waiting out the debounce.
     if (typingClearTimerRef.current) clearTimeout(typingClearTimerRef.current);
@@ -331,16 +365,18 @@ export default function MessagesClient() {
       senderId: user.uid,
       text: value,
       createdAt: new Date().toISOString(),
+      ...(replyTo ? { replyTo } : {}),
     };
     setMessages((prev) => [...prev, optimistic]);
     try {
-      await sendDM(selectedId, user.uid, value);
+      await sendDM(selectedId, user.uid, value, replyTo);
       // getConversations refetch isn't needed for the sidebar (subscribeToConversations already
       // picks up the updated lastMessage/lastMessageAt in real time); kept as a no-op-safe
       // read only if that ever needs a manual nudge.
     } catch {
       toast.error("Couldn't send your message.");
       setText(value);
+      setReplyingTo(replyTo ?? null);
       setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
     } finally {
       setSending(false);
@@ -372,6 +408,101 @@ export default function MessagesClient() {
     }, TYPING_CLEAR_DELAY_MS);
   }
 
+  function openMenu(messageId: string) {
+    setMenuForId(messageId);
+  }
+  function closeMenu() {
+    setMenuForId(null);
+  }
+
+  // Long-press (mobile) opens the same context menu a right-click does on desktop. The "fired"
+  // flag suppresses the click that a touchend otherwise also produces, so a long-press doesn't
+  // also register as a tap-to-nothing right after the menu opens.
+  function handleTouchStart(messageId: string) {
+    longPressFiredRef.current = false;
+    longPressTimerRef.current = setTimeout(() => {
+      longPressFiredRef.current = true;
+      openMenu(messageId);
+    }, LONG_PRESS_MS);
+  }
+  function handleTouchEnd() {
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+  }
+  function handleContextMenu(e: React.MouseEvent, messageId: string) {
+    e.preventDefault();
+    openMenu(messageId);
+  }
+
+  function startEdit(m: DMMessage) {
+    setEditingId(m.id);
+    setEditDraft(m.text);
+    closeMenu();
+  }
+  async function saveEdit(messageId: string) {
+    if (!selectedId || !editDraft.trim()) return;
+    try {
+      await editMessage(selectedId, messageId, editDraft);
+      setEditingId(null);
+    } catch {
+      toast.error("Couldn't save your edit.");
+    }
+  }
+
+  async function handleDelete(messageId: string, forEveryone: boolean) {
+    if (!selectedId || !user) return;
+    closeMenu();
+    try {
+      await deleteMessage(selectedId, messageId, user.uid, forEveryone);
+    } catch {
+      toast.error("Couldn't delete that message.");
+    }
+  }
+
+  async function handleReact(m: DMMessage, emoji: string) {
+    if (!selectedId || !user) return;
+    closeMenu();
+    const alreadyReacted = m.reactions?.find((r) => r.emoji === emoji)?.uids.includes(user.uid);
+    try {
+      if (alreadyReacted) {
+        await removeReaction(selectedId, m.id, user.uid, emoji);
+      } else {
+        await addReaction(selectedId, m.id, user.uid, emoji);
+      }
+    } catch {
+      toast.error("Couldn't add your reaction.");
+    }
+  }
+
+  function handleReply(m: DMMessage) {
+    if (!user) return;
+    setReplyingTo({
+      messageId: m.id,
+      senderName: m.senderId === user.uid ? "You" : otherNameOf(m),
+      preview: truncate(m.text, 80),
+    });
+    closeMenu();
+    textareaRef.current?.focus();
+  }
+
+  async function handleCopy(m: DMMessage) {
+    closeMenu();
+    try {
+      await navigator.clipboard.writeText(m.text);
+      toast.success("Copied.");
+    } catch {
+      toast.error("Couldn't copy that.");
+    }
+  }
+
+  // `otherName` (the derived thread-header value below) isn't in scope this early in the
+  // component — this small helper exists just so handleReply above can label a reply's
+  // "senderName" without duplicating that lookup.
+  function otherNameOf(m: DMMessage): string {
+    const convo = conversations.find((c) => c.id === m.conversationId);
+    const other = convo?.participants.find((id) => id !== user?.uid);
+    return (other && convo?.participantNames?.[other]) || "Reader";
+  }
+
   if (authLoading || !user) {
     return (
       <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
@@ -401,9 +532,12 @@ export default function MessagesClient() {
     : conversations;
 
   // Date-separated message groups: an entry is either a message or a "day changed" marker.
+  // Messages this viewer chose "delete for me" on never even enter the list — everyone else's
+  // view (including a second "delete for everyone" later) is untouched.
+  const visibleMessages = messages.filter((m) => !m.deletedFor?.includes(user.uid));
   const messageItems: ({ kind: "separator"; label: string; key: string } | { kind: "message"; message: DMMessage })[] = [];
   let lastDay = "";
-  for (const m of messages) {
+  for (const m of visibleMessages) {
     const label = dayLabel(m.createdAt);
     if (label !== lastDay) {
       messageItems.push({ kind: "separator", label, key: `sep-${m.id}` });
@@ -589,20 +723,166 @@ export default function MessagesClient() {
                     }
                     const m = item.message;
                     const isOwn = m.senderId === user.uid;
-                    return (
-                      <div key={m.id} className={`flex ${isOwn ? "justify-end" : "justify-start"}`}>
-                        <div
-                          className={`max-w-[75%] px-4 py-2 font-noto text-sm ${
-                            isOwn
-                              ? "rounded-tl-2xl rounded-bl-2xl rounded-tr-sm bg-clay text-ivory"
-                              : "rounded-tr-2xl rounded-br-2xl rounded-tl-sm bg-bg3 text-text"
-                          }`}
-                        >
-                          {m.text}
-                          <span className={`mt-1 block text-[10px] ${isOwn ? "text-ivory/70" : "text-muted"}`}>
-                            {formatTime(m.createdAt)}
-                          </span>
+                    const isEditing = editingId === m.id;
+                    const bubbleShape = isOwn
+                      ? "rounded-tl-2xl rounded-bl-2xl rounded-tr-sm bg-clay text-ivory"
+                      : "rounded-tr-2xl rounded-br-2xl rounded-tl-sm bg-bg3 text-text";
+
+                    if (m.isDeleted) {
+                      return (
+                        <div key={m.id} className={`flex ${isOwn ? "justify-end" : "justify-start"}`}>
+                          <div className="max-w-[75%] rounded-2xl bg-bg3 px-4 py-2 font-noto text-sm italic text-muted">
+                            This message was deleted
+                          </div>
                         </div>
+                      );
+                    }
+
+                    return (
+                      <div key={m.id} className={`group relative flex ${isOwn ? "justify-end" : "justify-start"}`}>
+                        <div className="flex max-w-[75%] flex-col" style={{ alignItems: isOwn ? "flex-end" : "flex-start" }}>
+                          <div
+                            onContextMenu={(e) => handleContextMenu(e, m.id)}
+                            onTouchStart={() => handleTouchStart(m.id)}
+                            onTouchEnd={handleTouchEnd}
+                            onTouchMove={handleTouchEnd}
+                            className={`relative w-full px-4 py-2 font-noto text-sm ${bubbleShape}`}
+                          >
+                            {m.replyTo && (
+                              <div
+                                className={`mb-1.5 border-l-2 pl-2 text-xs ${
+                                  isOwn ? "border-ivory/40 text-ivory/80" : "border-muted2 text-muted"
+                                }`}
+                              >
+                                <p className="font-semibold">{m.replyTo.senderName}</p>
+                                <p className="truncate">{m.replyTo.preview}</p>
+                              </div>
+                            )}
+
+                            {isEditing ? (
+                              <div className="flex flex-col gap-2">
+                                <textarea
+                                  autoFocus
+                                  value={editDraft}
+                                  onChange={(e) => setEditDraft(e.target.value)}
+                                  rows={2}
+                                  className="w-full resize-none rounded-lg border border-white/20 bg-black/20 p-2 text-sm text-inherit outline-none"
+                                />
+                                <div className="flex justify-end gap-2 text-xs">
+                                  <button type="button" onClick={() => setEditingId(null)} className="underline">
+                                    Cancel
+                                  </button>
+                                  <button type="button" onClick={() => saveEdit(m.id)} className="font-semibold underline">
+                                    Save
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                {m.text}
+                                <span className="mt-1 flex items-center gap-1 text-[10px]">
+                                  <span className={isOwn ? "text-ivory/70" : "text-muted"}>{formatTime(m.createdAt)}</span>
+                                  {m.isEdited && <span className={isOwn ? "text-ivory/70" : "text-muted"}>(edited)</span>}
+                                </span>
+                              </>
+                            )}
+
+                            {/* Desktop affordance for the same menu long-press opens on mobile. */}
+                            {!isEditing && (
+                              <button
+                                type="button"
+                                onClick={() => openMenu(m.id)}
+                                aria-label="Message options"
+                                className={`absolute top-1 hidden rounded-full p-1 opacity-0 transition-opacity hover:bg-black/10 group-hover:opacity-100 sm:block ${
+                                  isOwn ? "left-1" : "right-1"
+                                }`}
+                              >
+                                <MoreHorizontal className="h-3 w-3" />
+                              </button>
+                            )}
+                          </div>
+
+                          {m.reactions && m.reactions.length > 0 && (
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {m.reactions.map((r) => (
+                                <button
+                                  key={r.emoji}
+                                  type="button"
+                                  onClick={() => setReactionViewer({ emoji: r.emoji, uids: r.uids })}
+                                  className={`flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[11px] ${
+                                    r.uids.includes(user.uid) ? "border-clay bg-clay/15" : "border-bg4 bg-bg3"
+                                  }`}
+                                >
+                                  <span>{r.emoji}</span>
+                                  <span className="text-muted">{r.uids.length}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {menuForId === m.id && (
+                          <>
+                            <div className="fixed inset-0 z-40" onClick={closeMenu} />
+                            <div
+                              className={`glass absolute z-50 flex w-48 flex-col gap-0.5 rounded-xl p-1.5 ${
+                                isOwn ? "right-0" : "left-0"
+                              } top-full mt-1`}
+                            >
+                              <div className="flex items-center justify-around border-b border-white/10 px-1 pb-1.5">
+                                {REACTION_EMOJIS.map((emoji) => (
+                                  <button
+                                    key={emoji}
+                                    type="button"
+                                    onClick={() => handleReact(m, emoji)}
+                                    className="rounded p-1 text-lg hover:bg-white/10"
+                                  >
+                                    {emoji}
+                                  </button>
+                                ))}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleReply(m)}
+                                className="flex items-center gap-2 rounded-lg px-3 py-2 text-left font-noto text-sm text-text hover:bg-bg4"
+                              >
+                                <Reply className="h-4 w-4" /> Reply
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleCopy(m)}
+                                className="flex items-center gap-2 rounded-lg px-3 py-2 text-left font-noto text-sm text-text hover:bg-bg4"
+                              >
+                                <Copy className="h-4 w-4" /> Copy
+                              </button>
+                              {isOwn && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => startEdit(m)}
+                                    className="flex items-center gap-2 rounded-lg px-3 py-2 text-left font-noto text-sm text-text hover:bg-bg4"
+                                  >
+                                    <Pencil className="h-4 w-4" /> Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDelete(m.id, true)}
+                                    className="flex items-center gap-2 rounded-lg px-3 py-2 text-left font-noto text-sm text-clay2 hover:bg-bg4"
+                                  >
+                                    <Trash2 className="h-4 w-4" /> Delete for everyone
+                                  </button>
+                                </>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleDelete(m.id, false)}
+                                className="flex items-center gap-2 rounded-lg px-3 py-2 text-left font-noto text-sm text-clay2 hover:bg-bg4"
+                              >
+                                <Trash2 className="h-4 w-4" /> Delete for me
+                              </button>
+                            </div>
+                          </>
+                        )}
                       </div>
                     );
                   })}
@@ -628,8 +908,26 @@ export default function MessagesClient() {
                   {blockedByMe ? "You've blocked this user." : "You can't message this person."}
                 </div>
               ) : (
+                <div className="border-t border-bg4">
+                  {replyingTo && (
+                    <div className="flex items-center gap-2 border-b border-bg4 bg-bg3 px-3 py-2">
+                      <Reply className="h-3.5 w-3.5 shrink-0 text-muted" />
+                      <div className="min-w-0 flex-1 border-l-2 border-clay pl-2">
+                        <p className="font-noto text-xs font-semibold text-text">{replyingTo.senderName}</p>
+                        <p className="truncate font-noto text-xs text-muted">{replyingTo.preview}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setReplyingTo(null)}
+                        aria-label="Cancel reply"
+                        className="shrink-0 text-muted hover:text-text"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  )}
                 <div
-                  className="flex items-end gap-2 border-t border-bg4 p-3"
+                  className="flex items-end gap-2 p-3"
                   style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
                 >
                   <button
@@ -660,11 +958,28 @@ export default function MessagesClient() {
                     <Send className="h-4 w-4" />
                   </button>
                 </div>
+                </div>
               )}
             </>
           )}
         </div>
       </div>
+
+      <Modal open={reactionViewer !== null} onClose={() => setReactionViewer(null)} title={reactionViewer ? `Reacted ${reactionViewer.emoji}` : ""}>
+        <div className="flex flex-col gap-2">
+          {reactionViewer?.uids.map((uid) => (
+            <div key={uid} className="flex items-center gap-3">
+              <Avatar
+                uid={uid}
+                photoURL={uid === user.uid ? (profile?.photoURL ?? user.photoURL ?? undefined) : otherPhoto}
+                displayName={uid === user.uid ? "You" : otherName}
+                size={32}
+              />
+              <span className="font-noto text-sm text-text">{uid === user.uid ? "You" : otherName}</span>
+            </div>
+          ))}
+        </div>
+      </Modal>
 
       <Modal open={composeOpen} onClose={() => setComposeOpen(false)} title="New message">
         <div className="relative mb-4">
