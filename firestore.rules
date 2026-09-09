@@ -39,7 +39,21 @@ service cloud.firestore {
     match /users/{uid} {
       allow read: if true;
       allow create: if isOwner(uid);
-      allow update: if isOwner(uid) || isAdmin();
+      // followCreator/unfollowCreator (lib/firestore.ts) write BOTH sides of a follow in one
+      // call: arrayUnion(targetUid) onto the follower's own `following`, then arrayUnion(myUid)
+      // onto the TARGET's `followers` — that second write is on someone else's document, which
+      // isOwner(uid) alone rejects outright. Confirmed live: this was the actual cause of "the
+      // follow button doesn't work anywhere" — the first write succeeded, the second threw
+      // permission-denied, followUser's catch fired, and the button silently reset. blockUser
+      // (lib/blocking.ts) has the identical shape on its cross-user cleanup write, touching both
+      // `following` AND `followers` on the *target's* doc in one updateDoc — it was already
+      // failing the same way, just silently: that call is wrapped in its own .catch(logError),
+      // so the block record itself still wrote, but the target never actually lost the follow
+      // edge. Scoped to only these two social-graph fields (any other field on someone else's
+      // profile still needs isOwner/isAdmin), matching this file's existing precedent of
+      // trusting isSignedIn() for writes made on another uid's behalf (see `transactions` below).
+      allow update: if isOwner(uid) || isAdmin() ||
+        (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followers', 'following']));
       // Sprint 9d: self-service account deletion (deleteMyAccount() in lib/auth.ts) needs the
       // owner to be able to delete their own profile document, not just an admin moderating
       // someone else's — confirmed live during testing that this was previously owner-deletion's

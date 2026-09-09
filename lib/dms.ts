@@ -119,6 +119,25 @@ export async function getConversations(uid: string): Promise<Conversation[]> {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Conversation);
 }
 
+/** Real-time version of getConversations — the DM page's sidebar needs this rather than a
+ * one-shot fetch so an incoming message bubbles that conversation to the top (and updates its
+ * preview/unread badge) live, without the viewer having to refresh or reselect anything. */
+export function subscribeToConversations(
+  uid: string,
+  callback: (conversations: Conversation[]) => void
+): Unsubscribe {
+  const q = query(
+    collection(db, CONVERSATIONS),
+    where("participants", "array-contains", uid),
+    orderBy("lastMessageAt", "desc")
+  );
+  return onSnapshot(
+    q,
+    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Conversation)),
+    () => callback([])
+  );
+}
+
 export async function markDMRead(conversationId: string, uid: string): Promise<void> {
   await updateDoc(doc(db, CONVERSATIONS, conversationId), { [`unreadCounts.${uid}`]: 0 });
 }

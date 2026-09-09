@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { BadgeCheck, Globe2, Sparkles, TrendingUp, UserPlus } from "lucide-react";
+import { BadgeCheck, Sparkles, TrendingUp } from "lucide-react";
 import EmailSignupForm from "@/components/explore/EmailSignupForm";
 import GenreBrowser from "@/components/explore/GenreBrowser";
 import NewReleasesLive from "@/components/explore/NewReleasesLive";
 import PlatinumExclusivesLive from "@/components/explore/PlatinumExclusivesLive";
+import SpotlightCreatorLive from "@/components/explore/SpotlightCreatorLive";
 import TrendingSoundsSection, { TrendingSoundsEmpty } from "@/components/explore/TrendingSoundsSection";
 import Trending from "@/components/landing/Trending";
 import Reveal from "@/components/landing/Reveal";
@@ -14,7 +15,7 @@ import { FALLBACK_SUMMARIES } from "@/lib/fallback-manga";
 import { proxyImg } from "@/lib/manga-api";
 import { getAfricanOriginals } from "@/lib/publishedSeries";
 import { getTrendingSounds } from "@/lib/sounds";
-import { initials, parseViewCount, stringToColor } from "@/lib/utils";
+import { parseViewCount } from "@/lib/utils";
 
 export const metadata: Metadata = {
   title: "Explore",
@@ -71,7 +72,6 @@ export default async function ExplorePage() {
   // pool client-side by PlatinumExclusivesLive below (see its own comment for why).
   const highViralIds = await getMangaIdsByTier(["high", "viral"], 6);
 
-  const spotlight = FALLBACK_SUMMARIES[1];
   const trendingSounds = await getTrendingSounds(6);
   const africanOriginals = await getAfricanOriginals(12);
 
@@ -339,41 +339,7 @@ export default async function ExplorePage() {
       <Reveal>
         <section>
           <SectionHeader eyebrow="🎨 Spotlight Creator" title="Creator of the week" />
-          <div className="grid gap-6 rounded-2xl border border-bg4 bg-bg2 p-6 sm:grid-cols-[auto_1fr_auto] sm:items-center">
-            <span
-              className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full font-cinzel text-xl font-bold text-ivory"
-              style={{ backgroundColor: stringToColor(spotlight.author) }}
-            >
-              {initials(spotlight.author)}
-            </span>
-            <div>
-              <p className="flex items-center gap-2 font-syne text-base font-semibold text-text">
-                {spotlight.author}
-                <span className="rounded-full bg-clay/15 px-2 py-0.5 font-noto text-[10px] font-semibold text-clay2">
-                  <Globe2 className="mr-1 inline h-3 w-3" /> West Africa
-                </span>
-              </p>
-              <p className="mt-1 max-w-md font-noto text-xs text-muted">
-                Creator of <span className="text-gold">{spotlight.title}</span> — building worlds
-                where African folklore meets the far future.
-              </p>
-              <div className="mt-3 flex items-center gap-3">
-                <div className="h-14 w-10 overflow-hidden rounded bg-bg3">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-            loading="lazy"
-                    src={proxyImg(spotlight.image)}
-                    alt={spotlight.title}
-                    className="h-full w-full object-cover"
-                  />
-                </div>
-                <span className="font-noto text-xs text-muted">{spotlight.title}</span>
-              </div>
-            </div>
-            <button type="button" className="btn-primary shrink-0">
-              <UserPlus className="h-4 w-4" /> Follow
-            </button>
-          </div>
+          <SpotlightCreatorLive />
         </section>
       </Reveal>
 
