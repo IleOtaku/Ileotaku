@@ -1,0 +1,417 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    }
+
+    // Mirrors lib/creatorFeed.ts's getForYouEligibility() so a post's `forYouEligible` flag can
+    // never be self-declared out of step with the author's own role — only Creator/Publisher
+    // accounts in good standing (not banned) may claim eligibility at create time. Uses
+    // map.get(key, default) rather than dot access for every field: unlike JS, reading a map key
+    // that doesn't exist on the document (e.g. an account that has never been banned, so
+    // `isBanned` was never written) is a rules EVALUATION ERROR, not `null`/`undefined` — one
+    // that surfaces to the client as a blanket "Missing or insufficient permissions" with no
+    // hint it was actually a missing-field issue in the rule itself.
+    function computedForYouEligible() {
+      let p = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return (p.get('isCreator', false) == true || p.get('isPublisher', false) == true)
+        && p.get('isBanned', false) != true;
+    }
+
+    // ---------------------------- users ----------------------------
+    // Profiles are publicly readable — /creator/[handle] is a public page rendered by a
+    // server component, which has no Firebase Auth session at all, so gating reads behind
+    // isSignedIn() breaks that page (and any other server-rendered or logged-out view) with
+    // a hard "Missing or insufficient permissions" crash. Only writes are locked to the owner.
+    match /users/{uid} {
+      allow read: if true;
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid) || isAdmin();
+      // Sprint 9d: self-service account deletion (deleteMyAccount() in lib/auth.ts) needs the
+      // owner to be able to delete their own profile document, not just an admin moderating
+      // someone else's — confirmed live during testing that this was previously owner-deletion's
+      // only remaining blocker after every subcollection had already been cleared.
+      allow delete: if isOwner(uid) || isAdmin();
+
+      // Notifications are written by whoever triggers them (a follow, a reply, a tip — not
+      // necessarily the notification's own owner), so create is open to any signed-in user;
+      // only the owner can read, mark-read, or delete their own notifications.
+      match /notifications/{notifId} {
+        allow read, update, delete: if isOwner(uid);
+        allow create: if isSignedIn();
+      }
+
+      // Reading history is written only by the account itself, but read more broadly: the
+      // Friend Activity widget shows what people you follow are reading, so any signed-in
+      // reader can see it — treat it like the rest of this app's largely-public activity data.
+      match /history/{historyId} {
+        allow read: if isSignedIn();
+        allow create: if isOwner(uid);
+        allow update, delete: if isOwner(uid) || isAdmin();
+      }
+
+      // Coin ledger. Some entries are written on behalf of a DIFFERENT uid (tipCreator credits
+      // the recipient's transactions from the sender's session), so create stays open to any
+      // signed-in user; the ledger itself is otherwise read-only from the client once written.
+      match /transactions/{txId} {
+        allow read: if isOwner(uid) || isAdmin();
+        allow create: if isSignedIn();
+        allow update, delete: if isAdmin();
+      }
+
+      // Coin-unlocked chapters — private to the account that unlocked them.
+      match /unlocked/{chapterId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // Feed post drafts (Sprint 9b) — never readable by anyone but their own author, unlike
+      // the public `creatorFeed` collection published posts live in.
+      match /drafts/{draftId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // Sprint 9d: Spotify OAuth grant — access/refresh tokens, never readable by anyone but
+      // the account they belong to (and never written by anyone but the owner's own client,
+      // via the token/refresh exchange routes and disconnectSpotify()).
+      match /spotifyAuth/{docId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // Now Playing snapshot — readable by any signed-in user (that's the whole point: other
+      // people's profile pages, DM headers, and comment rows show it), but only the account
+      // itself ever writes its own snapshot (via startNowPlayingSync()'s periodic sync).
+      match /nowPlaying/{docId} {
+        allow read: if isSignedIn();
+        allow write: if isOwner(uid);
+      }
+
+      // Sprint 9e: blocklist. Write is owner-only (only you can block/unblock on your own
+      // behalf), but read is open to any signed-in user rather than owner-only — a strictly
+      // owner-only read would make isBlockedBy() (lib/blocking.ts) impossible to ever satisfy:
+      // checking "has this OTHER profile blocked me" inherently means reading a document that
+      // lives under *their* uid while signed in as *myself*, which owner-only read can never
+      // permit no matter whose side initiates it. The trade-off is a narrow, low-sensitivity
+      // leak (anyone who already knows both uids can confirm a specific block exists) in
+      // exchange for the profile-visit / DM / comment gates actually being able to function.
+      match /blocked/{targetUid} {
+        allow read: if isSignedIn();
+        allow write: if isOwner(uid);
+      }
+
+      // Sprint 9e: "currently reading" live status — same read-broadly/write-only-self shape
+      // as nowPlaying, for the same reason (profile pages and Friend Activity need to read
+      // OTHER users' activity, but only the account itself ever updates its own).
+      match /readingActivity/{docId} {
+        allow read: if isSignedIn();
+        allow write: if isOwner(uid);
+      }
+    }
+
+    // ---------------------------- Spotify Listen Along (Sprint 9d) ----------------------------
+    // One ephemeral session doc per host, keyed by their own uid. Write is open to any
+    // signed-in user (not just the host) because listenAlong()/leaveListenSession() are called
+    // by *listeners* joining or leaving someone else's session, the same "write on someone
+    // else's document, but only touching a narrow field" shape as creatorFeed's likes toggle —
+    // here the whole document is small and ephemeral enough that a full write rule (rather than
+    // an affectedKeys().hasOnly(["listeners"]) restriction) is an acceptable simplification.
+    match /listenSessions/{hostUid} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    // Collection-group reads for `transactions`/`history` (lib/admin.ts's revenue/stats
+    // rollups use collectionGroup() to read across every user at once). Firestore requires
+    // the recursive {path=**} wildcard specifically to authorize collection-group queries —
+    // the nested `match /users/{uid}/transactions/{txId}` rules above cover direct,
+    // single-user reads/writes only and do NOT extend to a query spanning all users, even
+    // though they match the identical document paths for a plain get(). Without this block,
+    // every collectionGroup(db, "transactions"/"history") call is rejected outright before a
+    // single document is evaluated, regardless of the requester's role.
+    match /{path=**}/transactions/{txId} {
+      allow read: if isSignedIn() && (isAdmin() || path[1] == request.auth.uid);
+    }
+    match /{path=**}/history/{historyId} {
+      allow read: if isSignedIn();
+    }
+
+    // ---------------------------- chats ----------------------------
+    // Messages can be read by any signed-in user and created only by their own sender,
+    // with a hard cap on message length. Edits/deletes are admin-only (moderation).
+    match /chats/{chatId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.senderId == request.auth.uid
+        && request.resource.data.text is string
+        && request.resource.data.text.size() > 0
+        && request.resource.data.text.size() < 500;
+      allow update, delete: if isAdmin();
+    }
+
+    // Actual runtime shape used by the app: chatRooms/{roomId}/messages/{messageId}.
+    match /chatRooms/{roomId} {
+      allow read: if isSignedIn();
+      allow write: if false; // room metadata is managed server-side only
+
+      match /messages/{messageId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn()
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() < 500;
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    // ---------------------------- works ----------------------------
+    // Published works are a public catalog (browsed from server-rendered pages with no auth
+    // session), so reads are public; only the submitting creator can create/update their own,
+    // and admins can moderate any (approve/reject).
+    match /works/{workId} {
+      allow read: if true;
+      allow create: if isSignedIn() && request.resource.data.authorId == request.auth.uid;
+      allow update: if isSignedIn()
+        && (resource.data.authorId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // Actual runtime collection used by the app.
+    match /creatorWorks/{workId} {
+      allow read: if true;
+      allow create: if isSignedIn() && request.resource.data.creatorId == request.auth.uid;
+      allow update: if isSignedIn()
+        && (resource.data.creatorId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // ---------------------------- published series (Sprint 9f) ----------------------------
+    // Public-facing summary of an approved creatorWorks doc — Explore's African Originals rail,
+    // /manga/[id], and /creator/[handle]'s Works tab all read from here (never from creatorWorks
+    // directly) so a pending/rejected work never needs public read access. Only admin approval
+    // creates one; the work's own author can update theirs afterwards (chapterCount bumps from
+    // the Add Chapter flow), same shape as `creatorWorks` above.
+    match /publishedSeries/{workId} {
+      allow read: if true;
+      allow create: if isAdmin();
+      allow update: if isAdmin() || (isSignedIn() && resource.data.authorId == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
+    // ---------------------------- series (comments & ratings) ----------------------------
+    // The manga catalog itself is served from MangaHook, not Firestore — `series/{seriesId}`
+    // (keyed by that external id) is just the lightweight Firestore-side home for social
+    // metadata: comments, ratings, and the average/count rollup submitRating recomputes.
+    match /series/{seriesId} {
+      allow read: if true;
+      allow create, update: if isSignedIn();
+      allow delete: if isAdmin();
+
+      match /comments/{commentId} {
+        allow read: if true;
+        allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+        // The comment's own author can change anything on it; anyone else signed in may only
+        // toggle the `likes` array — that's how liking someone else's comment writes.
+        allow update: if isSignedIn()
+          && (resource.data.userId == request.auth.uid
+            || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["likes"]));
+        allow delete: if isSignedIn()
+          && (resource.data.userId == request.auth.uid || isAdmin());
+      }
+
+      match /chapters/{chapterId}/comments/{commentId} {
+        allow read: if true;
+        allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+        allow update: if isSignedIn()
+          && (resource.data.userId == request.auth.uid
+            || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["likes"]));
+        allow delete: if isSignedIn()
+          && (resource.data.userId == request.auth.uid || isAdmin());
+      }
+
+      // Sprint 9f: a creator work's actual chapter pages, keyed by the same id as its
+      // publishedSeries/{seriesId} summary — only that work's own author (or an admin) may add
+      // or edit chapters, checked with a lookup against the summary doc's authorId since a
+      // chapter doc carries no uid of its own to compare directly.
+      match /chapters/{chapterId} {
+        allow read: if true;
+        allow create, update: if isSignedIn()
+          && (isAdmin()
+            || get(/databases/$(database)/documents/publishedSeries/$(seriesId)).data.authorId == request.auth.uid);
+        allow delete: if isAdmin();
+      }
+
+      match /ratings/{userId} {
+        allow read: if true;
+        allow create, update: if isOwner(userId);
+        allow delete: if isOwner(userId) || isAdmin();
+      }
+    }
+
+    // ---------------------------- direct messages ----------------------------
+    match /conversations/{conversationId} {
+      // startConversation() always does a getDoc() first to check whether the 1:1 conversation
+      // already exists before creating it. For a brand-new pair of users that document doesn't
+      // exist yet, so `resource` is null on that read — referencing resource.data.participants
+      // directly (with no null check) denied that existence check unconditionally, which broke
+      // starting a first conversation for everyone. `update` never runs against a nonexistent
+      // doc (there's nothing to update), so it doesn't need the same null guard.
+      allow read: if isSignedIn()
+        && (resource == null || request.auth.uid in resource.data.participants);
+      allow update: if isSignedIn() && request.auth.uid in resource.data.participants;
+      allow create: if isSignedIn() && request.auth.uid in request.resource.data.participants;
+
+      match /messages/{messageId} {
+        allow read: if isSignedIn()
+          && request.auth.uid in
+            get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
+        allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid;
+      }
+    }
+
+    // ---------------------------- reports ----------------------------
+    // Anyone signed in can file a report as themselves; only admins can read or triage them.
+    match /reports/{reportId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn() && request.resource.data.reporterId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    // ---------------------------- maintenance ----------------------------
+    // Public read (MaintenanceGate subscribes to this with no auth session on some routes);
+    // only admins can write. Requests awaiting Super Admin approval are admin-only end to end.
+    match /maintenance/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /maintenanceRequests/{requestId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ---------------------------- admin: error logs ----------------------------
+    // logError() can fire from a render-time ErrorBoundary before auth has resolved, or from a
+    // signed-out page — create stays open so a crash is never itself silently unloggable; only
+    // admins can read/triage the log.
+    match /errors/{errorId} {
+      allow read, update: if isAdmin();
+      allow create: if true;
+      allow delete: if isAdmin();
+    }
+
+    // ---------------------------- admin: bug reports ----------------------------
+    // Anyone (including signed-out visitors) can file a bug report from the Footer. The
+    // reporter can read back their own report (to see the technical team's note on their
+    // profile); full listing/triage is admin-only.
+    match /bugReports/{bugId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.reportedBy == request.auth.uid);
+      allow create: if true;
+      allow update, delete: if isAdmin();
+    }
+
+    // ---------------------------- admin: contact messages ----------------------------
+    // Same shape as bugReports above: the public /contact page's form works for signed-out
+    // visitors, so create stays fully open; only admins ever read the inbox.
+    match /contactMessages/{messageId} {
+      allow read, update, delete: if isAdmin();
+      allow create: if true;
+    }
+
+    // ---------------------------- beta feedback (Sprint 10) ----------------------------
+    // Same shape as contactMessages/bugReports: the floating Beta Feedback button works for
+    // signed-out visitors too, so create stays fully open; only admins triage it.
+    match /betaFeedback/{feedbackId} {
+      allow read, update, delete: if isAdmin();
+      allow create: if true;
+    }
+
+    // ---------------------------- admin: announcements ----------------------------
+    // The announcement record itself (compose history) is admin-only; actual delivery to
+    // users happens through their own notifications subcollection, which already has its own
+    // rules and needs none of these.
+    match /announcements/{announcementId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ---------------------------- admin: creator payouts ----------------------------
+    // A creator may read their own payout rows; only admins can read the full ledger or write.
+    match /earnings/{earningId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.creatorId == request.auth.uid);
+      allow write: if isAdmin();
+    }
+
+    // ---------------------------- admin: ban audit trail ----------------------------
+    match /bannedEmails/{uid} {
+      allow read, write: if isAdmin();
+    }
+
+    // ---------------------------- creator feed ----------------------------
+    // Posts are readable by any signed-in user (the "For You"/"Following" feed and creator
+    // profile Posts tabs); only the post's own author may create, edit, or delete it — likes
+    // are the one exception, allowed on someone else's post but restricted to touching just the
+    // `likes` field, the same pattern comments already use for their like toggle.
+    match /creatorFeed/{postId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.forYouEligible == computedForYouEligible();
+      // Beyond the post's own author (full edit rights) and an admin (moderation), two narrow
+      // any-signed-in-user carve-outs mirror what the client actually writes without its own
+      // uid: liking someone else's post (`likes` only — comments already use this pattern), and
+      // incrementViewCount()/trackWatchTime() bumping a post's view/watch stats plus the
+      // forYouScore that write recomputes in the same call (`viewCount`/`watchTime`/
+      // `forYouScore` only — never touched alongside anything else, by design).
+      allow update: if isSignedIn()
+        && (resource.data.uid == request.auth.uid
+          || isAdmin()
+          || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["likes"])
+          || request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(["viewCount", "watchTime", "forYouScore"]));
+      allow delete: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+    }
+
+    // ---------------------------- manga engagement stats (Sprint 9c) ----------------------------
+    // Read/write-tracking doc per imported manga (totalReads, engagementTier) that powers
+    // chapter locking — public read (the manga detail page renders lock icons for signed-out
+    // visitors too, server-side with no auth session, same reasoning as `users/{uid}` above);
+    // write is open to any signed-in reader since trackMangaRead() fires from every reader's own
+    // client as they read, not from some privileged/admin-only process.
+    match /mangaStats/{mangaId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    // ---------------------------- sounds ----------------------------
+    // The shared library (source:"library", seeded by scripts/seed-sounds.js) and every
+    // creator's own uploads live in the same collection — readable by anyone (the sound picker
+    // and Explore's Trending Sounds need to work for signed-out visitors too), but only the
+    // uploader may edit or delete their own creator sound. Library sounds have no `uploadedBy`,
+    // so update covers the one case that DOES need to be open to any signed-in user:
+    // incrementSoundUsage()'s usageCount bump when someone attaches a library sound to a post.
+    match /sounds/{soundId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update: if isSignedIn()
+        && (resource.data.uploadedBy == request.auth.uid
+          || !("uploadedBy" in resource.data)
+          || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["usageCount"]));
+      allow delete: if isSignedIn() && (resource.data.uploadedBy == request.auth.uid || isAdmin());
+    }
+
+    // Deny everything else by default.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

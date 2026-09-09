@@ -1,0 +1,236 @@
+@import url("https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700;900&family=Syne:wght@400;500;600;700;800&family=Noto+Sans:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #0c0a07;
+  --foreground: #e8ddd0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: "Noto Sans", ui-sans-serif, sans-serif;
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* Infinite horizontal scroll for the landing page feature marquee */
+  .marquee-track {
+    animation: marquee 28s linear infinite;
+  }
+  @keyframes marquee {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+
+  /* Gentle vertical bob for the 404/error pages' floating emoji */
+  .animate-float {
+    animation: float 3s ease-in-out infinite;
+  }
+  @keyframes float {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-14px);
+    }
+  }
+
+  /* CSS-only confetti burst, used by the coin roulette win state */
+  .confetti-piece {
+    animation: confetti-burst 0.8s ease-out forwards;
+  }
+  @keyframes confetti-burst {
+    0% {
+      transform: translate(-50%, -50%) rotate(var(--angle)) translateY(0) scale(1);
+      opacity: 1;
+    }
+    100% {
+      transform: translate(-50%, -50%) rotate(var(--angle)) translateY(var(--distance, -60px)) scale(0.4);
+      opacity: 0;
+    }
+  }
+
+  /* Coin roulette's spin: fast out of the gate, decelerates through the middle (per-stop
+   * timing-function), slightly overshoots the landing angle, then eases back — a "bounce" a
+   * plain single cubic-bezier transition can't express, since a transition's end value can't
+   * differ from its target. --start-rotation/--spin-distance are set inline per spin by
+   * CoinRoulette so this same keyframe animates correctly regardless of where the wheel
+   * currently rests or how far it needs to travel. */
+  @keyframes roulette-spin {
+    0% {
+      transform: rotate(var(--start-rotation, 0deg));
+      animation-timing-function: cubic-bezier(0.15, 0.85, 0.35, 1);
+    }
+    65% {
+      transform: rotate(calc(var(--start-rotation, 0deg) + var(--spin-distance, 1800deg) * 0.93));
+      animation-timing-function: ease-out;
+    }
+    85% {
+      transform: rotate(calc(var(--start-rotation, 0deg) + var(--spin-distance, 1800deg) * 1.015));
+    }
+    100% {
+      transform: rotate(calc(var(--start-rotation, 0deg) + var(--spin-distance, 1800deg)));
+    }
+  }
+
+  /* Result card sliding up under the roulette wheel once a spin lands */
+  .animate-slide-up {
+    animation: slide-up-fade 0.4s ease-out forwards;
+  }
+  @keyframes slide-up-fade {
+    from {
+      transform: translateY(16px);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+}
+
+/*
+ * Component-level recipes live in the `components` layer (NOT `utilities`) so that any
+ * plain utility class applied alongside them (e.g. `pl-9` next to `input-base`) always wins
+ * in the cascade — Tailwind guarantees `components` rules are emitted before `utilities`
+ * rules regardless of source order. Previously these lived in `@layer utilities`, which put
+ * them in the same layer as (and, by source position, after) classes like `.pl-9`/`.pl-12`,
+ * silently overriding any extra left-padding meant to clear an input's icon.
+ */
+@layer components {
+  /* Kente-inspired repeating gradient bar, used as an accent divider */
+  .kente-bar {
+    background-image: repeating-linear-gradient(
+      90deg,
+      #c4622d 0px,
+      #c4622d 24px,
+      #d4a843 24px,
+      #d4a843 48px,
+      #3d6b4f 48px,
+      #3d6b4f 72px
+    );
+    height: 4px;
+    width: 100%;
+  }
+
+  /* Shimmering skeleton loading placeholder */
+  .skeleton {
+    position: relative;
+    overflow: hidden;
+    background-color: #1a1510;
+  }
+  .skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background-image: linear-gradient(
+      90deg,
+      rgba(245, 237, 224, 0) 0%,
+      rgba(245, 237, 224, 0.08) 50%,
+      rgba(245, 237, 224, 0) 100%
+    );
+    animation: skeleton-shimmer 1.6s infinite;
+  }
+  @keyframes skeleton-shimmer {
+    100% {
+      transform: translateX(100%);
+    }
+  }
+
+  /* Frosted-glass card */
+  .glass {
+    background-color: rgba(26, 21, 16, 0.6);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(212, 168, 67, 0.12);
+  }
+
+  /* Buttons */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-clay px-5 py-2.5 font-syne font-semibold text-ivory transition-colors hover:bg-clay2 disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-muted2 bg-transparent px-5 py-2.5 font-syne font-semibold text-text transition-colors hover:border-gold hover:text-gold disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-plat {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-plat px-5 py-2.5 font-syne font-semibold text-bg transition-colors hover:bg-plat2 disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-gold {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-gold px-5 py-2.5 font-syne font-semibold text-bg transition-colors hover:bg-gold2 disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  /* Form inputs */
+  .input-base {
+    @apply w-full rounded-lg border border-muted2 bg-bg3 px-4 py-2.5 font-noto text-text placeholder:text-muted focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold;
+  }
+
+  /* Badges */
+  .badge-plat {
+    @apply inline-flex items-center gap-1 rounded-full bg-plat/15 px-2.5 py-1 font-syne text-xs font-semibold text-plat2;
+  }
+  .badge-free {
+    @apply inline-flex items-center gap-1 rounded-full bg-green/15 px-2.5 py-1 font-syne text-xs font-semibold text-green2;
+  }
+
+  /* TikTok-style scrolling sound name ticker, shown at the bottom of a feed post card while
+   * its attached sound is playing unmuted. The track is duplicated in the markup so the loop
+   * reads as continuous rather than snapping back to the start. */
+  .sound-marquee {
+    overflow: hidden;
+    white-space: nowrap;
+    mask-image: linear-gradient(90deg, transparent, black 8%, black 92%, transparent);
+  }
+  .sound-marquee-track {
+    display: inline-block;
+    animation: sound-marquee-scroll 12s linear infinite;
+  }
+  @keyframes sound-marquee-scroll {
+    0% {
+      transform: translateX(0);
+    }
+    100% {
+      transform: translateX(-50%);
+    }
+  }
+
+  /* Spotify-style three-bar equalizer, shown next to a track name while it's actively playing
+   * (NowPlayingCard/SpotifyMiniPlayer, compact mode). Each bar is the same keyframe at a
+   * different animation-delay/duration so they don't all bounce in lockstep. */
+  .eq-bar {
+    display: inline-block;
+    width: 3px;
+    background: #1db954;
+    border-radius: 1px;
+    animation: eq-bounce 0.9s ease-in-out infinite;
+  }
+  @keyframes eq-bounce {
+    0%,
+    100% {
+      height: 3px;
+    }
+    50% {
+      height: 12px;
+    }
+  }
+}

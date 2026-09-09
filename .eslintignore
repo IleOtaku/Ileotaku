@@ -1,0 +1,4 @@
+# Standalone Node maintenance scripts — CommonJS, run outside the Next.js app/lint pipeline.
+scripts/
+# Cloud Functions — its own separate npm project/tsconfig, deployed independently of the app.
+functions/

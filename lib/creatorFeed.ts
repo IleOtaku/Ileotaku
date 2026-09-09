@@ -1,0 +1,768 @@
+import {
+  addDoc,
+  arrayRemove,
+  arrayUnion,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  increment,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  startAfter,
+  updateDoc,
+  where,
+  writeBatch,
+  type DocumentData,
+  type QueryDocumentSnapshot,
+  type Unsubscribe,
+} from "firebase/firestore";
+import { getVideoThumbnail, uploadVideo } from "./cloudinary";
+import { logError } from "./errorLogger";
+import { db } from "./firebase";
+import { getUserProfile, updateLastActive, updateUserPrefs } from "./firestore";
+import { incrementSoundUsage } from "./sounds";
+import type { CreatorPost, CreatorPostType, EditingApp, Sound, UserProfile } from "@/types";
+
+const FEED = "creatorFeed";
+
+/** Whether an author's role permits their posts to enter the algorithmic For You feed at all.
+ * Only accounts that can post to the feed in the first place (Creator or Publisher — see
+ * PostComposer's own `canPost` gate) are ever eligible; a banned or suspended account is
+ * excluded even though it can't reach the composer today, as a defensive backstop against a
+ * future entry point (e.g. a scheduled post) publishing on its behalf. Platinum status is
+ * intentionally NOT a gate here — every eligible creator's posts compete in For You on equal
+ * footing; `isPlatinum` only ever affects ranking indirectly, via the badges already denormalized
+ * onto the post. */
+export function getForYouEligibility(profile: Pick<UserProfile, "isCreator" | "isPublisher" | "isBanned">): boolean {
+  return (profile.isCreator === true || profile.isPublisher === true) && profile.isBanned !== true;
+}
+
+/** Firestore's `in` operator caps at 30 comparison values — following lists longer than that
+ * are truncated to the 30 most-recently-followed creators for the Following feed query. */
+const MAX_IN_CLAUSE = 30;
+
+export interface CreatorPostBadges {
+  isVerified?: boolean;
+  isPlatinum?: boolean;
+  isFoundingCreator?: boolean;
+}
+
+export interface FeedPage {
+  posts: CreatorPost[];
+  /** Cursor for the next getPosts()/getFollowingFeed()/getForYouFeed() call, or null once the
+   * feed is exhausted. */
+  lastDoc: QueryDocumentSnapshot<DocumentData> | null;
+}
+
+/** Defaults applied to every document read back out of Firestore, so posts written before this
+ * sprint (which have none of these fields) still satisfy CreatorPost's now-required shape
+ * instead of leaving `undefined` to leak into scoring math, boost-tier lookups, etc. */
+const POST_DEFAULTS = {
+  mediaType: "none" as const,
+  isDraft: false,
+  boostLevel: 0 as const,
+  forYouScore: 0,
+  viewCount: 0,
+  watchTime: 0,
+  forYouEligible: false,
+};
+
+function toPost(d: QueryDocumentSnapshot<DocumentData>): CreatorPost {
+  const data = d.data();
+  return {
+    ...POST_DEFAULTS,
+    // Older posts counted views via the `views` field only — fold it into viewCount so an
+    // old post doesn't read as having zero views just because it predates this sprint.
+    viewCount: (data.viewCount as number | undefined) ?? (data.views as number | undefined) ?? 0,
+    id: d.id,
+    ...data,
+  } as CreatorPost;
+}
+
+/* ---------------------------- Boost economy ---------------------------- */
+
+export interface BoostTierConfig {
+  /** Coin cost to purchase this tier. */
+  cost: number;
+  /** How long the boost stays active once purchased. */
+  hours: number;
+  /** Multiplier applied to a post's base For You score while the boost is active. */
+  multiplier: number;
+  label: string;
+}
+
+export const BOOST_TIERS: Record<1 | 2 | 3, BoostTierConfig> = {
+  1: { cost: 50, hours: 24, multiplier: 2, label: "Boost" },
+  2: { cost: 150, hours: 48, multiplier: 5, label: "Super Boost" },
+  3: { cost: 500, hours: 72, multiplier: 10, label: "Mega Boost" },
+};
+
+/* ---------------------------- Resolution-based monetization ---------------------------- */
+
+/** Coin cost to post at each image resolution — "standard" is always free, higher tiers cost
+ * coins UNLESS the poster is Platinum, in which case every tier is free (see
+ * resolutionCost() below). This is the resolution half of Sprint 9b's monetization model: coins
+ * pay per-post for a resolution bump, Platinum pays once for unlimited high-res posting. */
+export const IMAGE_RESOLUTION_COSTS: Record<NonNullable<CreatorPost["imageResolution"]>, number> = {
+  standard: 0,
+  hd: 10,
+  "2k": 25,
+  "4k": 50,
+};
+
+export const VIDEO_RESOLUTION_COSTS: Record<NonNullable<CreatorPost["videoResolution"]>, number> = {
+  "480p": 0,
+  "720p": 15,
+  "1080p": 30,
+  "2k": 60,
+  "4k": 120,
+};
+
+/** The coin cost a specific poster actually pays for a resolution — zero for Platinum members
+ * (a perk) and for anyone choosing the free base tier, otherwise the flat cost above. */
+export function resolutionCost(
+  kind: "image" | "video",
+  resolution: string | undefined,
+  isPlatinum: boolean
+): number {
+  if (!resolution || isPlatinum) return 0;
+  const table = kind === "image" ? IMAGE_RESOLUTION_COSTS : VIDEO_RESOLUTION_COSTS;
+  return (table as Record<string, number>)[resolution] ?? 0;
+}
+
+export interface ResolutionChargeResult {
+  success: boolean;
+  message?: string;
+}
+
+/** Deducts the coin cost of a chosen resolution tier before a post/draft-publish goes out —
+ * called by the composer immediately before createPost(). No-ops (and succeeds) when the cost is
+ * zero, so callers can always call this unconditionally rather than branching on whether a
+ * charge is actually needed. */
+export async function chargeForResolution(
+  uid: string,
+  kind: "image" | "video",
+  resolution: string | undefined,
+  isPlatinum: boolean
+): Promise<ResolutionChargeResult> {
+  const cost = resolutionCost(kind, resolution, isPlatinum);
+  if (cost <= 0) return { success: true };
+  try {
+    const profile = await getUserProfile(uid);
+    if (!profile || (profile.coins ?? 0) < cost) {
+      return { success: false, message: `Not enough coins — posting at ${resolution} costs ${cost} coins.` };
+    }
+    const newBalance = profile.coins - cost;
+    await updateUserPrefs(uid, { coins: newBalance });
+    await addDoc(collection(db, "users", uid, "transactions"), {
+      userId: uid,
+      type: "spend",
+      amount: -cost,
+      balanceAfter: newBalance,
+      description: `Posted ${kind} at ${resolution}`,
+      category: "resolution",
+      createdAt: new Date().toISOString(),
+    });
+    return { success: true };
+  } catch (error) {
+    await logError(error, { operation: "creatorFeed.chargeForResolution", uid, kind, resolution });
+    return { success: false, message: "Couldn't charge coins for this resolution. Please try again." };
+  }
+}
+
+/* ---------------------------- For You scoring ---------------------------- */
+
+type ScoreInput = Pick<
+  CreatorPost,
+  "likes" | "commentCount" | "viewCount" | "watchTime" | "createdAt" | "boostLevel" | "boostExpiresAt"
+>;
+
+/**
+ * Ranking score behind the For You feed. Engagement (likes weighted heaviest, then comments,
+ * then raw views, then a small credit for cumulative watch time) is divided by an age-based
+ * "gravity" term — the same shape as Hacker News's ranking formula — so a post needs
+ * proportionally more engagement to stay near the top the older it gets, keeping the feed from
+ * being dominated by a handful of old viral posts. An active boost then multiplies the whole
+ * decayed score, which is intentional: boosting only *pays off* on a post that's already
+ * earning some genuine engagement, rather than guaranteeing top placement outright.
+ */
+export function calculateForYouScore(post: ScoreInput): number {
+  const ageHours = Math.max(0, (Date.now() - new Date(post.createdAt).getTime()) / 3_600_000);
+  const engagement =
+    post.likes.length * 3 + post.commentCount * 5 + post.viewCount * 1 + post.watchTime * 0.05;
+  const decayed = engagement / Math.pow(ageHours + 2, 1.5);
+
+  const boostActive =
+    post.boostLevel > 0 && !!post.boostExpiresAt && new Date(post.boostExpiresAt).getTime() > Date.now();
+  const multiplier = boostActive ? BOOST_TIERS[post.boostLevel as 1 | 2 | 3].multiplier : 1;
+
+  return Math.round(decayed * multiplier * 1000) / 1000;
+}
+
+/* ---------------------------- Video upload ---------------------------- */
+
+const MAX_VIDEO_BYTES = 100 * 1024 * 1024; // 100MB
+const ALLOWED_VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime"];
+
+export interface UploadedVideo {
+  url: string;
+  posterUrl: string;
+  /** Seconds. */
+  duration: number;
+}
+
+/** Reads a video file's duration client-side by loading it into an off-DOM <video> — there's no
+ * server here to probe it. Used to be paired with a canvas-captured poster frame too, but
+ * Cloudinary auto-generates a poster for any uploaded video (see getVideoThumbnail() in
+ * lib/cloudinary.ts), so that manual capture-and-separately-upload step is gone; one upload now
+ * produces both the video and its poster. Mirrors lib/sounds.ts's probeDuration for the same
+ * "no server-side media pipeline" reason. */
+function probeVideoDuration(file: File): Promise<number> {
+  return new Promise((resolve) => {
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    const url = URL.createObjectURL(file);
+    const cleanup = () => URL.revokeObjectURL(url);
+    video.addEventListener("loadedmetadata", () => {
+      cleanup();
+      resolve(Number.isFinite(video.duration) ? Math.round(video.duration) : 0);
+    });
+    video.addEventListener("error", () => {
+      cleanup();
+      resolve(0);
+    });
+    video.src = url;
+  });
+}
+
+/** Uploads a video (MP4/WebM/MOV, ≤100MB) to Cloudinary under feed/videos/{uid}/ and returns its
+ * secure_url, an auto-generated poster thumbnail url, and the probed duration. Real upload
+ * progress (not a simulated ramp — Cloudinary's upload can take a while for a 100MB file, and
+ * XMLHttpRequest's upload.onprogress reports actual bytes transferred) flows straight through
+ * from lib/cloudinary.ts's uploadVideo(). */
+export async function uploadPostVideo(
+  uid: string,
+  file: File,
+  onProgress?: (progress: number) => void
+): Promise<UploadedVideo> {
+  if (!ALLOWED_VIDEO_TYPES.includes(file.type)) {
+    throw new Error("Only MP4, WebM, or MOV videos are supported.");
+  }
+  if (file.size > MAX_VIDEO_BYTES) {
+    throw new Error("Videos must be under 100MB.");
+  }
+
+  const [duration, { secureUrl }] = await Promise.all([
+    probeVideoDuration(file),
+    uploadVideo(file, `feed/videos/${uid}`, onProgress),
+  ]);
+
+  return { url: secureUrl, posterUrl: getVideoThumbnail(secureUrl), duration };
+}
+
+/* ---------------------------- Create / read ---------------------------- */
+
+export interface CreatePostInput {
+  uid: string;
+  displayName: string;
+  photoURL?: string;
+  handle?: string;
+  content: string;
+  type: CreatorPostType;
+  badges?: CreatorPostBadges;
+  sound?: Sound | null;
+  attachments?: string[];
+  imageResolution?: CreatorPost["imageResolution"];
+  videoUrl?: string;
+  videoPosterUrl?: string;
+  videoDuration?: number;
+  videoResolution?: CreatorPost["videoResolution"];
+  editingApp?: EditingApp | null;
+  /** Whether the author's role permits this post to enter the algorithmic For You feed at all —
+   * computed by the caller from the author's profile (see getForYouEligibility() below), since
+   * createPost() itself has no reason to re-derive role logic from a bare uid. */
+  forYouEligible: boolean;
+}
+
+/** Publishes a new feed post. Content is hard-capped at 500 chars here too, as a server-of-truth
+ * backstop behind the composer's own client-side limit. Badges are denormalized onto the post at
+ * write-time (from the author's current profile) so the feed never needs a per-post profile
+ * lookup just to render a verified/founding/platinum badge. */
+export async function createPost(input: CreatePostInput): Promise<string> {
+  const {
+    uid,
+    displayName,
+    photoURL,
+    handle,
+    content,
+    type,
+    badges = {},
+    sound,
+    attachments = [],
+    imageResolution,
+    videoUrl,
+    videoPosterUrl,
+    videoDuration,
+    videoResolution,
+    editingApp,
+    forYouEligible,
+  } = input;
+
+  const mediaType: CreatorPost["mediaType"] = videoUrl
+    ? "video"
+    : attachments.length > 1
+      ? "images"
+      : attachments.length === 1
+        ? "image"
+        : "none";
+
+  try {
+    const ref = await addDoc(collection(db, FEED), {
+      uid,
+      displayName,
+      ...(photoURL ? { photoURL } : {}),
+      ...(handle ? { handle } : {}),
+      content: content.trim().slice(0, 500),
+      type,
+      attachments: attachments.slice(0, 4),
+      likes: [],
+      commentCount: 0,
+      isVerified: badges.isVerified ?? false,
+      isPlatinum: badges.isPlatinum ?? false,
+      isFoundingCreator: badges.isFoundingCreator ?? false,
+      ...(sound
+        ? {
+            soundId: sound.id,
+            soundUrl: sound.url,
+            soundTitle: sound.title,
+            soundArtist: sound.artist,
+            soundSource: sound.source,
+            soundDuration: sound.duration,
+            ...(sound.source !== "spotify" ? { soundCategory: sound.category } : {}),
+          }
+        : {}),
+      mediaType,
+      ...(imageResolution ? { imageResolution } : {}),
+      ...(videoUrl
+        ? {
+            videoUrl,
+            ...(videoPosterUrl ? { videoPosterUrl } : {}),
+            ...(videoDuration !== undefined ? { videoDuration } : {}),
+            ...(videoResolution ? { videoResolution } : {}),
+          }
+        : {}),
+      ...(editingApp !== undefined ? { editingApp } : {}),
+      isDraft: false,
+      boostLevel: 0,
+      boostExpiresAt: null,
+      forYouScore: 0,
+      viewCount: 0,
+      watchTime: 0,
+      forYouEligible,
+      createdAt: new Date().toISOString(),
+    });
+    // Fire-and-forget — a missed usage-count bump shouldn't fail the post itself. Spotify
+    // preview "sounds" aren't real `sounds` docs (their id is a synthetic `spotify:{trackId}`),
+    // so this silently no-ops for them via incrementSoundUsage's own internal try/catch.
+    if (sound) incrementSoundUsage(sound.id);
+    await updateLastActive(uid);
+    return ref.id;
+  } catch (error) {
+    await logError(error, { operation: "creatorFeed.createPost", uid });
+    throw error;
+  }
+}
+
+/** Paginated "For You" feed — every creator's posts, newest first. Pass the previous page's
+ * `lastDoc` back in to fetch the next page. */
+export async function getPosts(
+  pageSize = 10,
+  lastDoc: QueryDocumentSnapshot<DocumentData> | null = null
+): Promise<FeedPage> {
+  try {
+    const q = lastDoc
+      ? query(collection(db, FEED), orderBy("createdAt", "desc"), startAfter(lastDoc), limit(pageSize))
+      : query(collection(db, FEED), orderBy("createdAt", "desc"), limit(pageSize));
+    const snap = await getDocs(q);
+    return {
+      posts: snap.docs.map(toPost),
+      lastDoc: snap.docs.length > 0 ? snap.docs[snap.docs.length - 1] : null,
+    };
+  } catch (error) {
+    await logError(error, { operation: "creatorFeed.getPosts" });
+    return { posts: [], lastDoc: null };
+  }
+}
+
+/** Paginated, algorithmically-ranked "For You" feed — only posts whose author is
+ * `forYouEligible`, ordered by the precomputed `forYouScore` (kept fresh by createPost,
+ * likePost, incrementViewCount, trackWatchTime, and boostPost/expireBoosts, rather than
+ * recomputed on every read, since Firestore can't order by a computed expression). Requires a
+ * composite index on (forYouEligible ASC, forYouScore DESC) — see firestore.indexes.json. */
+export async function getForYouFeed(
+  pageSize = 10,
+  lastDoc: QueryDocumentSnapshot<DocumentData> | null = null
+): Promise<FeedPage> {
+  try {
+    const base = query(
+      collection(db, FEED),
+      where("forYouEligible", "==", true),
+      orderBy("forYouScore", "desc")
+    );
+    const q = lastDoc ? query(base, startAfter(lastDoc), limit(pageSize)) : query(base, limit(pageSize));
+    const snap = await getDocs(q);
+    return {
+      posts: snap.docs.map(toPost),
+      lastDoc: snap.docs.length > 0 ? snap.docs[snap.docs.length - 1] : null,
+    };
+  } catch (error) {
+    await logError(error, { operation: "creatorFeed.getForYouFeed" });
+    return { posts: [], lastDoc: null };
+  }
+}
+
+/** Paginated "Following" feed — posts from only the given creator uids. Returns an empty page
+ * immediately (no query) when the list is empty, since a `where("uid","in",[])` call is invalid. */
+export async function getFollowingFeed(
+  followingIds: string[],
+  pageSize = 10,
+  lastDoc: QueryDocumentSnapshot<DocumentData> | null = null
+): Promise<FeedPage> {
+  if (followingIds.length === 0) return { posts: [], lastDoc: null };
+  const ids = followingIds.slice(0, MAX_IN_CLAUSE);
+  try {
+    const q = lastDoc
+      ? query(
+          collection(db, FEED),
+          where("uid", "in", ids),
+          orderBy("createdAt", "desc"),
+          startAfter(lastDoc),
+          limit(pageSize)
+        )
+      : query(collection(db, FEED), where("uid", "in", ids), orderBy("createdAt", "desc"), limit(pageSize));
+    const snap = await getDocs(q);
+    return {
+      posts: snap.docs.map(toPost),
+      lastDoc: snap.docs.length > 0 ? snap.docs[snap.docs.length - 1] : null,
+    };
+  } catch (error) {
+    await logError(error, { operation: "creatorFeed.getFollowingFeed" });
+    return { posts: [], lastDoc: null };
+  }
+}
+
+/** Toggles `uid` in a post's `likes` array. Caller passes whether it's currently liked (the UI
+ * already has this from the post it's rendering) rather than this function re-reading the doc.
+ * Also recomputes and writes `forYouScore` in the same update, so a like's ranking effect is
+ * visible immediately rather than waiting on some later recompute pass. */
+export async function likePost(uid: string, postId: string, currentlyLiked: boolean): Promise<void> {
+  try {
+    const ref = doc(db, FEED, postId);
+    const snap = await getDoc(ref);
+    const current = snap.exists() ? toPost(snap as QueryDocumentSnapshot<DocumentData>) : null;
+    const nextLikes = currentlyLiked
+      ? (current?.likes ?? []).filter((id) => id !== uid)
+      : [...(current?.likes ?? []), uid];
+    const forYouScore = current
+      ? calculateForYouScore({ ...current, likes: nextLikes })
+      : undefined;
+    await updateDoc(ref, {
+      likes: currentlyLiked ? arrayRemove(uid) : arrayUnion(uid),
+      ...(forYouScore !== undefined ? { forYouScore } : {}),
+    });
+  } catch (error) {
+    await logError(error, { operation: "creatorFeed.likePost", uid, postId });
+    throw error;
+  }
+}
+
+/** Deletes a post. Firestore rules enforce that only the post's own author may do this — this
+ * function doesn't re-check ownership client-side, it just relies on the UI only ever showing
+ * the delete action on the signed-in user's own posts. */
+export async function deletePost(uid: string, postId: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, FEED, postId));
+  } catch (error) {
+    await logError(error, { operation: "creatorFeed.deletePost", uid, postId });
+    throw error;
+  }
+}
+
+/** Real-time listener on the newest page of the "For You" feed — powers new-post-appears-live
+ * behavior. Pagination beyond this first page uses the one-shot getPosts()/getFollowingFeed()
+ * instead, since a live listener per page would be needlessly expensive. */
+export function subscribeToFeed(
+  callback: (posts: CreatorPost[]) => void,
+  pageSize = 10
+): Unsubscribe {
+  const q = query(collection(db, FEED), orderBy("createdAt", "desc"), limit(pageSize));
+  return onSnapshot(
+    q,
+    (snap) => callback(snap.docs.map(toPost)),
+    () => callback([])
+  );
+}
+
+/** Fire-and-forget view counter — called once per viewer per post (the caller is responsible
+ * for de-duping, e.g. once per browser session) to power the creator dashboard's per-post
+ * analytics. Never throws into the UI; a missed view count isn't worth surfacing an error for. */
+export async function incrementPostViews(postId: string): Promise<void> {
+  try {
+    await updateDoc(doc(db, FEED, postId), { views: increment(1) });
+  } catch {
+    // Non-fatal — view counts are a nice-to-have, not core functionality.
+  }
+}
+
+/** Fetches every post by one creator, newest first — used by the creator dashboard's own Feed
+ * tab and the public creator profile's Posts tab. Excludes drafts, since drafts live in a
+ * separate per-user subcollection rather than this query's `creatorFeed` collection. */
+export async function getPostsByCreator(uid: string): Promise<CreatorPost[]> {
+  try {
+    const q = query(collection(db, FEED), where("uid", "==", uid), orderBy("createdAt", "desc"));
+    const snap = await getDocs(q);
+    return snap.docs.map(toPost);
+  } catch (error) {
+    await logError(error, { operation: "creatorFeed.getPostsByCreator", uid });
+    return [];
+  }
+}
+
+/* ---------------------------- Admin ---------------------------- */
+
+/** Every post, newest first, capped generously rather than paginated — used only by the Super
+ * Admin dashboard's Feed tab, whose table already scrolls and filters client-side rather than
+ * needing true pagination the way the public feed does. */
+export async function getAllPostsForAdmin(cap = 300): Promise<CreatorPost[]> {
+  try {
+    const q = query(collection(db, FEED), orderBy("createdAt", "desc"), limit(cap));
+    const snap = await getDocs(q);
+    return snap.docs.map(toPost);
+  } catch (error) {
+    await logError(error, { operation: "creatorFeed.getAllPostsForAdmin" });
+    return [];
+  }
+}
+
+/** Admin override to immediately end a post's boost (e.g. in response to a report), independent
+ * of expireBoosts()'s time-based sweep. */
+export async function adminClearBoost(postId: string): Promise<void> {
+  try {
+    const snap = await getDoc(doc(db, FEED, postId));
+    if (!snap.exists()) return;
+    const post = toPost(snap as QueryDocumentSnapshot<DocumentData>);
+    await updateDoc(doc(db, FEED, postId), {
+      boostLevel: 0,
+      boostExpiresAt: null,
+      forYouScore: calculateForYouScore({ ...post, boostLevel: 0 }),
+    });
+  } catch (error) {
+    await logError(error, { operation: "creatorFeed.adminClearBoost", postId });
+    throw error;
+  }
+}
+
+/** Admin override for a post's For You eligibility — e.g. pulling a specific post out of the
+ * algorithmic feed without banning its author outright. */
+export async function adminSetForYouEligible(postId: string, eligible: boolean): Promise<void> {
+  try {
+    await updateDoc(doc(db, FEED, postId), { forYouEligible: eligible });
+  } catch (error) {
+    await logError(error, { operation: "creatorFeed.adminSetForYouEligible", postId, eligible });
+    throw error;
+  }
+}
+
+/* ---------------------------- View / watch-time tracking ---------------------------- */
+
+/** Distinct-viewer counter for video (and, going forward, any) posts — a superset of the older
+ * `incrementPostViews`, which only bumped the legacy `views` field. Recomputes `forYouScore` in
+ * the same write so a post's ranking reflects fresh views immediately. De-duping per viewer is
+ * the caller's responsibility (FeedPostCard uses sessionStorage, same as the legacy view count). */
+export async function incrementViewCount(postId: string): Promise<void> {
+  try {
+    const ref = doc(db, FEED, postId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return;
+    const post = toPost(snap as QueryDocumentSnapshot<DocumentData>);
+    const viewCount = post.viewCount + 1;
+    await updateDoc(ref, { viewCount, forYouScore: calculateForYouScore({ ...post, viewCount }) });
+  } catch {
+    // Non-fatal — view counts are a discovery signal, not core functionality.
+  }
+}
+
+/** Adds `seconds` to a video post's cumulative watch time (FeedPostCard calls this roughly once
+ * every 5s of continued playback) and recomputes `forYouScore`. Never throws into the UI. */
+export async function trackWatchTime(postId: string, seconds: number): Promise<void> {
+  if (seconds <= 0) return;
+  try {
+    const ref = doc(db, FEED, postId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return;
+    const post = toPost(snap as QueryDocumentSnapshot<DocumentData>);
+    const watchTime = post.watchTime + seconds;
+    await updateDoc(ref, { watchTime, forYouScore: calculateForYouScore({ ...post, watchTime }) });
+  } catch {
+    // Non-fatal.
+  }
+}
+
+/* ---------------------------- Boosting ---------------------------- */
+
+export interface BoostResult {
+  success: boolean;
+  message?: string;
+}
+
+/** Spends coins to boost a post for a limited window — deducts the tier's cost from the author's
+ * balance, logs a "boost" transaction, and stamps `boostLevel`/`boostExpiresAt` plus a freshly
+ * multiplied `forYouScore` onto the post so the effect is visible immediately rather than after
+ * some later recompute pass. Only the post's own author may boost it (mirrors the delete-post
+ * ownership check, enforced again server-side by firestore.rules). */
+export async function boostPost(uid: string, postId: string, level: 1 | 2 | 3): Promise<BoostResult> {
+  const tier = BOOST_TIERS[level];
+  try {
+    const [profile, snap] = await Promise.all([getUserProfile(uid), getDoc(doc(db, FEED, postId))]);
+    if (!snap.exists()) return { success: false, message: "This post no longer exists." };
+    const post = toPost(snap as QueryDocumentSnapshot<DocumentData>);
+    if (post.uid !== uid) return { success: false, message: "You can only boost your own posts." };
+    if (!profile || (profile.coins ?? 0) < tier.cost) {
+      return { success: false, message: `Not enough coins — ${tier.label} costs ${tier.cost} coins.` };
+    }
+
+    const newBalance = profile.coins - tier.cost;
+    const boostExpiresAt = new Date(Date.now() + tier.hours * 3_600_000).toISOString();
+    const forYouScore = calculateForYouScore({ ...post, boostLevel: level, boostExpiresAt });
+
+    await updateUserPrefs(uid, { coins: newBalance });
+    await updateDoc(doc(db, FEED, postId), { boostLevel: level, boostExpiresAt, forYouScore });
+    await addDoc(collection(db, "users", uid, "transactions"), {
+      userId: uid,
+      type: "spend",
+      amount: -tier.cost,
+      balanceAfter: newBalance,
+      description: `${tier.label} on a feed post`,
+      category: "boost",
+      createdAt: new Date().toISOString(),
+    });
+
+    return { success: true };
+  } catch (error) {
+    await logError(error, { operation: "creatorFeed.boostPost", uid, postId, level });
+    return { success: false, message: "Couldn't boost this post. Please try again." };
+  }
+}
+
+/** Sweeps every post whose boost has expired and resets it to unboosted, recomputing its
+ * (now-unmultiplied) `forYouScore` in the same batch. Cheap enough to call on every feed-page
+ * mount: the query only ever matches posts genuinely mid-expiry, which is a small, self-limiting
+ * set (each one is fixed the first time anyone calls this after it expires). Client-side rather
+ * than a scheduled Cloud Function, since this project has no Cloud Functions deployment. */
+export async function expireBoosts(): Promise<void> {
+  try {
+    // A single inequality filter is enough: unboosted posts have `boostExpiresAt` set to `null`
+    // (either from createPost or from a prior sweep), and Firestore range/inequality filters
+    // never match `null`, so this only ever matches posts that were genuinely boosted and whose
+    // window has passed — no second `boostLevel > 0` filter (and its composite-index cost) needed.
+    const q = query(collection(db, FEED), where("boostExpiresAt", "<=", new Date().toISOString()));
+    const snap = await getDocs(q);
+    if (snap.empty) return;
+    const batch = writeBatch(db);
+    snap.docs.forEach((d) => {
+      const post = toPost(d as QueryDocumentSnapshot<DocumentData>);
+      batch.update(d.ref, {
+        boostLevel: 0,
+        boostExpiresAt: null,
+        forYouScore: calculateForYouScore({ ...post, boostLevel: 0 }),
+      });
+    });
+    await batch.commit();
+  } catch (error) {
+    // Non-fatal — a missed expiry sweep just means a boost's multiplier lingers a little longer
+    // than intended until the next page load runs this again.
+    await logError(error, { operation: "creatorFeed.expireBoosts" });
+  }
+}
+
+/* ---------------------------- Drafts ---------------------------- */
+
+function draftsCol(uid: string) {
+  return collection(db, "users", uid, "drafts");
+}
+
+/** Saves (or overwrites, if `draftId` is given) a private draft under the author's own
+ * `users/{uid}/drafts` subcollection — never the shared `creatorFeed` collection, so a draft is
+ * never visible to anyone but its author even if the feed query logic has a bug. Returns the
+ * draft's id. */
+/** Recursively strips `undefined` values (top-level and nested one level, which is as deep as
+ * any caller here actually nests — e.g. `badges`) from an object. Firestore's `addDoc`/
+ * `updateDoc` reject any field whose value is `undefined` (as opposed to simply omitting the
+ * key), and unlike createPost() — which builds its payload field-by-field with explicit `?? `
+ * fallbacks — saveDraft() accepts a loose `Partial<CreatePostInput>` straight from the composer,
+ * where e.g. `badges.isVerified` is `undefined` on any profile that hasn't set it. Stripping
+ * here rather than in every caller keeps that guarantee in one place. */
+function stripUndefined<T extends Record<string, unknown>>(obj: T): T {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value === undefined) continue;
+    out[key] =
+      value !== null && typeof value === "object" && !Array.isArray(value)
+        ? stripUndefined(value as Record<string, unknown>)
+        : value;
+  }
+  return out as T;
+}
+
+export async function saveDraft(
+  uid: string,
+  draft: Partial<CreatePostInput> & { draftId?: string }
+): Promise<string> {
+  const { draftId, ...fields } = draft;
+  try {
+    const payload = stripUndefined({ ...fields, uid, isDraft: true, draftSavedAt: new Date().toISOString() });
+    if (draftId) {
+      await updateDoc(doc(draftsCol(uid), draftId), payload);
+      return draftId;
+    }
+    const ref = await addDoc(draftsCol(uid), payload);
+    return ref.id;
+  } catch (error) {
+    await logError(error, { operation: "creatorFeed.saveDraft", uid });
+    throw error;
+  }
+}
+
+/** All of one creator's saved drafts, most-recently-saved first. */
+export async function getDrafts(uid: string): Promise<CreatorPost[]> {
+  try {
+    const q = query(draftsCol(uid), orderBy("draftSavedAt", "desc"));
+    const snap = await getDocs(q);
+    return snap.docs.map(toPost);
+  } catch (error) {
+    await logError(error, { operation: "creatorFeed.getDrafts", uid });
+    return [];
+  }
+}
+
+export async function deleteDraft(uid: string, draftId: string): Promise<void> {
+  try {
+    await deleteDoc(doc(draftsCol(uid), draftId));
+  } catch (error) {
+    await logError(error, { operation: "creatorFeed.deleteDraft", uid, draftId });
+    throw error;
+  }
+}
+
+/** Publishes a saved draft to the live feed via the normal createPost() path, then deletes the
+ * draft. Takes the same fields getForYouEligibility()'s caller would already have computed, plus
+ * an explicit `forYouEligible` so this doesn't need its own role lookup. */
+export async function publishDraft(uid: string, draftId: string, input: CreatePostInput): Promise<string> {
+  const postId = await createPost(input);
+  await deleteDraft(uid, draftId);
+  return postId;
+}
