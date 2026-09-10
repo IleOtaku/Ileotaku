@@ -1,7 +1,7 @@
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { create } from "zustand";
 import { auth } from "@/lib/firebase";
-import { getUserProfile } from "@/lib/firestore";
+import { subscribeToUserProfile } from "@/lib/firestore";
 import { setOffline, setOnline } from "@/lib/onlineStatus";
 import type { UserProfile } from "@/types";
 
@@ -29,17 +29,24 @@ let listenerStarted = false;
  * store's `user` so a sign-out (or switching accounts in the same tab) can mark the PREVIOUS
  * uid offline before/regardless of whatever the new auth state turns out to be. */
 let currentOnlineUid: string | null = null;
+/** Unsubscribes the previous uid's profile listener before starting a new one — otherwise
+ * switching accounts in the same tab (or a second onAuthStateChanged firing) would leak
+ * listeners and let a stale one occasionally overwrite the current user's profile. */
+let unsubscribeProfile: (() => void) | null = null;
 
 /**
  * Starts the Firebase onAuthStateChanged listener exactly once, keeping the Zustand
- * store in sync and fetching the matching Firestore profile whenever a user signs in.
- * Called from AuthProvider so it only ever runs on the client.
+ * store in sync and opening a REAL-TIME Firestore listener (subscribeToUserProfile) on the
+ * signed-in user's own profile whenever one signs in — so every value the app reads off
+ * `useAuth().profile` (coin balance, isPlatinum, follower counts, ...) updates live wherever
+ * it's changed, not only on the specific actions that happen to call setProfile manually
+ * afterward. Called from AuthProvider so it only ever runs on the client.
  */
 export function initAuthListener(): void {
   if (listenerStarted) return;
   listenerStarted = true;
 
-  onAuthStateChanged(auth, async (user) => {
+  onAuthStateChanged(auth, (user) => {
     const { setUser, setProfile, setLoading } = useAuth.getState();
     setUser(user);
 
@@ -48,20 +55,20 @@ export function initAuthListener(): void {
       currentOnlineUid = null;
     }
 
+    unsubscribeProfile?.();
+    unsubscribeProfile = null;
+
     if (user) {
-      try {
-        const profile = await getUserProfile(user.uid);
+      unsubscribeProfile = subscribeToUserProfile(user.uid, (profile) => {
         setProfile(profile);
-      } catch {
-        setProfile(null);
-      }
+        setLoading(false);
+      });
       setOnline(user.uid);
       currentOnlineUid = user.uid;
     } else {
       setProfile(null);
+      setLoading(false);
     }
-
-    setLoading(false);
   });
 
   // Best-effort — an abrupt tab close/crash may still tear the page down before this async

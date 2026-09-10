@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Users } from "lucide-react";
 import { Skeleton } from "@/components/ui";
 import { useAuth } from "@/hooks/useAuth";
-import { getFollowingActivity, type FollowingActivityEntry } from "@/lib/readingActivity";
+import { subscribeToFollowingActivity, type FollowingActivityEntry } from "@/lib/readingActivity";
 import { proxyImg } from "@/lib/manga-api";
 import { initials, stringToColor } from "@/lib/utils";
 
@@ -35,21 +35,12 @@ export default function FriendActivity() {
       setLoading(false);
       return;
     }
-    let cancelled = false;
     setLoading(true);
-    getFollowingActivity(user.uid, MAX_SHOWN)
-      .then((res) => {
-        if (!cancelled) setItems(res);
-      })
-      .catch(() => {
-        if (!cancelled) setItems([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+    const unsub = subscribeToFollowingActivity(user.uid, MAX_SHOWN, (res) => {
+      setItems(res);
+      setLoading(false);
+    });
+    return unsub;
   }, [user]);
 
   if (!user) return null;

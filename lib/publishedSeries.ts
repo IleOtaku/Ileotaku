@@ -1,6 +1,7 @@
 import {
   addDoc,
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -10,11 +11,19 @@ import {
   query,
   updateDoc,
   where,
+  writeBatch,
 } from "firebase/firestore";
 import { db } from "./firebase";
 import { logError } from "./errorLogger";
 import { createNotification } from "./notifications";
-import { NotificationType, type PublishedChapter, type PublishedSeries } from "@/types";
+import { getUserByHandle } from "./firestore";
+import {
+  NotificationType,
+  type ChapterDraft,
+  type OwnershipTransferRequest,
+  type PublishedChapter,
+  type PublishedSeries,
+} from "@/types";
 import type { MangaChapterSummary, MangaDetailData } from "./apis/types";
 
 const PUBLISHED_SERIES = "publishedSeries";
@@ -202,4 +211,252 @@ export async function addChapter(
   }
 
   return ref.id;
+}
+
+/* ============================== Delete work (Part 12) ============================== */
+
+/**
+ * Permanently deletes a creator's work: every chapter doc, the publishedSeries summary (which
+ * is what actually removes it from Explore/the reader/search — those all query that collection,
+ * never creatorWorks directly), and the source creatorWorks doc itself.
+ *
+ * Two things this deliberately does NOT do, both flagged rather than silently skipped:
+ * - Cloudinary cleanup: chapter/cover images are stored as plain secure_urls, not the publicId
+ *   deleteFile() (lib/cloudinary.ts) needs — deriving a publicId by parsing the URL risks
+ *   deleting the wrong asset if the parse is ever wrong, so orphaned files are left in the
+ *   Cloudinary account (a storage cost, not a functional bug) rather than risk that.
+ * - Reverse-updating other readers' `unlocked` chapter records: there's no reverse index from a
+ *   chapter id to who unlocked it, and a collectionGroup scan across every user's `unlocked`
+ *   subcollection for one deleted work isn't worth the read cost — an unlocked-but-now-gone
+ *   chapter just 404s the same as any other removed content, no different from an imported
+ *   source's chapter disappearing upstream.
+ */
+export async function deleteWork(workId: string): Promise<void> {
+  try {
+    const chaptersSnap = await getDocs(collection(db, SERIES, workId, "chapters"));
+    if (!chaptersSnap.empty) {
+      const batch = writeBatch(db);
+      chaptersSnap.docs.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+    }
+
+    const draftsSnap = await getDocs(collection(db, SERIES, workId, "draftChapters"));
+    if (!draftsSnap.empty) {
+      const batch = writeBatch(db);
+      draftsSnap.docs.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+    }
+
+    await deleteDoc(doc(db, PUBLISHED_SERIES, workId)).catch(() => {});
+    await deleteDoc(doc(db, "creatorWorks", workId));
+  } catch (error) {
+    await logError(error, { operation: "deleteWork", workId });
+    throw error;
+  }
+}
+
+/* ============================== Edit series / chapters (Part 12) ============================== */
+
+export interface SeriesDetailsPatch {
+  title?: string;
+  description?: string;
+  genres?: string[];
+  coverURL?: string;
+  updateSchedule?: string;
+  contentRating?: string;
+}
+
+/** Updates series-level details on BOTH creatorWorks (the source of truth the dashboard reads)
+ * and publishedSeries (the public-facing summary Explore/the reader/search all query) so the
+ * two never drift apart — publishedSeries only exists once a work has actually been approved,
+ * so that half is skipped (not an error) for a work still pending/rejected. */
+export async function updateSeriesDetails(workId: string, patch: SeriesDetailsPatch): Promise<void> {
+  try {
+    const now = new Date().toISOString();
+    const workPatch: Record<string, unknown> = { ...patch, updatedAt: now };
+    if (patch.coverURL) workPatch.coverURL = patch.coverURL;
+    await updateDoc(doc(db, "creatorWorks", workId), workPatch);
+
+    const publishedPatch: Record<string, unknown> = { ...patch };
+    if (patch.coverURL) publishedPatch.coverImage = patch.coverURL;
+    const publishedSnap = await getDoc(doc(db, PUBLISHED_SERIES, workId));
+    if (publishedSnap.exists()) {
+      await updateDoc(doc(db, PUBLISHED_SERIES, workId), publishedPatch);
+    }
+  } catch (error) {
+    await logError(error, { operation: "updateSeriesDetails", workId });
+    throw error;
+  }
+}
+
+export interface ChapterPatch {
+  title?: string;
+  coinPrice?: number;
+  images?: string[];
+  chapterNumber?: number;
+}
+
+/** Edits an already-published chapter in place — title, price, page order/set, or its number
+ * (which changes its sort position in the chapter list). Changes are visible on the public
+ * manga page and in the reader immediately since both read this same doc live. */
+export async function updateChapter(workId: string, chapterId: string, patch: ChapterPatch): Promise<void> {
+  try {
+    await updateDoc(doc(db, SERIES, workId, "chapters", chapterId), { ...patch });
+  } catch (error) {
+    await logError(error, { operation: "updateChapter", workId, chapterId });
+    throw error;
+  }
+}
+
+/* ============================== Chapter drafts (Part 12) ============================== */
+
+export async function getChapterDrafts(workId: string): Promise<ChapterDraft[]> {
+  try {
+    const snap = await getDocs(collection(db, SERIES, workId, "draftChapters"));
+    return snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }) as ChapterDraft)
+      .sort((a, b) => (a.savedAt < b.savedAt ? 1 : -1));
+  } catch (error) {
+    await logError(error, { operation: "getChapterDrafts", workId });
+    return [];
+  }
+}
+
+export async function saveChapterDraft(
+  workId: string,
+  draft: { chapterNumber: number; title: string; images: string[]; coinPrice: number }
+): Promise<string> {
+  const ref = await addDoc(collection(db, SERIES, workId, "draftChapters"), {
+    ...draft,
+    savedAt: new Date().toISOString(),
+  });
+  return ref.id;
+}
+
+export async function deleteChapterDraft(workId: string, draftId: string): Promise<void> {
+  await deleteDoc(doc(db, SERIES, workId, "draftChapters", draftId));
+}
+
+/** Publishes a saved draft as a real chapter (via the same addChapter path a fresh upload takes,
+ * so it gets the same follower-notification behavior), then removes the draft. */
+export async function publishChapterDraft(workId: string, draft: ChapterDraft): Promise<string> {
+  const chapterId = await addChapter(workId, {
+    chapterNumber: draft.chapterNumber,
+    title: draft.title,
+    images: draft.images,
+    coinPrice: draft.coinPrice,
+  });
+  await deleteChapterDraft(workId, draft.id);
+  return chapterId;
+}
+
+/* ============================== Transfer ownership (Part 12) ============================== */
+
+const OWNERSHIP_TRANSFERS = "ownershipTransfers";
+
+/** Starts a transfer: looks up the recipient by @handle, writes a pending request, and notifies
+ * them to accept/decline — nothing on the work itself changes until they accept. */
+export async function requestOwnershipTransfer(
+  workId: string,
+  workTitle: string,
+  fromUid: string,
+  fromDisplayName: string,
+  toHandle: string
+): Promise<void> {
+  const cleanHandle = toHandle.trim().replace(/^@/, "");
+  const recipient = await getUserByHandle(cleanHandle);
+  if (!recipient) throw new Error(`No account found with the handle @${cleanHandle}.`);
+  if (recipient.uid === fromUid) throw new Error("You already own this series.");
+
+  try {
+    await addDoc(collection(db, OWNERSHIP_TRANSFERS), {
+      workId,
+      workTitle,
+      fromUid,
+      fromDisplayName,
+      toUid: recipient.uid,
+      toHandle: cleanHandle,
+      status: "pending",
+      createdAt: new Date().toISOString(),
+    } satisfies Omit<OwnershipTransferRequest, "id">);
+
+    await createNotification(
+      recipient.uid,
+      NotificationType.OWNERSHIP_TRANSFER_REQUEST,
+      "Series transfer request",
+      `${fromDisplayName} wants to transfer "${workTitle}" to you.`,
+      "/creator",
+      undefined
+    );
+  } catch (error) {
+    await logError(error, { operation: "requestOwnershipTransfer", workId, fromUid, toHandle: cleanHandle });
+    throw error;
+  }
+}
+
+export async function getPendingTransfersFor(uid: string): Promise<OwnershipTransferRequest[]> {
+  try {
+    const q = query(
+      collection(db, OWNERSHIP_TRANSFERS),
+      where("toUid", "==", uid),
+      where("status", "==", "pending")
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as OwnershipTransferRequest);
+  } catch (error) {
+    await logError(error, { operation: "getPendingTransfersFor", uid });
+    return [];
+  }
+}
+
+/** Accepting rewrites authorId/authorName/authorHandle on both creatorWorks and publishedSeries
+ * (mirroring how those two collections' author fields are denormalized everywhere else in this
+ * file) so every page reading either one immediately reflects the new owner. Declining just
+ * closes out the request — the work is untouched either way until acceptance. */
+export async function respondToOwnershipTransfer(
+  requestId: string,
+  accept: boolean
+): Promise<void> {
+  try {
+    const reqSnap = await getDoc(doc(db, OWNERSHIP_TRANSFERS, requestId));
+    if (!reqSnap.exists()) throw new Error("This request no longer exists.");
+    const request = reqSnap.data() as OwnershipTransferRequest;
+
+    await updateDoc(doc(db, OWNERSHIP_TRANSFERS, requestId), {
+      status: accept ? "accepted" : "declined",
+      respondedAt: new Date().toISOString(),
+    });
+
+    if (!accept) return;
+
+    const recipient = await getDoc(doc(db, "users", request.toUid));
+    const recipientProfile = recipient.exists() ? recipient.data() : null;
+    const authorPatch = {
+      authorId: request.toUid,
+      authorName: recipientProfile?.displayName ?? request.toHandle,
+      authorHandle: recipientProfile?.handle ?? request.toHandle,
+      authorPhotoURL: recipientProfile?.photoURL,
+    };
+
+    await updateDoc(doc(db, "creatorWorks", request.workId), {
+      creatorId: request.toUid,
+      ...authorPatch,
+    });
+    const publishedSnap = await getDoc(doc(db, PUBLISHED_SERIES, request.workId));
+    if (publishedSnap.exists()) {
+      await updateDoc(doc(db, PUBLISHED_SERIES, request.workId), authorPatch);
+    }
+
+    await createNotification(
+      request.fromUid,
+      NotificationType.OWNERSHIP_TRANSFER_ACCEPTED,
+      "Transfer accepted",
+      `@${request.toHandle} accepted ownership of "${request.workTitle}".`,
+      "/creator",
+      undefined
+    );
+  } catch (error) {
+    await logError(error, { operation: "respondToOwnershipTransfer", requestId, accept });
+    throw error;
+  }
 }

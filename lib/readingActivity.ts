@@ -138,3 +138,73 @@ export async function getFollowingActivity(uid: string, take = 8): Promise<Follo
     return [];
   }
 }
+
+/** Real-time version of getFollowingActivity — one subscribeToReadingActivity listener per
+ * followed uid (same per-contact-listener pattern MessagesClient.tsx already uses for online
+ * status), merged and re-sorted into the same shape on every update. The privacy check and
+ * profile lookups stay a one-shot fetch done once up front (who's followed and their
+ * display-name/photo/visibility settings change far less often than "are they reading right
+ * now"), so only the actual live signal — isReading/seriesId/chapterId — is the real-time part. */
+export function subscribeToFollowingActivity(
+  uid: string,
+  take: number,
+  callback: (entries: FollowingActivityEntry[]) => void
+): Unsubscribe {
+  let cancelled = false;
+  const unsubs: Unsubscribe[] = [];
+  const latest = new Map<string, FollowingActivityEntry>();
+
+  function emit() {
+    if (cancelled) return;
+    callback(
+      Array.from(latest.values())
+        .sort((a, b) => (a.lastUpdatedAt < b.lastUpdatedAt ? 1 : -1))
+        .slice(0, take)
+    );
+  }
+
+  (async () => {
+    try {
+      const me = await getUserProfile(uid);
+      const followingUids = (me?.following ?? []).slice(0, 30);
+      if (followingUids.length === 0) {
+        emit();
+        return;
+      }
+      if (cancelled) return;
+
+      const q = query(collection(db, USERS), where("uid", "in", followingUids));
+      const profilesSnap = await getDocs(q);
+      const profiles = new Map(profilesSnap.docs.map((d) => [d.id, d.data() as UserProfile]));
+      if (cancelled) return;
+
+      for (const targetUid of followingUids) {
+        const profile = profiles.get(targetUid);
+        if (!profile || !canViewReadingActivity(profile, uid)) continue;
+        unsubs.push(
+          subscribeToReadingActivity(targetUid, (activity) => {
+            if (!activity?.isReading) {
+              latest.delete(targetUid);
+            } else {
+              latest.set(targetUid, {
+                ...activity,
+                uid: targetUid,
+                displayName: profile.displayName,
+                ...(profile.photoURL ? { photoURL: profile.photoURL } : {}),
+              });
+            }
+            emit();
+          })
+        );
+      }
+    } catch (error) {
+      await logError(error, { operation: "readingActivity.subscribeToFollowingActivity", uid });
+      emit();
+    }
+  })();
+
+  return () => {
+    cancelled = true;
+    unsubs.forEach((u) => u());
+  };
+}

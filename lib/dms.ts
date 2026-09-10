@@ -2,6 +2,7 @@ import {
   addDoc,
   arrayUnion,
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -17,7 +18,16 @@ import {
 import { logError } from "./errorLogger";
 import { db } from "./firebase";
 import { getUserProfile, updateLastActive } from "./firestore";
-import type { Conversation, DMMessage, MessageReplyTo } from "@/types";
+import { createNotification } from "./notifications";
+import { NotificationType, type Conversation, type DMMessage, type MessageReplyTo } from "@/types";
+
+/** A group @mention's token is the member's display name with whitespace stripped, lowercased —
+ * there's no real @handle stored per-conversation-participant (only participantNames), so this
+ * is the practical stand-in: what the mention dropdown inserts, and what sendDM scans new group
+ * message text for to decide who gets notified. */
+function mentionToken(displayName: string): string {
+  return displayName.replace(/\s+/g, "").toLowerCase();
+}
 
 const CONVERSATIONS = "conversations";
 const TYPING = "typing";
@@ -80,7 +90,10 @@ export async function sendDM(
     const convoSnap = await getDoc(convoRef);
     if (!convoSnap.exists()) throw new Error("Conversation not found.");
     const convo = convoSnap.data() as Conversation;
-    const recipientId = convo.participants.find((id) => id !== senderId) ?? senderId;
+    // Every OTHER participant is a "recipient" here — a 1:1 has exactly one, a group has
+    // however many members besides the sender. Bumping only the first one (the original,
+    // 1:1-only implementation) silently left every other group member's unread count frozen.
+    const recipientIds = convo.participants.filter((id) => id !== senderId);
 
     await addDoc(collection(convoRef, "messages"), {
       conversationId,
@@ -90,15 +103,244 @@ export async function sendDM(
       ...(replyTo ? { replyTo } : {}),
     });
 
+    const unreadUpdates = Object.fromEntries(
+      recipientIds.map((id) => [`unreadCounts.${id}`, (convo.unreadCounts?.[id] ?? 0) + 1])
+    );
     await updateDoc(convoRef, {
       lastMessage: trimmed,
       lastMessageAt: new Date().toISOString(),
       lastSenderId: senderId,
-      [`unreadCounts.${recipientId}`]: (convo.unreadCounts?.[recipientId] ?? 0) + 1,
+      ...unreadUpdates,
     });
     await updateLastActive(senderId);
+
+    // Group @mentions — best-effort, never let a notification failure fail the send itself.
+    if (convo.type === "group") {
+      const senderName = convo.participantNames?.[senderId] ?? "Someone";
+      for (const uid of recipientIds) {
+        const name = convo.participantNames?.[uid];
+        if (!name) continue;
+        const token = mentionToken(name);
+        if (!token || !trimmed.toLowerCase().includes(`@${token}`)) continue;
+        createNotification(
+          uid,
+          NotificationType.GROUP_MENTION,
+          `${senderName} mentioned you`,
+          `in ${convo.name ?? "a group"}: ${trimmed.slice(0, 100)}`,
+          "/messages",
+          convo.participantPhotos?.[senderId]
+        ).catch(() => {});
+      }
+    }
   } catch (error) {
     await logError(error, { operation: "sendDM", conversationId, senderId });
+    throw error;
+  }
+}
+
+/** Creates a new group conversation, admin'd by its creator, and returns its id. Unlike
+ * startConversation's deterministic 1:1 id, a group gets a fresh auto-id every time — creating
+ * "the same" group twice is a deliberate, valid action (two separate groups), not a duplicate
+ * to be collapsed. */
+export async function createGroup(
+  creatorUid: string,
+  name: string,
+  photoURL: string | undefined,
+  memberUids: string[]
+): Promise<string> {
+  const trimmedName = name.trim();
+  if (!trimmedName) throw new Error("Give the group a name.");
+  try {
+    const participants = Array.from(new Set([creatorUid, ...memberUids]));
+    const profiles = await Promise.all(participants.map((uid) => getUserProfile(uid)));
+    const participantNames: Record<string, string> = {};
+    const participantPhotos: Record<string, string> = {};
+    const unreadCounts: Record<string, number> = {};
+    participants.forEach((uid, i) => {
+      participantNames[uid] = profiles[i]?.displayName ?? "Reader";
+      participantPhotos[uid] = profiles[i]?.photoURL ?? "";
+      unreadCounts[uid] = 0;
+    });
+
+    const ref = await addDoc(collection(db, CONVERSATIONS), {
+      type: "group",
+      name: trimmedName,
+      ...(photoURL ? { photoURL } : {}),
+      participants,
+      participantNames,
+      participantPhotos,
+      adminUids: [creatorUid],
+      creatorUid,
+      lastMessage: "",
+      lastMessageAt: new Date().toISOString(),
+      lastSenderId: "",
+      unreadCounts,
+      createdAt: new Date().toISOString(),
+    } satisfies Omit<Conversation, "id">);
+
+    const creatorName = participantNames[creatorUid];
+    memberUids
+      .filter((uid) => uid !== creatorUid)
+      .forEach((uid) => {
+        createNotification(
+          uid,
+          NotificationType.GROUP_ADDED,
+          "Added to a group",
+          `${creatorName} added you to "${trimmedName}".`,
+          "/messages",
+          photoURL
+        ).catch(() => {});
+      });
+
+    return ref.id;
+  } catch (error) {
+    await logError(error, { operation: "createGroup", creatorUid });
+    throw error;
+  }
+}
+
+export async function addMembersToGroup(
+  conversationId: string,
+  adminUid: string,
+  newMemberUids: string[]
+): Promise<void> {
+  try {
+    const ref = doc(db, CONVERSATIONS, conversationId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) throw new Error("Group not found.");
+    const convo = snap.data() as Conversation;
+    if (!convo.adminUids?.includes(adminUid)) throw new Error("Only a group admin can add members.");
+
+    const toAdd = newMemberUids.filter((uid) => !convo.participants.includes(uid));
+    if (toAdd.length === 0) return;
+    const profiles = await Promise.all(toAdd.map((uid) => getUserProfile(uid)));
+    const nameUpdates: Record<string, string> = {};
+    const photoUpdates: Record<string, string> = {};
+    const unreadUpdates: Record<string, number> = {};
+    toAdd.forEach((uid, i) => {
+      nameUpdates[`participantNames.${uid}`] = profiles[i]?.displayName ?? "Reader";
+      photoUpdates[`participantPhotos.${uid}`] = profiles[i]?.photoURL ?? "";
+      unreadUpdates[`unreadCounts.${uid}`] = 0;
+    });
+
+    await updateDoc(ref, {
+      participants: arrayUnion(...toAdd),
+      ...nameUpdates,
+      ...photoUpdates,
+      ...unreadUpdates,
+    });
+
+    const adminName = convo.participantNames?.[adminUid] ?? "Someone";
+    toAdd.forEach((uid) => {
+      createNotification(
+        uid,
+        NotificationType.GROUP_ADDED,
+        "Added to a group",
+        `${adminName} added you to "${convo.name ?? "a group"}".`,
+        "/messages",
+        convo.photoURL
+      ).catch(() => {});
+    });
+  } catch (error) {
+    await logError(error, { operation: "addMembersToGroup", conversationId, adminUid });
+    throw error;
+  }
+}
+
+export async function removeMemberFromGroup(
+  conversationId: string,
+  adminUid: string,
+  memberUid: string
+): Promise<void> {
+  try {
+    const ref = doc(db, CONVERSATIONS, conversationId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) throw new Error("Group not found.");
+    const convo = snap.data() as Conversation;
+    if (!convo.adminUids?.includes(adminUid)) throw new Error("Only a group admin can remove members.");
+    if (memberUid === convo.creatorUid) throw new Error("The group creator can't be removed.");
+
+    await updateDoc(ref, {
+      participants: (convo.participants ?? []).filter((uid) => uid !== memberUid),
+      adminUids: (convo.adminUids ?? []).filter((uid) => uid !== memberUid),
+    });
+  } catch (error) {
+    await logError(error, { operation: "removeMemberFromGroup", conversationId, adminUid, memberUid });
+    throw error;
+  }
+}
+
+export async function makeGroupAdmin(conversationId: string, adminUid: string, targetUid: string): Promise<void> {
+  try {
+    const ref = doc(db, CONVERSATIONS, conversationId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) throw new Error("Group not found.");
+    const convo = snap.data() as Conversation;
+    if (!convo.adminUids?.includes(adminUid)) throw new Error("Only a group admin can promote members.");
+    if (!convo.participants.includes(targetUid)) throw new Error("That person isn't in this group.");
+    await updateDoc(ref, { adminUids: arrayUnion(targetUid) });
+  } catch (error) {
+    await logError(error, { operation: "makeGroupAdmin", conversationId, adminUid, targetUid });
+    throw error;
+  }
+}
+
+export async function updateGroupInfo(
+  conversationId: string,
+  adminUid: string,
+  info: { name?: string; description?: string; photoURL?: string }
+): Promise<void> {
+  try {
+    const ref = doc(db, CONVERSATIONS, conversationId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) throw new Error("Group not found.");
+    const convo = snap.data() as Conversation;
+    if (!convo.adminUids?.includes(adminUid)) throw new Error("Only a group admin can edit group info.");
+
+    const updates: Record<string, string> = {};
+    if (info.name?.trim()) updates.name = info.name.trim();
+    if (info.description !== undefined) updates.description = info.description;
+    if (info.photoURL !== undefined) updates.photoURL = info.photoURL;
+    if (Object.keys(updates).length === 0) return;
+    await updateDoc(ref, updates);
+  } catch (error) {
+    await logError(error, { operation: "updateGroupInfo", conversationId, adminUid });
+    throw error;
+  }
+}
+
+/** A non-admin (or an admin who isn't the creator) leaves a group of their own accord. */
+export async function leaveGroup(conversationId: string, uid: string): Promise<void> {
+  try {
+    const ref = doc(db, CONVERSATIONS, conversationId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return;
+    const convo = snap.data() as Conversation;
+    await updateDoc(ref, {
+      participants: (convo.participants ?? []).filter((id) => id !== uid),
+      adminUids: (convo.adminUids ?? []).filter((id) => id !== uid),
+    });
+  } catch (error) {
+    await logError(error, { operation: "leaveGroup", conversationId, uid });
+    throw error;
+  }
+}
+
+/** The group's creator only — deletes the conversation doc outright. Its messages subcollection
+ * is left orphaned rather than recursively deleted (no batched-delete-of-a-subcollection helper
+ * exists in the client SDK without paging through every doc; harmless since nothing can read an
+ * orphaned subcollection once its parent conversation doc — and the access check that reads
+ * it — no longer exists). */
+export async function deleteGroup(conversationId: string, creatorUid: string): Promise<void> {
+  try {
+    const ref = doc(db, CONVERSATIONS, conversationId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return;
+    const convo = snap.data() as Conversation;
+    if (convo.creatorUid !== creatorUid) throw new Error("Only the group creator can delete it.");
+    await deleteDoc(ref);
+  } catch (error) {
+    await logError(error, { operation: "deleteGroup", conversationId, creatorUid });
     throw error;
   }
 }

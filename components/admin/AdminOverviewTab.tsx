@@ -26,6 +26,7 @@ import {
   type TopCreatorEntry,
   type TopSeriesEntry,
 } from "@/lib/admin";
+import { subscribeToPendingWorkCount } from "@/lib/firestore";
 import { initials, stringToColor } from "@/lib/utils";
 import { Skeleton } from "@/components/ui";
 import type { UserProfile } from "@/types";
@@ -66,6 +67,13 @@ export default function AdminOverviewTab({
   const [loading, setLoading] = useState(true);
   const [addAdminOpen, setAddAdminOpen] = useState(false);
   const [maintenanceOpen, setMaintenanceOpen] = useState(false);
+  // Overrides stats.pendingReviews once the live listener below reports in — the rest of
+  // `stats` stays a one-shot fetch (a full live-stats overview is a bigger rearchitecture than
+  // this one card needs), but this specific number is exactly the one admins watch to know
+  // whether there's new triage work waiting, so it's worth being instant.
+  const [livePendingCount, setLivePendingCount] = useState<number | null>(null);
+
+  useEffect(() => subscribeToPendingWorkCount(setLivePendingCount), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -112,7 +120,7 @@ export default function AdminOverviewTab({
         <StatCard icon={BadgeCheck} label="Platinum Users" value={stats.platinumUsers.toLocaleString()} />
         <StatCard icon={Sparkles} label="Active Creators" value={stats.activeCreators.toLocaleString()} />
         <StatCard icon={ShieldPlus} label="Publishers" value={stats.publishers.toLocaleString()} />
-        <StatCard icon={FileClock} label="Pending Reviews" value={stats.pendingReviews.toLocaleString()} />
+        <StatCard icon={FileClock} label="Pending Reviews" value={(livePendingCount ?? stats.pendingReviews).toLocaleString()} />
         <StatCard icon={ShieldAlert} label="Open Reports" value={stats.openReports.toLocaleString()} />
         <StatCard icon={Banknote} label="Revenue This Month" value={`₦${stats.revenueThisMonthNGN.toLocaleString()}`} />
         <StatCard icon={UserPlus} label="Today's Signups" value={stats.todaySignups.toLocaleString()} />

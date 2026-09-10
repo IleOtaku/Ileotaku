@@ -6,6 +6,7 @@ import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ChevronDown,
+  Coins,
   Crown,
   LayoutDashboard,
   LogOut,
@@ -92,6 +93,16 @@ export default function Navbar() {
         <NavSearch />
 
         <div className="hidden items-center gap-3 md:flex">
+          {/* Reads useAuth().profile.coins — live via subscribeToUserProfile (hooks/useAuth.ts),
+              so a purchase or spend anywhere in the app updates this without a page refresh. */}
+          {user && (
+            <Link
+              href="/pricing#coins"
+              className="flex items-center gap-1.5 rounded-full border border-muted2 bg-bg3 px-3 py-1.5 font-syne text-sm text-gold2 transition-colors hover:border-gold"
+            >
+              <Coins className="h-4 w-4" /> {(profile?.coins ?? 0).toLocaleString()}
+            </Link>
+          )}
           <NotificationBell />
           {/* Sprint 9e (13c): this was previously unconditional — found live, a genuine bug, not
               the "already hidden, just verify" the request assumed. Platinum members should see

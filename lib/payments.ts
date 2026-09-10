@@ -173,6 +173,56 @@ export async function subscribePlatinum(user: User, tier: PlatinumTier): Promise
   }
 }
 
+/** Coin price of each Platinum tier purchasable with coins — annual works out to a ~20% discount
+ * vs. 12x the monthly rate (500 × 12 = 6000; 4800 is 20% off that), same "save 20%" framing the
+ * pricing page already uses for the NGN annual plan. */
+export const PLATINUM_COIN_PRICES: Record<"monthly" | "annual", number> = {
+  monthly: 500,
+  annual: 4800,
+};
+
+/** Buys Platinum outright with coins instead of a Paystack charge — no payment gateway involved,
+ * so this is just a balance check + deduct + activate, mirroring subscribePlatinum's activation
+ * logic (isPlatinum/platinumTier/platinumUntil, an achievements check, a logged transaction) but
+ * skipping straight to it since there's no external reference to wait on first. */
+export async function purchasePlatinumWithCoins(
+  uid: string,
+  tier: "monthly" | "annual"
+): Promise<PaymentResult> {
+  const price = PLATINUM_COIN_PRICES[tier];
+  const profile = await getUserProfile(uid);
+  if (!profile) return { success: false, message: "Couldn't load your account. Please try again." };
+  const balance = profile.coins ?? 0;
+  if (balance < price) {
+    return { success: false, message: `You need ${(price - balance).toLocaleString()} more coins for this.` };
+  }
+
+  const newBalance = balance - price;
+  const platinumUntil = new Date();
+  platinumUntil.setDate(platinumUntil.getDate() + (tier === "annual" ? 365 : 30));
+
+  try {
+    await updateUserPrefs(uid, {
+      coins: newBalance,
+      isPlatinum: true,
+      platinumTier: tier,
+      platinumUntil: platinumUntil.toISOString(),
+    });
+    await addTransaction(uid, {
+      type: "spend",
+      amount: -price,
+      balanceAfter: newBalance,
+      description: `Platinum (${tier === "annual" ? "Annual" : "Monthly"}) — paid with coins`,
+      category: "platinum",
+    });
+    await checkAndAwardAchievements(uid, { ...profile, coins: newBalance, isPlatinum: true });
+    return { success: true };
+  } catch (error) {
+    await logError(error, { operation: "purchasePlatinumWithCoins", uid, tier });
+    return { success: false, message: "Couldn't activate Platinum. Please try again." };
+  }
+}
+
 /* ---------------------------- Tipping ---------------------------- */
 
 /** Deducts `coins` from the sender and credits 65% of it to the creator, logging both sides. */

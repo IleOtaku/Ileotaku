@@ -47,6 +47,24 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
   return snap.exists() ? (snap.data() as UserProfile) : null;
 }
 
+/** Real-time version of getUserProfile — used for the SIGNED-IN user's own profile (see
+ * hooks/useAuth.ts's initAuthListener) so every value on it (coin balance, isPlatinum, follower
+ * counts, ...) updates live everywhere the app reads `useAuth().profile`, instead of only
+ * refreshing on the specific actions that happened to call `useAuth.getState().setProfile(...)`
+ * manually. Not used for reading OTHER users' profiles — those stay one-shot getUserProfile
+ * calls, since subscribing to every profile a page happens to render would be a lot of
+ * simultaneous listeners for no real benefit over a fresh read. */
+export function subscribeToUserProfile(
+  uid: string,
+  callback: (profile: UserProfile | null) => void
+): Unsubscribe {
+  return onSnapshot(
+    doc(db, USERS, uid),
+    (snap) => callback(snap.exists() ? (snap.data() as UserProfile) : null),
+    () => callback(null)
+  );
+}
+
 /** Derives handleLower/displayNameLower from whichever of handle/displayName is present in this
  * write, so every path that can change either one (account creation, editing your profile) keeps
  * the lowercase search fields in sync rather than only setting them once at signup. */
@@ -432,6 +450,21 @@ export async function getCreatorWorks(creatorId: string): Promise<CreatorWork[]>
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as CreatorWork);
 }
 
+/** Real-time version of getCreatorWorks — the creator dashboard's Works/Earnings tabs use this
+ * instead of a one-shot fetch so a work's `earnings` (bumped whenever a reader unlocks one of
+ * its chapters) and `views` update live, without the creator needing to refresh to see them. */
+export function subscribeToCreatorWorks(
+  creatorId: string,
+  callback: (works: CreatorWork[]) => void
+): Unsubscribe {
+  const q = query(collection(db, CREATOR_WORKS), where("creatorId", "==", creatorId));
+  return onSnapshot(
+    q,
+    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as CreatorWork)),
+    () => callback([])
+  );
+}
+
 export async function submitWork(
   work: Omit<CreatorWork, "id" | "createdAt" | "updatedAt">
 ): Promise<string> {
@@ -468,6 +501,13 @@ export async function getAllPendingWorks(): Promise<CreatorWork[]> {
   const q = query(collection(db, CREATOR_WORKS), where("status", "==", "pending"));
   const snap = await getDocs(q);
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as CreatorWork);
+}
+
+/** Real-time pending-review count — powers the Admin Overview tab's "Pending Reviews" card so
+ * it updates the instant a work is submitted or triaged, without needing a manual refresh. */
+export function subscribeToPendingWorkCount(callback: (count: number) => void): Unsubscribe {
+  const q = query(collection(db, CREATOR_WORKS), where("status", "==", "pending"));
+  return onSnapshot(q, (snap) => callback(snap.size), () => callback(0));
 }
 
 /* ---------------------------- Comments ---------------------------- */

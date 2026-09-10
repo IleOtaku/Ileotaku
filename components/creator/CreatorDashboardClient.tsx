@@ -15,14 +15,19 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
-import { getCreatorWorks, getUserProfile, updateUserPrefs } from "@/lib/firestore";
+import { getCreatorWorks, getUserProfile, subscribeToCreatorWorks, updateUserPrefs } from "@/lib/firestore";
 import CreatorFeedTab from "@/components/creator/CreatorFeedTab";
 import WorkCard from "@/components/creator/WorkCard";
 import UploadModal from "@/components/creator/UploadModal";
 import AddChapterModal from "@/components/creator/AddChapterModal";
+import ChapterDraftsModal from "@/components/creator/ChapterDraftsModal";
+import DeleteWorkModal from "@/components/creator/DeleteWorkModal";
+import EditSeriesModal from "@/components/creator/EditSeriesModal";
+import TransferOwnershipModal from "@/components/creator/TransferOwnershipModal";
 import EarningsChart from "@/components/creator/EarningsChart";
 import { EmptyState, SectionEyebrow, Skeleton, Tabs } from "@/components/ui";
-import type { CreatorWork } from "@/types";
+import { getPendingTransfersFor, respondToOwnershipTransfer } from "@/lib/publishedSeries";
+import type { CreatorWork, OwnershipTransferRequest } from "@/types";
 
 const FEATURE_CHIPS = [
   {
@@ -91,6 +96,11 @@ export default function CreatorDashboardClient() {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [chapterWorkId, setChapterWorkId] = useState<string | null>(null);
   const [tab, setTab] = useState<TabValue>("works");
+  const [editingWork, setEditingWork] = useState<CreatorWork | null>(null);
+  const [deletingWork, setDeletingWork] = useState<CreatorWork | null>(null);
+  const [draftsWorkId, setDraftsWorkId] = useState<string | null>(null);
+  const [transferringWork, setTransferringWork] = useState<CreatorWork | null>(null);
+  const [pendingTransfers, setPendingTransfers] = useState<OwnershipTransferRequest[]>([]);
 
   const isCreator = profile?.isCreator === true;
 
@@ -112,6 +122,37 @@ export default function CreatorDashboardClient() {
       refreshWorks();
     }
   }, [isCreator, refreshWorks]);
+
+  // Real-time on top of the initial fetch above — a work's `earnings` (bumped whenever a reader
+  // unlocks one of its chapters) and `views` now update live instead of only refreshing on the
+  // specific actions (upload, add chapter) that happen to call refreshWorks() themselves.
+  useEffect(() => {
+    if (!user || !isCreator) return;
+    return subscribeToCreatorWorks(user.uid, setWorks);
+  }, [user, isCreator]);
+
+  const refreshPendingTransfers = useCallback(async () => {
+    if (!user) return;
+    try {
+      setPendingTransfers(await getPendingTransfersFor(user.uid));
+    } catch {
+      setPendingTransfers([]);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (isCreator) refreshPendingTransfers();
+  }, [isCreator, refreshPendingTransfers]);
+
+  async function handleTransferResponse(requestId: string, accept: boolean) {
+    try {
+      await respondToOwnershipTransfer(requestId, accept);
+      toast.success(accept ? "Series transferred to you!" : "Request declined.");
+      setPendingTransfers((prev) => prev.filter((r) => r.id !== requestId));
+    } catch {
+      toast.error("Couldn't process this request.");
+    }
+  }
 
   async function handleActivate() {
     if (!user) return;
@@ -231,6 +272,38 @@ export default function CreatorDashboardClient() {
             <StatCard icon={Wallet} label="Total Earned" value={`$${totalEarned.toFixed(2)}`} />
           </section>
 
+          {pendingTransfers.length > 0 && (
+            <section className="mt-8 flex flex-col gap-3">
+              {pendingTransfers.map((req) => (
+                <div
+                  key={req.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-gold/40 bg-gold/10 p-4"
+                >
+                  <p className="font-noto text-sm text-text">
+                    <span className="font-semibold">{req.fromDisplayName}</span> wants to transfer{" "}
+                    <span className="font-semibold text-gold">{req.workTitle}</span> to you.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleTransferResponse(req.id, false)}
+                      className="btn-ghost text-xs"
+                    >
+                      Decline
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleTransferResponse(req.id, true)}
+                      className="btn-primary text-xs"
+                    >
+                      Accept
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </section>
+          )}
+
           <section className="mt-10">
             <Tabs
               tabs={[
@@ -275,6 +348,10 @@ export default function CreatorDashboardClient() {
                         key={work.id}
                         work={work}
                         onAddChapter={() => setChapterWorkId(work.id)}
+                        onEditSeries={() => setEditingWork(work)}
+                        onDeleteWork={() => setDeletingWork(work)}
+                        onViewDrafts={() => setDraftsWorkId(work.id)}
+                        onTransferOwnership={() => setTransferringWork(work)}
                       />
                     ))}
                   </div>
@@ -361,6 +438,37 @@ export default function CreatorDashboardClient() {
           onAdded={refreshWorks}
         />
       )}
+
+      <EditSeriesModal
+        open={editingWork !== null}
+        onClose={() => setEditingWork(null)}
+        work={editingWork}
+        // No manual state patch needed — works is a live subscribeToCreatorWorks() listener
+        // (see the effect above), so the edit reflects here the moment Firestore confirms it.
+        onSaved={() => {}}
+      />
+
+      <DeleteWorkModal
+        open={deletingWork !== null}
+        onClose={() => setDeletingWork(null)}
+        work={deletingWork}
+        onDeleted={() => {}}
+      />
+
+      <ChapterDraftsModal
+        open={draftsWorkId !== null}
+        onClose={() => setDraftsWorkId(null)}
+        workId={draftsWorkId}
+        onPublished={refreshWorks}
+      />
+
+      <TransferOwnershipModal
+        open={transferringWork !== null}
+        onClose={() => setTransferringWork(null)}
+        work={transferringWork}
+        fromUid={user.uid}
+        fromDisplayName={profile?.displayName ?? user.displayName ?? "A creator"}
+      />
     </div>
   );
 }

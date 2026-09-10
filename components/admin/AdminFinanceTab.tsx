@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
-import { Download, Loader2 } from "lucide-react";
+import { Download, Loader2, Search } from "lucide-react";
 import {
   getFinanceSummary,
   getPendingPayouts,
@@ -30,6 +30,22 @@ function BreakdownBar({ label, amount, max, colorClass }: { label: string; amoun
   );
 }
 
+/** Wraps the substring of `text` matching `query` (case-insensitive) in a highlight span — used
+ * by the transaction log search below. Renders the plain text unchanged when there's no match
+ * or no active query, rather than always wrapping in an empty/no-op <mark>. */
+function Highlight({ text, query }: { text: string; query: string }) {
+  if (!query.trim()) return <>{text}</>;
+  const idx = text.toLowerCase().indexOf(query.trim().toLowerCase());
+  if (idx === -1) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="rounded bg-gold/30 text-inherit">{text.slice(idx, idx + query.trim().length)}</mark>
+      {text.slice(idx + query.trim().length)}
+    </>
+  );
+}
+
 /** Full finance console: revenue summary, coin/Platinum/ad breakdown, pending creator payouts,
  * a 50-row transaction log, and a CSV export of that log. Shared by the Super Admin, Sub-Admin
  * and Accountant dashboards — Accountant renders this as its entire console. */
@@ -39,6 +55,21 @@ export default function AdminFinanceTab() {
   const [transactions, setTransactions] = useState<TransactionLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [payingId, setPayingId] = useState<string | null>(null);
+  const [txSearchInput, setTxSearchInput] = useState("");
+  const [txSearch, setTxSearch] = useState("");
+
+  // Debounced 300ms, per spec — the search box updates instantly but the actual filter (and
+  // its highlight) lags slightly behind so fast typing doesn't refilter on every keystroke.
+  useEffect(() => {
+    const timer = setTimeout(() => setTxSearch(txSearchInput), 300);
+    return () => clearTimeout(timer);
+  }, [txSearchInput]);
+
+  const filteredTransactions = useMemo(() => {
+    const q = txSearch.trim().toLowerCase();
+    if (!q) return transactions;
+    return transactions.filter((t) => t.id.toLowerCase().includes(q) || (t.paystackRef ?? "").toLowerCase().includes(q));
+  }, [transactions, txSearch]);
 
   useEffect(() => {
     Promise.all([getFinanceSummary(), getPendingPayouts(), getRecentTransactions(50)])
@@ -163,14 +194,25 @@ export default function AdminFinanceTab() {
             <Download className="h-3.5 w-3.5" /> Export CSV
           </button>
         </div>
+        <div className="relative mb-4 max-w-sm">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+          <input
+            value={txSearchInput}
+            onChange={(e) => setTxSearchInput(e.target.value)}
+            placeholder="Search by transaction ID or reference..."
+            className="input-base w-full pl-9 text-sm"
+          />
+        </div>
         {transactions.length === 0 ? (
           <p className="font-noto text-sm text-muted">No transactions recorded yet.</p>
+        ) : filteredTransactions.length === 0 ? (
+          <p className="font-noto text-sm text-muted">No transactions match &ldquo;{txSearch}&rdquo;.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] border-collapse text-left">
               <thead>
                 <tr className="border-b border-bg4">
-                  {["Date", "Type", "Amount (NGN)", "User", "Reference"].map((h) => (
+                  {["Date", "Type", "Amount (NGN)", "User", "ID", "Reference"].map((h) => (
                     <th key={h} className="p-2.5 font-syne text-[11px] font-semibold uppercase tracking-wide text-muted">
                       {h}
                     </th>
@@ -178,7 +220,7 @@ export default function AdminFinanceTab() {
                 </tr>
               </thead>
               <tbody>
-                {transactions.map((t) => (
+                {filteredTransactions.map((t) => (
                   <tr key={t.id} className="border-b border-bg4 last:border-0">
                     <td className="whitespace-nowrap p-2.5 font-noto text-xs text-muted">
                       {new Date(t.createdAt).toLocaleDateString()}
@@ -188,7 +230,12 @@ export default function AdminFinanceTab() {
                       {t.amountNGN ? `₦${t.amountNGN.toLocaleString()}` : "—"}
                     </td>
                     <td className="max-w-[180px] truncate p-2.5 font-noto text-xs text-muted">{t.userEmail ?? "—"}</td>
-                    <td className="max-w-[160px] truncate p-2.5 font-noto text-[11px] text-muted">{t.paystackRef ?? "—"}</td>
+                    <td className="max-w-[140px] truncate p-2.5 font-noto text-[11px] text-muted">
+                      <Highlight text={t.id} query={txSearch} />
+                    </td>
+                    <td className="max-w-[160px] truncate p-2.5 font-noto text-[11px] text-muted">
+                      {t.paystackRef ? <Highlight text={t.paystackRef} query={txSearch} /> : "—"}
+                    </td>
                   </tr>
                 ))}
               </tbody>

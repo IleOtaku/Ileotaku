@@ -10,6 +10,7 @@ import {
   addDoc,
   collection,
   collectionGroup,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -166,25 +167,91 @@ export async function removeAdminRole(uid: string): Promise<void> {
   await updateUser(uid, { isAdmin: false, adminType: undefined });
 }
 
+/** Temporarily suspends an account and notifies the user of the exact date it lifts. */
 export async function suspendUserFor(uid: string, days: number): Promise<void> {
   const until = new Date();
   until.setDate(until.getDate() + days);
   await updateUser(uid, { suspendedUntil: until.toISOString() });
+  await createNotification(
+    uid,
+    NotificationType.MODERATION_ACTION,
+    "Account suspended",
+    `Your account has been suspended until ${until.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}.`,
+    "/profile"
+  );
 }
 
 /** Permanently bans an account and logs the email to a small audit trail (`bannedEmails`) so
  * the address stays on record even if the profile document is later modified or removed. */
-export async function permanentlyBanUser(uid: string, email: string, bannedBy: string): Promise<void> {
+export async function permanentlyBanUser(
+  uid: string,
+  email: string,
+  bannedBy: string,
+  reason?: string
+): Promise<void> {
   try {
-    await updateUser(uid, { isBanned: true });
+    const bannedAt = new Date().toISOString();
+    await updateUser(uid, { isBanned: true, bannedAt, ...(reason ? { bannedReason: reason } : {}) });
     await setDoc(doc(db, "bannedEmails", uid), {
       uid,
       email,
       bannedBy,
-      bannedAt: new Date().toISOString(),
+      bannedAt,
+      ...(reason ? { reason } : {}),
     });
   } catch (error) {
     await logError(error, { operation: "permanentlyBanUser", uid });
+    throw error;
+  }
+}
+
+/**
+ * Erases an account's Firestore data — mirrors lib/auth.ts's deleteMyAccount pipeline (every
+ * subcollection, their creatorFeed posts, then the profile doc itself) but for an admin acting
+ * on SOMEONE ELSE's account.
+ *
+ * IMPORTANT LIMITATION: this does NOT delete the person's Firebase Auth account. Firebase's
+ * client SDK can only ever call deleteUser() on whichever account is CURRENTLY signed into this
+ * browser session — there's no client-side way to delete a different uid's Auth record; that
+ * requires the Admin SDK running server-side (a Cloud Function), which this project doesn't
+ * have (see lib/firebase.ts's comment on the Firebase plan having no Storage bucket either — no
+ * Blaze/billing account is attached). Practically: the account's data and access to anything
+ * that reads a profile doc are gone, but the bare email/password credential still exists and
+ * can sign in again — landing on a freshly-recreated blank profile per lib/auth.ts's
+ * signInEmail/signInSocial backfill behavior, same as any first-time signup. Surfaced in the
+ * admin UI's confirmation copy rather than silently promising a full account deletion this
+ * client-only setup can't actually deliver.
+ */
+export async function adminDeleteUserData(uid: string): Promise<void> {
+  const USER_SUBCOLLECTIONS = [
+    "notifications",
+    "history",
+    "transactions",
+    "unlocked",
+    "blocked",
+    "readingActivity",
+  ];
+  try {
+    await Promise.all(
+      USER_SUBCOLLECTIONS.map(async (name) => {
+        const snap = await getDocs(collection(db, USERS, uid, name));
+        if (snap.empty) return;
+        const batch = writeBatch(db);
+        snap.docs.forEach((d) => batch.delete(d.ref));
+        await batch.commit();
+      })
+    );
+
+    const postsSnap = await getDocs(query(collection(db, "creatorFeed"), where("uid", "==", uid)));
+    if (!postsSnap.empty) {
+      const batch = writeBatch(db);
+      postsSnap.docs.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+    }
+
+    await deleteDoc(doc(db, USERS, uid));
+  } catch (error) {
+    await logError(error, { operation: "adminDeleteUserData", uid });
     throw error;
   }
 }

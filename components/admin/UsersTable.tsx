@@ -8,11 +8,13 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ExternalLink,
   Loader2,
   Search,
   ShieldCheck,
 } from "lucide-react";
 import {
+  adminDeleteUserData,
   grantPlatinum,
   makeCreator,
   makePublisher,
@@ -23,10 +25,18 @@ import {
   verifyCreator,
   verifyPublisher,
 } from "@/lib/admin";
-import { Skeleton } from "@/components/ui";
+import { Modal, Skeleton } from "@/components/ui";
 import { Avatar } from "@/components/ui/Avatar";
+import { getUserProfileUrl } from "@/lib/utils";
 import type { UserProfile } from "@/types";
 import AddAdminRoleModal from "./AddAdminRoleModal";
+
+const BAN_DURATIONS = [
+  { label: "1 day", days: 1 },
+  { label: "3 days", days: 3 },
+  { label: "7 days", days: 7 },
+  { label: "30 days", days: 30 },
+];
 
 export interface UsersTableProps {
   users: UserProfile[];
@@ -48,7 +58,8 @@ type PendingAction =
   | "verify-publisher"
   | "suspend"
   | "ban"
-  | "remove-admin";
+  | "remove-admin"
+  | "delete-account";
 
 function RoleBadges({ user }: { user: UserProfile }) {
   return (
@@ -90,6 +101,10 @@ export default function UsersTable({ users, loading, canManageAdmins = true, onU
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const [pending, setPending] = useState<{ uid: string; action: PendingAction } | null>(null);
   const [adminModalUser, setAdminModalUser] = useState<UserProfile | null>(null);
+  const [tempBanUser, setTempBanUser] = useState<UserProfile | null>(null);
+  const [permBanUser, setPermBanUser] = useState<UserProfile | null>(null);
+  const [banReason, setBanReason] = useState("");
+  const [deleteUserTarget, setDeleteUserTarget] = useState<UserProfile | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   // The dropdown is rendered via a portal to <body> (see UserActionsMenu below) so it's never
@@ -145,6 +160,43 @@ export default function UsersTable({ users, loading, canManageAdmins = true, onU
     }
   }
 
+  async function handleConfirmTempBan(days: number) {
+    if (!tempBanUser) return;
+    const until = new Date();
+    until.setDate(until.getDate() + days);
+    await runAction(tempBanUser, "suspend", () => suspendUserFor(tempBanUser.uid, days), {
+      suspendedUntil: until.toISOString(),
+    });
+    setTempBanUser(null);
+  }
+
+  async function handleConfirmPermBan() {
+    if (!permBanUser) return;
+    await runAction(
+      permBanUser,
+      "ban",
+      () => permanentlyBanUser(permBanUser.uid, permBanUser.email, "admin", banReason.trim() || undefined),
+      { isBanned: true }
+    );
+    setPermBanUser(null);
+    setBanReason("");
+  }
+
+  async function handleConfirmDelete() {
+    if (!deleteUserTarget) return;
+    setPending({ uid: deleteUserTarget.uid, action: "delete-account" });
+    try {
+      await adminDeleteUserData(deleteUserTarget.uid);
+      onUserUpdated(deleteUserTarget.uid, { displayName: "[Deleted Account]" });
+      toast.success("Account data deleted.");
+      setDeleteUserTarget(null);
+    } catch {
+      toast.error("That account's data couldn't be fully deleted.");
+    } finally {
+      setPending(null);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex flex-col gap-2">
@@ -186,7 +238,7 @@ export default function UsersTable({ users, loading, canManageAdmins = true, onU
               const rowTint = u.isBanned
                 ? "bg-red-950/40"
                 : u.suspendedUntil && new Date(u.suspendedUntil) > new Date()
-                  ? "bg-red-950/15"
+                  ? "bg-yellow-900/20"
                   : "";
               const isBusy = pending?.uid === u.uid;
 
@@ -279,6 +331,17 @@ export default function UsersTable({ users, loading, canManageAdmins = true, onU
                 className="glass fixed z-50 w-56 overflow-hidden rounded-xl p-1.5 text-left"
                 style={{ top: menuPos.top, left: Math.max(8, menuPos.left) }}
               >
+                <MenuItem
+                  onClick={() => {
+                    window.open(getUserProfileUrl(u), "_blank", "noopener,noreferrer");
+                    setOpenMenuUid(null);
+                  }}
+                >
+                  <span className="flex items-center gap-2">
+                    <ExternalLink className="h-3.5 w-3.5" /> View Profile
+                  </span>
+                </MenuItem>
+                <div className="my-1 border-t border-bg4" />
                 {u.isPlatinum ? (
                   <MenuItem onClick={() => runAction(u, "revoke-platinum", () => revokePlatinum(u.uid), { isPlatinum: false })}>
                     Revoke Platinum
@@ -354,19 +417,36 @@ export default function UsersTable({ users, loading, canManageAdmins = true, onU
                 <div className="my-1 border-t border-bg4" />
                 <MenuItem
                   danger
-                  onClick={() =>
-                    runAction(u, "suspend", () => suspendUserFor(u.uid, 7), {
-                      suspendedUntil: new Date(Date.now() + 7 * 86400000).toISOString(),
-                    })
-                  }
+                  onClick={() => {
+                    setTempBanUser(u);
+                    setOpenMenuUid(null);
+                  }}
                 >
-                  Suspend 7 days
+                  Temporary Ban
                 </MenuItem>
                 <MenuItem
                   danger
-                  onClick={() => runAction(u, "ban", () => permanentlyBanUser(u.uid, u.email, "admin"), { isBanned: true })}
+                  disabled={!canManageAdmins}
+                  title={!canManageAdmins ? "Super Admin only" : undefined}
+                  onClick={() => {
+                    if (!canManageAdmins) return;
+                    setPermBanUser(u);
+                    setOpenMenuUid(null);
+                  }}
                 >
-                  Permanent Ban
+                  Permanent Ban{!canManageAdmins && " (Super Admin only)"}
+                </MenuItem>
+                <MenuItem
+                  danger
+                  disabled={!canManageAdmins}
+                  title={!canManageAdmins ? "Super Admin only" : undefined}
+                  onClick={() => {
+                    if (!canManageAdmins) return;
+                    setDeleteUserTarget(u);
+                    setOpenMenuUid(null);
+                  }}
+                >
+                  Delete Account{!canManageAdmins && " (Super Admin only)"}
                 </MenuItem>
               </div>
             );
@@ -380,6 +460,86 @@ export default function UsersTable({ users, loading, canManageAdmins = true, onU
         user={adminModalUser}
         onDone={(uid, adminType) => onUserUpdated(uid, { isAdmin: true, adminType })}
       />
+
+      <Modal open={tempBanUser !== null} onClose={() => setTempBanUser(null)} title="Temporary Ban">
+        <p className="mb-4 font-noto text-sm text-muted">
+          Suspend <span className="font-semibold text-text">{tempBanUser?.displayName}</span> for:
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          {BAN_DURATIONS.map((d) => (
+            <button
+              key={d.days}
+              type="button"
+              onClick={() => handleConfirmTempBan(d.days)}
+              disabled={pending !== null}
+              className="btn-ghost justify-center disabled:opacity-50"
+            >
+              {d.label}
+            </button>
+          ))}
+        </div>
+      </Modal>
+
+      <Modal
+        open={permBanUser !== null}
+        onClose={() => {
+          setPermBanUser(null);
+          setBanReason("");
+        }}
+        title="Permanent Ban"
+      >
+        <p className="mb-3 font-noto text-sm text-muted">
+          <span className="font-semibold text-text">{permBanUser?.displayName}</span> will not be able to sign in
+          again. This can be reversed later by an admin, but treat it as a serious action.
+        </p>
+        <textarea
+          value={banReason}
+          onChange={(e) => setBanReason(e.target.value)}
+          placeholder="Reason (optional, kept in the audit log)..."
+          rows={3}
+          className="input-base w-full resize-none"
+        />
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" onClick={() => setPermBanUser(null)} className="btn-ghost">
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleConfirmPermBan}
+            disabled={pending !== null}
+            className="rounded-lg bg-red-900 px-4 py-2 font-syne text-sm font-semibold text-red-100 hover:bg-red-800 disabled:opacity-50"
+          >
+            {pending?.action === "ban" ? <Loader2 className="h-4 w-4 animate-spin" /> : "Confirm Permanent Ban"}
+          </button>
+        </div>
+      </Modal>
+
+      <Modal open={deleteUserTarget !== null} onClose={() => setDeleteUserTarget(null)} title="Delete Account">
+        <p className="mb-3 font-noto text-sm text-muted">
+          This permanently deletes{" "}
+          <span className="font-semibold text-text">{deleteUserTarget?.displayName}</span>&apos;s profile, posts,
+          history, and other Firestore data. This cannot be undone.
+        </p>
+        <p className="mb-4 rounded-lg border border-yellow-900/40 bg-yellow-950/20 p-3 font-noto text-xs text-yellow-200">
+          Note: this only erases their app data — it does not revoke their login credentials
+          (a client-only limitation of this Firebase setup, no server-side Admin SDK is
+          available). Combine with a Permanent Ban if they must also be locked out from signing
+          back in.
+        </p>
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={() => setDeleteUserTarget(null)} className="btn-ghost">
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleConfirmDelete}
+            disabled={pending !== null}
+            className="rounded-lg bg-red-900 px-4 py-2 font-syne text-sm font-semibold text-red-100 hover:bg-red-800 disabled:opacity-50"
+          >
+            {pending?.action === "delete-account" ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete Account Data"}
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -388,16 +548,22 @@ function MenuItem({
   children,
   onClick,
   danger,
+  disabled,
+  title,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   danger?: boolean;
+  disabled?: boolean;
+  title?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`block w-full rounded-lg px-3 py-2 text-left font-noto text-xs hover:bg-bg4 ${
+      disabled={disabled}
+      title={title}
+      className={`block w-full rounded-lg px-3 py-2 text-left font-noto text-xs hover:bg-bg4 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${
         danger ? "text-clay2" : "text-text"
       }`}
     >

@@ -299,6 +299,32 @@ export function ChatTab({ mangaId, mangaTitle }: { mangaId: string | null; manga
     }
   }
 
+  function startEdit(m: ChatMessage) {
+    setEditingId(m.id);
+    setEditDraft(m.text);
+    setMenuForId(null);
+  }
+
+  async function saveEdit(messageId: string) {
+    if (!mangaId || !editDraft.trim()) return;
+    try {
+      await editChatMessage(mangaId, messageId, editDraft);
+      setEditingId(null);
+    } catch {
+      toast.error("Couldn't save your edit.");
+    }
+  }
+
+  async function handleDelete(messageId: string) {
+    if (!mangaId) return;
+    setMenuForId(null);
+    try {
+      await deleteChatMessage(mangaId, messageId);
+    } catch {
+      toast.error("Couldn't delete that message.");
+    }
+  }
+
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-bg4 px-4 py-2">
@@ -314,23 +340,84 @@ export function ChatTab({ mangaId, mangaTitle }: { mangaId: string | null; manga
           </p>
         ) : (
           <div className="flex flex-col gap-3">
-            {messages.map((m) => (
-              <div key={m.id} className="flex gap-2">
-                <Avatar uid={m.senderId} photoURL={m.senderPhotoURL} displayName={m.senderName} size={28} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="truncate font-syne text-xs font-semibold text-text">
-                      {m.senderName}
-                    </span>
-                    {m.senderIsPlatinum && <span className="text-plat">✦</span>}
-                    <span className="font-noto text-[10px] text-muted">
-                      {formatTime(m.createdAt)}
-                    </span>
+            {messages.map((m) => {
+              const isOwn = user?.uid === m.senderId;
+              return (
+                <div key={m.id} className="group flex gap-2">
+                  <Avatar uid={m.senderId} photoURL={m.senderPhotoURL} displayName={m.senderName} size={28} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate font-syne text-xs font-semibold text-text">
+                        {m.senderName}
+                      </span>
+                      {m.senderIsPlatinum && <span className="text-plat">✦</span>}
+                      <span className="font-noto text-[10px] text-muted">
+                        {formatTime(m.createdAt)}
+                      </span>
+                      {m.isEdited && !m.isDeleted && (
+                        <span className="font-noto text-[10px] text-muted">(edited)</span>
+                      )}
+                      {isOwn && !m.isDeleted && (
+                        <div className="relative ml-auto opacity-0 group-hover:opacity-100">
+                          <button
+                            type="button"
+                            onClick={() => setMenuForId(menuForId === m.id ? null : m.id)}
+                            aria-label="Message options"
+                            className="text-muted hover:text-text"
+                          >
+                            <Ellipsis className="h-3.5 w-3.5" />
+                          </button>
+                          {menuForId === m.id && (
+                            <>
+                              <div className="fixed inset-0 z-40" onClick={() => setMenuForId(null)} />
+                              <div className="glass absolute right-0 z-50 mt-1 w-32 overflow-hidden rounded-lg p-1">
+                                <button
+                                  type="button"
+                                  onClick={() => startEdit(m)}
+                                  className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs text-text hover:bg-bg4"
+                                >
+                                  <Pencil className="h-3 w-3" /> Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDelete(m.id)}
+                                  className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs text-clay2 hover:bg-bg4"
+                                >
+                                  <Trash2 className="h-3 w-3" /> Delete
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    {m.isDeleted ? (
+                      <p className="break-words font-noto text-xs italic text-muted">{m.text}</p>
+                    ) : editingId === m.id ? (
+                      <div className="mt-1 flex flex-col gap-1.5">
+                        <textarea
+                          autoFocus
+                          value={editDraft}
+                          onChange={(e) => setEditDraft(e.target.value)}
+                          rows={2}
+                          className="w-full resize-none rounded-lg border border-muted2 bg-bg3 p-1.5 text-xs text-text outline-none"
+                        />
+                        <div className="flex gap-2 text-[10px]">
+                          <button type="button" onClick={() => saveEdit(m.id)} className="font-semibold text-gold">
+                            Save
+                          </button>
+                          <button type="button" onClick={() => setEditingId(null)} className="text-muted">
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="break-words font-noto text-xs text-text/90">{m.text}</p>
+                    )}
                   </div>
-                  <p className="break-words font-noto text-xs text-text/90">{m.text}</p>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             <div ref={bottomRef} />
           </div>
         )}

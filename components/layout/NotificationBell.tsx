@@ -27,6 +27,10 @@ const TYPE_EMOJI: Record<NotificationType, string> = {
   [NotificationType.EARNINGS_MILESTONE]: "💰",
   [NotificationType.BADGE_APPROVED]: "🏅",
   [NotificationType.MODERATION_ACTION]: "🚫",
+  [NotificationType.GROUP_ADDED]: "👥",
+  [NotificationType.GROUP_MENTION]: "📣",
+  [NotificationType.OWNERSHIP_TRANSFER_REQUEST]: "🔄",
+  [NotificationType.OWNERSHIP_TRANSFER_ACCEPTED]: "✅",
 };
 
 type GroupLabel = "Today" | "This Week" | "Earlier";

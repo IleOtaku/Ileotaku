@@ -77,8 +77,11 @@ service cloud.firestore {
       // necessarily the notification's own owner), so create is open to any signed-in user;
       // only the owner can read, mark-read, or delete their own notifications.
       match /notifications/{notifId} {
-        allow read, update, delete: if isOwner(uid);
+        allow read, update: if isOwner(uid);
         allow create: if isSignedIn();
+        // Owner clears their own notifications one at a time; admin delete is here only for
+        // adminDeleteUserData's (lib/admin.ts) bulk cleanup of a MODERATED account's data.
+        allow delete: if isOwner(uid) || isAdmin();
       }
 
       // Reading history is written only by the account itself, but read more broadly: the
@@ -99,9 +102,11 @@ service cloud.firestore {
         allow update, delete: if isAdmin();
       }
 
-      // Coin-unlocked chapters — private to the account that unlocked them.
+      // Coin-unlocked chapters — private to the account that unlocked them. Admin write is here
+      // only for adminDeleteUserData's bulk cleanup of a moderated account's data.
       match /unlocked/{chapterId} {
-        allow read, write: if isOwner(uid);
+        allow read: if isOwner(uid);
+        allow write: if isOwner(uid) || isAdmin();
       }
 
       // Feed post drafts (Sprint 9b) — never readable by anyone but their own author, unlike
@@ -133,17 +138,20 @@ service cloud.firestore {
       // permit no matter whose side initiates it. The trade-off is a narrow, low-sensitivity
       // leak (anyone who already knows both uids can confirm a specific block exists) in
       // exchange for the profile-visit / DM / comment gates actually being able to function.
+      // Admin write is here only for adminDeleteUserData's (lib/admin.ts) bulk cleanup of a
+      // moderated account's data — everyday reads/writes are still owner-only.
       match /blocked/{targetUid} {
         allow read: if isSignedIn();
-        allow write: if isOwner(uid);
+        allow write: if isOwner(uid) || isAdmin();
       }
 
       // Sprint 9e: "currently reading" live status — same read-broadly/write-only-self shape
       // as nowPlaying, for the same reason (profile pages and Friend Activity need to read
-      // OTHER users' activity, but only the account itself ever updates its own).
+      // OTHER users' activity, but only the account itself ever updates its own). Admin write is
+      // here only for adminDeleteUserData's bulk cleanup of a moderated account's data.
       match /readingActivity/{docId} {
         allow read: if isSignedIn();
-        allow write: if isOwner(uid);
+        allow write: if isOwner(uid) || isAdmin();
       }
     }
 
@@ -226,9 +234,22 @@ service cloud.firestore {
     match /creatorWorks/{workId} {
       allow read: if true;
       allow create: if isSignedIn() && request.resource.data.creatorId == request.auth.uid;
+      // The current owner may change anything on their own work (Part 12's edit-series-details,
+      // add/delete chapter counters, etc). A DIFFERENT signed-in user may ONLY ever rewrite the
+      // 5 ownership fields — never anything else — which is exactly and only what
+      // respondToOwnershipTransfer() (lib/publishedSeries.ts) sends when a transfer's recipient
+      // accepts it. Trusts that function's own check (it reads the transfer request doc and
+      // confirms the caller is its `toUid` before writing) rather than re-deriving "is there a
+      // pending transfer to this uid for this work" here — Firestore rules can only check exact
+      // document paths, not run a query, and the request doc's id is a random auto-id with no
+      // deterministic path to look up. Same trust-the-app-layer precedent already used for the
+      // `conversations` group-admin fields above.
       allow update: if isSignedIn()
-        && (resource.data.creatorId == request.auth.uid || isAdmin());
-      allow delete: if isAdmin();
+        && (resource.data.creatorId == request.auth.uid
+          || isAdmin()
+          || request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(["creatorId", "authorId", "authorName", "authorHandle", "authorPhotoURL"]));
+      allow delete: if isSignedIn() && (resource.data.creatorId == request.auth.uid || isAdmin());
     }
 
     // ---------------------------- published series (Sprint 9f) ----------------------------
@@ -240,8 +261,24 @@ service cloud.firestore {
     match /publishedSeries/{workId} {
       allow read: if true;
       allow create: if isAdmin();
-      allow update: if isAdmin() || (isSignedIn() && resource.data.authorId == request.auth.uid);
-      allow delete: if isAdmin();
+      // See creatorWorks' update rule above for the same ownership-transfer-acceptance carve-out
+      // (same 5 fields, same trust-the-app-layer reasoning).
+      allow update: if isAdmin()
+        || (isSignedIn() && resource.data.authorId == request.auth.uid)
+        || (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(["authorId", "authorName", "authorHandle", "authorPhotoURL"]));
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.authorId == request.auth.uid);
+    }
+
+    // ---------------------------- ownership transfers (Part 12) ----------------------------
+    // A creator-to-creator series handoff request. Created by the sender, only ever updated by
+    // its own recipient (accept/decline) or an admin — the sender can't self-approve their own
+    // request by writing straight to it.
+    match /ownershipTransfers/{requestId} {
+      allow read: if isSignedIn()
+        && (request.auth.uid == resource.data.fromUid || request.auth.uid == resource.data.toUid || isAdmin());
+      allow create: if isSignedIn() && request.resource.data.fromUid == request.auth.uid;
+      allow update: if isSignedIn() && (request.auth.uid == resource.data.toUid || isAdmin());
     }
 
     // ---------------------------- series (comments & ratings) ----------------------------
@@ -276,15 +313,32 @@ service cloud.firestore {
       }
 
       // Sprint 9f: a creator work's actual chapter pages, keyed by the same id as its
-      // publishedSeries/{seriesId} summary — only that work's own author (or an admin) may add
-      // or edit chapters, checked with a lookup against the summary doc's authorId since a
-      // chapter doc carries no uid of its own to compare directly.
+      // publishedSeries/{seriesId} summary — only that work's own author (or an admin) may add,
+      // edit, or delete chapters, checked with a lookup against the summary doc's authorId since
+      // a chapter doc carries no uid of its own to compare directly. Delete widened from
+      // admin-only (Sprint 9f's original scope, which had no creator-facing delete flow yet) to
+      // match create/update once Part 12's deleteWork()/updateChapter() needed the work's own
+      // author to be able to remove their own chapters, not just an admin.
       match /chapters/{chapterId} {
         allow read: if true;
-        allow create, update: if isSignedIn()
+        allow create, update, delete: if isSignedIn()
           && (isAdmin()
             || get(/databases/$(database)/documents/publishedSeries/$(seriesId)).data.authorId == request.auth.uid);
-        allow delete: if isAdmin();
+      }
+
+      // Part 12: saved-but-not-yet-published chapters — same author-or-admin ownership check as
+      // `chapters` above, but private (not publicly readable — a draft isn't meant to be seen by
+      // anyone but its own creator until it's actually published). Guarded with exists() before
+      // each get(): a work can save drafts before it's even been approved, when its
+      // publishedSeries summary doesn't exist yet — get() on a missing doc throws outright
+      // (unlike a plain missing FIELD on an existing doc), same reasoning as isAdmin()'s guard.
+      match /draftChapters/{draftId} {
+        allow read, create, update, delete: if isSignedIn()
+          && (isAdmin()
+            || (exists(/databases/$(database)/documents/publishedSeries/$(seriesId))
+              && get(/databases/$(database)/documents/publishedSeries/$(seriesId)).data.authorId == request.auth.uid)
+            || (exists(/databases/$(database)/documents/creatorWorks/$(seriesId))
+              && get(/databases/$(database)/documents/creatorWorks/$(seriesId)).data.creatorId == request.auth.uid));
       }
 
       match /ratings/{userId} {
@@ -304,8 +358,23 @@ service cloud.firestore {
       // doc (there's nothing to update), so it doesn't need the same null guard.
       allow read: if isSignedIn()
         && (resource == null || request.auth.uid in resource.data.participants);
-      allow update: if isSignedIn() && request.auth.uid in resource.data.participants;
       allow create: if isSignedIn() && request.auth.uid in request.resource.data.participants;
+      // Two update shapes: (1) any current participant may bump the message-send side effects
+      // (sendDM, markDMRead) — unchanged from before groups existed. (2) group-only fields —
+      // name/description/photoURL/membership/adminUids — scoped to a NARROWER set of keys than
+      // (1), but (like the rest of this ruleset's group support) trusts the calling app's own
+      // admin check in lib/dms.ts rather than re-deriving "is this specific uid an admin" from
+      // an array diff here; a crafted direct SDK call could bypass that app-level check the same
+      // way a crafted call already could for e.g. `chats`' create above. Tightening that further
+      // is a real improvement to make later, not a regression this introduces.
+      allow update: if isSignedIn() && request.auth.uid in resource.data.participants
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+          ["lastMessage", "lastMessageAt", "lastSenderId", "unreadCounts",
+           "name", "description", "photoURL", "participants", "participantNames",
+           "participantPhotos", "adminUids"]);
+      // The group's creator only (deleteGroup in lib/dms.ts) — a 1:1 conversation is never
+      // deleted, only left implicitly by no longer being messaged.
+      allow delete: if isSignedIn() && resource.data.creatorUid == request.auth.uid;
 
       match /messages/{messageId} {
         allow read: if isSignedIn()
@@ -484,6 +553,21 @@ service cloud.firestore {
       allow create: if isSignedIn() && request.resource.data.keys().hasOnly([request.auth.uid]);
       allow update: if isSignedIn()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([request.auth.uid]);
+    }
+
+    // ---------------------------- stories (Part 7) ----------------------------
+    // Public read (any signed-in user can see any active story — the home feed's bar has no
+    // per-viewer filtering beyond "followed", which is done client-side against the already-
+    // public `following` list, not enforced here). Only the story's own author may create or
+    // delete it. `update` is scoped to `viewedBy` only — viewStory() (lib/stories.ts) appending
+    // the CALLER'S OWN uid is the one write any other signed-in viewer ever makes to someone
+    // else's story.
+    match /stories/{storyId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
+      allow update: if isSignedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["viewedBy"]);
+      allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
     }
 
     // Deny everything else by default.

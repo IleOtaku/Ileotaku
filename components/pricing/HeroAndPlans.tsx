@@ -8,7 +8,14 @@ import toast from "react-hot-toast";
 import { Check, Coins, Crown, Loader2, Sparkles } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { getUserProfile } from "@/lib/firestore";
-import { COIN_PACKS, PLATINUM_PLANS, subscribePlatinum, type PlatinumTier } from "@/lib/payments";
+import {
+  COIN_PACKS,
+  PLATINUM_COIN_PRICES,
+  PLATINUM_PLANS,
+  purchasePlatinumWithCoins,
+  subscribePlatinum,
+  type PlatinumTier,
+} from "@/lib/payments";
 import { loadPaystackScript } from "@/lib/paystack";
 import { formatDualPrice } from "@/lib/utils";
 
@@ -20,10 +27,11 @@ const CHEAPEST_COIN_PACK = COIN_PACKS[0];
 
 /** Pricing hero: kente bar, headline, billing toggle, and the three plan cards it drives. */
 export default function HeroAndPlans() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const router = useRouter();
   const [billing, setBilling] = useState<Billing>("monthly");
   const [subscribing, setSubscribing] = useState(false);
+  const [payingWithCoins, setPayingWithCoins] = useState(false);
 
   useEffect(() => {
     loadPaystackScript().catch(() => {
@@ -63,6 +71,31 @@ export default function HeroAndPlans() {
       setSubscribing(false);
     }
   }
+
+  async function handlePayWithCoins() {
+    if (!user) {
+      router.push("/auth/signup");
+      return;
+    }
+    setPayingWithCoins(true);
+    try {
+      const result = await purchasePlatinumWithCoins(user.uid, billing);
+      if (result.success) {
+        toast.success("Welcome to Platinum! 💎");
+        const fresh = await getUserProfile(user.uid);
+        useAuth.getState().setProfile(fresh);
+      } else {
+        toast.error(result.message ?? "Couldn't complete this purchase.");
+      }
+    } catch {
+      toast.error("Something went wrong. Please try again.");
+    } finally {
+      setPayingWithCoins(false);
+    }
+  }
+
+  const platinumCoinPrice = PLATINUM_COIN_PRICES[platinumTier];
+  const coinBalance = profile?.coins ?? 0;
 
   return (
     <section className="px-4 pb-20 pt-16 sm:px-6">
@@ -151,6 +184,9 @@ export default function HeroAndPlans() {
             {formatDualPrice(platinumMonthlyNGN, platinumMonthlyUSD)}
             <span className="ml-1 font-noto text-xs text-muted">{platinumPeriod}</span>
           </p>
+          <p className="mt-0.5 font-noto text-xs text-gold">
+            or {platinumCoinPrice.toLocaleString()} 🪙 coins {billing === "annual" ? "/year" : "/month"}
+          </p>
           <ul className="mt-5 flex flex-1 flex-col gap-2.5">
             {[
               "Everything in Free",
@@ -175,11 +211,31 @@ export default function HeroAndPlans() {
           <button
             type="button"
             onClick={handleGoPlatinum}
-            disabled={subscribing}
+            disabled={subscribing || payingWithCoins}
             className="btn-gold mt-6 justify-center"
           >
             {subscribing ? <Loader2 className="h-4 w-4 animate-spin" /> : "Go Platinum"}
           </button>
+          <button
+            type="button"
+            onClick={handlePayWithCoins}
+            disabled={subscribing || payingWithCoins}
+            className="btn-ghost mt-2 justify-center text-sm"
+            title={user && coinBalance < platinumCoinPrice ? `You have ${coinBalance.toLocaleString()} coins` : undefined}
+          >
+            {payingWithCoins ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <>
+                <Coins className="h-4 w-4" /> Pay with Coins
+              </>
+            )}
+          </button>
+          {user && coinBalance < platinumCoinPrice && (
+            <Link href="/pricing#coins" className="mt-1 text-center font-noto text-xs text-muted hover:text-gold hover:underline">
+              You need {(platinumCoinPrice - coinBalance).toLocaleString()} more coins
+            </Link>
+          )}
         </div>
 
         <div className="flex flex-col rounded-2xl border border-bg4 bg-bg3/60 p-6">

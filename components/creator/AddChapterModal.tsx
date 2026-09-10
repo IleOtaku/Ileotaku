@@ -5,7 +5,7 @@ import toast from "react-hot-toast";
 import { GripVertical, ImagePlus, Loader2, X } from "lucide-react";
 import { Modal } from "@/components/ui";
 import { uploadImage } from "@/lib/cloudinary";
-import { addChapter } from "@/lib/publishedSeries";
+import { addChapter, saveChapterDraft } from "@/lib/publishedSeries";
 
 export interface AddChapterModalProps {
   open: boolean;
@@ -14,6 +14,9 @@ export interface AddChapterModalProps {
   /** Next chapter number to suggest by default — the creator's current chapterCount + 1. */
   suggestedNumber: number;
   onAdded: () => void;
+  /** Called after "Save Draft" succeeds — lets the parent refresh its draft list/badge. Optional
+   * since not every caller of this modal necessarily shows a drafts view. */
+  onDraftSaved?: () => void;
 }
 
 interface StagedPage {
@@ -33,6 +36,7 @@ export default function AddChapterModal({
   workId,
   suggestedNumber,
   onAdded,
+  onDraftSaved,
 }: AddChapterModalProps) {
   const [chapterNumber, setChapterNumber] = useState(suggestedNumber);
   const [title, setTitle] = useState("");
@@ -40,6 +44,7 @@ export default function AddChapterModal({
   const [pages, setPages] = useState<StagedPage[]>([]);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
   function resetForm() {
@@ -85,6 +90,16 @@ export default function AddChapterModal({
     setDragIndex(null);
   }
 
+  async function uploadPages(): Promise<string[]> {
+    const images: string[] = [];
+    for (const page of pages) {
+      const uploaded = await uploadImage(page.file, `chapters/${workId}/ch${chapterNumber}`);
+      images.push(uploaded.secureUrl);
+      setProgress((p) => (p ? { done: p.done + 1, total: p.total } : p));
+    }
+    return images;
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (pages.length === 0) {
@@ -99,13 +114,7 @@ export default function AddChapterModal({
     setSubmitting(true);
     setProgress({ done: 0, total: pages.length });
     try {
-      const images: string[] = [];
-      for (const page of pages) {
-        const uploaded = await uploadImage(page.file, `chapters/${workId}/ch${chapterNumber}`);
-        images.push(uploaded.secureUrl);
-        setProgress((p) => (p ? { done: p.done + 1, total: p.total } : p));
-      }
-
+      const images = await uploadPages();
       await addChapter(workId, {
         chapterNumber,
         title: title.trim(),
@@ -121,6 +130,33 @@ export default function AddChapterModal({
       toast.error("Something went wrong publishing this chapter. Please try again.");
     } finally {
       setSubmitting(false);
+      setProgress(null);
+    }
+  }
+
+  async function handleSaveDraft() {
+    if (pages.length === 0) {
+      toast.error("Add at least one page image.");
+      return;
+    }
+    setSavingDraft(true);
+    setProgress({ done: 0, total: pages.length });
+    try {
+      const images = await uploadPages();
+      await saveChapterDraft(workId, {
+        chapterNumber,
+        title: title.trim(),
+        images,
+        coinPrice: Math.max(0, coinPrice),
+      });
+      toast.success("Draft saved.");
+      resetForm();
+      onDraftSaved?.();
+      onClose();
+    } catch {
+      toast.error("Couldn't save this draft. Please try again.");
+    } finally {
+      setSavingDraft(false);
       setProgress(null);
     }
   }
@@ -216,16 +252,33 @@ export default function AddChapterModal({
           </div>
         </div>
 
-        <button type="submit" disabled={submitting} className="btn-primary mt-2 w-full">
-          {submitting ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              {progress ? `Uploading ${progress.done}/${progress.total}...` : "Publishing..."}
-            </>
-          ) : (
-            "Publish Chapter"
-          )}
-        </button>
+        <div className="mt-2 flex gap-2">
+          <button
+            type="button"
+            onClick={handleSaveDraft}
+            disabled={submitting || savingDraft}
+            className="btn-ghost flex-1"
+          >
+            {savingDraft ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {progress ? `Uploading ${progress.done}/${progress.total}...` : "Saving..."}
+              </>
+            ) : (
+              "Save Draft"
+            )}
+          </button>
+          <button type="submit" disabled={submitting || savingDraft} className="btn-primary flex-1">
+            {submitting ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {progress ? `Uploading ${progress.done}/${progress.total}...` : "Publishing..."}
+              </>
+            ) : (
+              "Publish Chapter"
+            )}
+          </button>
+        </div>
       </form>
     </Modal>
   );

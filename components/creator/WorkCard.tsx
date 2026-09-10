@@ -1,5 +1,6 @@
+import { useState } from "react";
 import Link from "next/link";
-import { Award, BookPlus } from "lucide-react";
+import { Award, BookPlus, FileEdit, MoreVertical, Repeat, Trash2 } from "lucide-react";
 import { getOptimizedImageUrl } from "@/lib/cloudinary";
 import { formatTime } from "@/lib/utils";
 import type { CreatorWork } from "@/types";
@@ -22,12 +23,28 @@ export interface WorkCardProps {
   work: CreatorWork;
   /** Only meaningful once `work.status === "published"` — opens the Add Chapter modal. */
   onAddChapter?: () => void;
+  /** Part 12 management actions — every work (regardless of status) can be edited/deleted; view
+   * drafts and transfer ownership only make sense once it's actually published. */
+  onEditSeries?: () => void;
+  onDeleteWork?: () => void;
+  onViewDrafts?: () => void;
+  onTransferOwnership?: () => void;
 }
 
 /** Reusable series card: cover, status badge, genre tags, view/submission stats, and earnings.
  * A published work also gets an Add Chapter action and a copyright-certificate link (Sprint 9f),
  * both absent on a work still pending/rejected/approved since neither applies yet. */
-export default function WorkCard({ work, onAddChapter }: WorkCardProps) {
+export default function WorkCard({
+  work,
+  onAddChapter,
+  onEditSeries,
+  onDeleteWork,
+  onViewDrafts,
+  onTransferOwnership,
+}: WorkCardProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const hasManagementMenu = onEditSeries || onDeleteWork || onViewDrafts || onTransferOwnership;
+
   return (
     <div className="flex flex-col overflow-hidden rounded-2xl border border-bg4 bg-bg2">
       <div className="relative aspect-[16/9] w-full overflow-hidden bg-bg3">
@@ -49,6 +66,73 @@ export default function WorkCard({ work, onAddChapter }: WorkCardProps) {
         >
           {STATUS_LABELS[work.status]}
         </span>
+        {hasManagementMenu && (
+          <div className="absolute right-3 top-3">
+            <button
+              type="button"
+              onClick={() => setMenuOpen((o) => !o)}
+              aria-label="Work options"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-bg/80 text-text backdrop-blur hover:bg-bg"
+            >
+              <MoreVertical className="h-4 w-4" />
+            </button>
+            {menuOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+                <div className="glass absolute right-0 z-50 mt-1 w-48 overflow-hidden rounded-xl p-1.5 text-left">
+                  {onEditSeries && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onEditSeries();
+                        setMenuOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-noto text-xs text-text hover:bg-bg4"
+                    >
+                      <FileEdit className="h-3.5 w-3.5" /> Edit Series
+                    </button>
+                  )}
+                  {work.status === "published" && onViewDrafts && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onViewDrafts();
+                        setMenuOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-noto text-xs text-text hover:bg-bg4"
+                    >
+                      <FileEdit className="h-3.5 w-3.5" /> View Drafts
+                    </button>
+                  )}
+                  {work.status === "published" && onTransferOwnership && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onTransferOwnership();
+                        setMenuOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-noto text-xs text-text hover:bg-bg4"
+                    >
+                      <Repeat className="h-3.5 w-3.5" /> Transfer Ownership
+                    </button>
+                  )}
+                  {onDeleteWork && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onDeleteWork();
+                        setMenuOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-noto text-xs text-clay2 hover:bg-bg4"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" /> Delete Work
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex flex-1 flex-col gap-2 p-4">

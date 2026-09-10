@@ -71,6 +71,10 @@ export interface UserProfile {
   suspendedUntil?: string;
   /** Set by a Permanent Ban moderation action. A banned account is not deleted, just locked out. */
   isBanned?: boolean;
+  /** When/why a Permanent Ban was applied — set alongside isBanned, kept even if it's later
+   * lifted so the account's moderation history isn't lost. */
+  bannedAt?: string;
+  bannedReason?: string;
   /** Preset id for the profile cover banner's background — see COVER_STYLES in
    * components/profile/CoverStylePicker.tsx for the six available options. */
   coverStyle?: CoverStyleId;
@@ -327,6 +331,33 @@ export interface PublishedChapter {
   publishedAt: string;
 }
 
+/** A chapter saved but not yet published — series/{workId}/draftChapters/{draftId}. Same shape
+ * as PublishedChapter minus `status`/`publishedAt` (a draft isn't live yet, so neither applies)
+ * plus its own `savedAt`. */
+export interface ChapterDraft {
+  id: string;
+  chapterNumber: number;
+  title: string;
+  images: string[];
+  coinPrice: number;
+  savedAt: string;
+}
+
+/** A creator-to-creator series handoff, pending the recipient's decision — see
+ * lib/publishedSeries.ts's requestOwnershipTransfer/respondToOwnershipTransfer. */
+export interface OwnershipTransferRequest {
+  id: string;
+  workId: string;
+  workTitle: string;
+  fromUid: string;
+  fromDisplayName: string;
+  toUid: string;
+  toHandle: string;
+  status: "pending" | "accepted" | "declined";
+  createdAt: string;
+  respondedAt?: string;
+}
+
 export interface HistoryEntry {
   id: string;
   mangaId: string;
@@ -518,6 +549,10 @@ export enum NotificationType {
   EARNINGS_MILESTONE = "EARNINGS_MILESTONE",
   BADGE_APPROVED = "BADGE_APPROVED",
   MODERATION_ACTION = "MODERATION_ACTION",
+  GROUP_ADDED = "GROUP_ADDED",
+  GROUP_MENTION = "GROUP_MENTION",
+  OWNERSHIP_TRANSFER_REQUEST = "OWNERSHIP_TRANSFER_REQUEST",
+  OWNERSHIP_TRANSFER_ACCEPTED = "OWNERSHIP_TRANSFER_ACCEPTED",
 }
 
 /** Named `AppNotification` (not `Notification`) to avoid colliding with the DOM Notification API. */
@@ -571,10 +606,32 @@ export interface SeriesMeta {
   ratingCount: number;
 }
 
+/* ---------------------------- Stories ---------------------------- */
+
+export interface Story {
+  id: string;
+  uid: string;
+  displayName: string;
+  photoURL?: string;
+  mediaUrl: string;
+  mediaType: "image" | "video" | "text";
+  textContent?: string;
+  backgroundColor?: string;
+  /** Milliseconds this segment stays on screen in the viewer — only meaningful for image/text
+   * (video plays for its own natural length instead). Defaults to 5000 for those two. */
+  duration?: number;
+  expiresAt: string;
+  viewedBy: string[];
+  createdAt: string;
+}
+
 /* ---------------------------- Direct messages ---------------------------- */
 
 export interface Conversation {
   id: string;
+  /** Absent on every conversation created before groups shipped — always treat as "direct"
+   * when missing, never assume it's set. */
+  type?: "direct" | "group";
   participants: string[];
   participantNames: Record<string, string>;
   participantPhotos: Record<string, string>;
@@ -584,6 +641,17 @@ export interface Conversation {
   /** Unread count per participant uid. */
   unreadCounts: Record<string, number>;
   createdAt: string;
+
+  /* ---- Group-only fields (type === "group") ---- */
+  name?: string;
+  description?: string;
+  photoURL?: string;
+  /** Uids with admin rights in this group — Make Admin/Remove Member/Delete Group checks read
+   * this, not `participants` (every participant, admin or not, is in that array). */
+  adminUids?: string[];
+  /** The uid who created the group — the only one who can delete it outright (see
+   * MessagesClient's Delete Group vs. Leave Group distinction). */
+  creatorUid?: string;
 }
 
 /** One emoji's worth of reactions on a message — every uid who reacted with that emoji. */

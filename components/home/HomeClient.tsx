@@ -12,6 +12,7 @@ import Reveal from "@/components/landing/Reveal";
 import { SectionEyebrow, Skeleton } from "@/components/ui";
 import CoinRoulette from "@/components/monetisation/CoinRoulette";
 import FriendActivity from "@/components/social/FriendActivity";
+import StoriesBar from "@/components/stories/StoriesBar";
 import { useAuth } from "@/hooks/useAuth";
 import { FALLBACK_SUMMARIES } from "@/lib/fallback-manga";
 import { proxyImg } from "@/lib/manga-api";
@@ -86,8 +87,10 @@ export default function HomeClient({ trendingSlot, africanOriginals }: HomeClien
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6">
+      <StoriesBar />
+
       <Reveal>
-        <h1 className="font-cinzel text-3xl text-text">
+        <h1 className="mt-8 font-cinzel text-3xl text-text">
           {greeting}, <span className="text-gold">{name}</span>
         </h1>
         <p className="mt-1 font-noto text-sm text-muted">Here&apos;s what&apos;s waiting for you today.</p>
