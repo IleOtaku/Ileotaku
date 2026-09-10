@@ -5,10 +5,10 @@ import Link from "next/link";
 import toast from "react-hot-toast";
 import { Coins, Loader2 } from "lucide-react";
 import { Modal } from "@/components/ui";
+import { Avatar } from "@/components/ui/Avatar";
 import { useAuth } from "@/hooks/useAuth";
 import { getUserProfile } from "@/lib/firestore";
 import { tipCreator } from "@/lib/payments";
-import { initials, stringToColor } from "@/lib/utils";
 
 export interface TipModalProps {
   open: boolean;
@@ -57,12 +57,7 @@ export default function TipModal({ open, onClose, creatorId, creatorName, mangaI
     <Modal open={open} onClose={onClose} title="Send a Tip">
       <div className="flex flex-col gap-4">
         <div className="flex items-center gap-3">
-          <span
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full font-syne text-sm font-bold text-ivory"
-            style={{ backgroundColor: stringToColor(creatorName) }}
-          >
-            {initials(creatorName)}
-          </span>
+          <Avatar uid={creatorId ?? undefined} displayName={creatorName} size={40} />
           <div>
             <p className="font-syne text-sm font-semibold text-text">{creatorName}</p>
             <p className="font-noto text-xs text-muted">Your tip goes straight to this creator.</p>

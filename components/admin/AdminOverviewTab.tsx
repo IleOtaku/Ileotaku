@@ -27,7 +27,7 @@ import {
   type TopSeriesEntry,
 } from "@/lib/admin";
 import { subscribeToPendingWorkCount } from "@/lib/firestore";
-import { initials, stringToColor } from "@/lib/utils";
+import { Avatar } from "@/components/ui/Avatar";
 import { Skeleton } from "@/components/ui";
 import type { UserProfile } from "@/types";
 import AddAdminModal from "./AddAdminModal";
@@ -179,12 +179,7 @@ export default function AdminOverviewTab({
           <div className="flex flex-col gap-2">
             {recentSignups.map((u) => (
               <div key={u.uid} className="flex items-center gap-2.5">
-                <span
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full font-syne text-[10px] font-bold text-ivory"
-                  style={{ backgroundColor: stringToColor(u.displayName) }}
-                >
-                  {initials(u.displayName)}
-                </span>
+                <Avatar uid={u.uid} photoURL={u.photoURL} displayName={u.displayName} size={32} />
                 <span className="min-w-0 flex-1 truncate font-noto text-sm text-text">{u.displayName}</span>
                 <span className="shrink-0 font-noto text-xs text-muted">
                   {u.createdAt && !Number.isNaN(new Date(u.createdAt).getTime())

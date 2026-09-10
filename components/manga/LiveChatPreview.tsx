@@ -4,9 +4,10 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { MessagesSquare, Users } from "lucide-react";
 import { Skeleton } from "@/components/ui";
+import { Avatar } from "@/components/ui/Avatar";
 import { useAuth } from "@/hooks/useAuth";
 import { getRecentChatMessages } from "@/lib/firestore";
-import { formatTime, initials, stringToColor } from "@/lib/utils";
+import { formatTime } from "@/lib/utils";
 import type { ChatMessage } from "@/types";
 
 export interface LiveChatPreviewProps {
@@ -100,12 +101,7 @@ export default function LiveChatPreview({ mangaId }: LiveChatPreviewProps) {
           <div className="flex flex-col gap-3">
             {lastFive.map((m) => (
               <div key={m.id} className="flex gap-2">
-                <span
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full font-syne text-[10px] font-bold text-ivory"
-                  style={{ backgroundColor: stringToColor(m.senderName) }}
-                >
-                  {initials(m.senderName)}
-                </span>
+                <Avatar uid={m.senderId} photoURL={m.senderPhotoURL} displayName={m.senderName} size={28} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     <span className="truncate font-syne text-xs font-semibold text-text">

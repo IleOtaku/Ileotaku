@@ -267,7 +267,7 @@ function FeedPostCard({ post, onDeleted }: FeedPostCardProps) {
 
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
-          <Avatar uid={post.uid} photoURL={post.photoURL} displayName={post.displayName} size={44} />
+          <Avatar uid={post.uid} photoURL={post.photoURL} displayName={post.displayName} size={40} />
 
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-1.5">

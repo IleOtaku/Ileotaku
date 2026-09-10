@@ -5,9 +5,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { BadgeCheck, Search, X } from "lucide-react";
+import { Avatar } from "@/components/ui/Avatar";
 import { useSearchPreview } from "@/hooks/useSearchPreview";
 import { proxyImg } from "@/lib/manga-api";
-import { initials, stringToColor } from "@/lib/utils";
 
 export interface MobileNavSearchProps {
   open: boolean;
@@ -146,22 +146,7 @@ export default function MobileNavSearch({ open, onOpen, onClose }: MobileNavSear
                         onClick={onClose}
                         className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-bg4"
                       >
-                        {p.photoURL ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-            loading="lazy"
-                            src={p.photoURL}
-                            alt={p.displayName}
-                            className="h-8 w-8 shrink-0 rounded-full object-cover"
-                          />
-                        ) : (
-                          <span
-                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full font-syne text-[10px] font-bold text-ivory"
-                            style={{ backgroundColor: stringToColor(p.displayName) }}
-                          >
-                            {initials(p.displayName)}
-                          </span>
-                        )}
+                        <Avatar uid={p.uid} photoURL={p.photoURL} displayName={p.displayName} size={40} className="shrink-0" />
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-1 font-noto text-sm text-text">
                             <span className="truncate">{p.displayName}</span>

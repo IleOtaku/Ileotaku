@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
 import { Loader2, Search, ShieldX } from "lucide-react";
 import { addAdminRole, getAllAdmins, removeAdminRole, getUserByEmail } from "@/lib/admin";
-import { initials, stringToColor } from "@/lib/utils";
 import { Modal } from "@/components/ui";
+import { Avatar } from "@/components/ui/Avatar";
 import type { AdminType, UserProfile } from "@/types";
 
 export interface AddAdminModalProps {
@@ -114,12 +114,7 @@ export default function AddAdminModal({ open, onClose }: AddAdminModalProps) {
       {found && (
         <div className="mt-4 rounded-xl border border-bg4 bg-bg3 p-3">
           <div className="flex items-center gap-2.5">
-            <span
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full font-syne text-xs font-bold text-ivory"
-              style={{ backgroundColor: stringToColor(found.displayName) }}
-            >
-              {initials(found.displayName)}
-            </span>
+            <Avatar uid={found.uid} photoURL={found.photoURL} displayName={found.displayName} size={32} />
             <div className="min-w-0">
               <p className="truncate font-syne text-sm font-semibold text-text">{found.displayName}</p>
               <p className="truncate font-noto text-xs text-muted">{found.email}</p>

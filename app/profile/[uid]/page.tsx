@@ -8,9 +8,9 @@ import FollowButton from "@/components/social/FollowButton";
 import MessageButton from "@/components/social/MessageButton";
 import ReportButton from "@/components/social/ReportButton";
 import NowPlayingCard from "@/components/spotify/NowPlayingCard";
-import { getCoverGradient } from "@/components/profile/CoverStylePicker";
+import { getCoverGradient } from "@/lib/coverStyles";
+import { Avatar } from "@/components/ui/Avatar";
 import { getUserProfile } from "@/lib/firestore";
-import { initials, stringToColor } from "@/lib/utils";
 import type { UserProfile } from "@/types";
 
 interface PublicProfilePageProps {
@@ -60,22 +60,13 @@ export default async function PublicProfilePage({ params }: PublicProfilePagePro
 
       <div className="relative z-10 mx-auto -mt-12 max-w-3xl px-4 pb-16 sm:px-6">
       <div className="flex flex-col items-center gap-4 text-center sm:flex-row sm:items-end sm:text-left">
-        {profile.photoURL ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            loading="lazy"
-            src={profile.photoURL}
-            alt={profile.displayName}
-            className="h-28 w-28 rounded-full border-4 border-bg object-cover"
-          />
-        ) : (
-          <div
-            className="flex h-28 w-28 items-center justify-center rounded-full border-4 border-bg font-cinzel text-3xl font-bold text-ivory"
-            style={{ backgroundColor: stringToColor(profile.displayName) }}
-          >
-            {initials(profile.displayName)}
-          </div>
-        )}
+        <Avatar
+          uid={profile.uid}
+          photoURL={profile.photoURL}
+          displayName={profile.displayName}
+          size={80}
+          className="border-4 border-bg font-cinzel text-2xl"
+        />
 
         <div className="flex-1">
           <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">

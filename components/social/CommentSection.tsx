@@ -118,7 +118,7 @@ const CommentRow = memo(function CommentRow({
   return (
     <div className={isReply ? "ml-10 mt-3" : "border-b border-bg4 py-4 last:border-0"}>
       <div className="flex gap-3">
-        <Avatar uid={comment.userId} photoURL={comment.userPhotoURL} displayName={comment.userName} size={36} />
+        <Avatar uid={comment.userId} photoURL={comment.userPhotoURL} displayName={comment.userName} size={32} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="font-syne text-sm font-semibold text-text">{comment.userName}</span>
@@ -478,7 +478,7 @@ export default function CommentSection({ mangaId, chapterId, variant = "page" }:
         uid={user.uid}
         photoURL={profile?.photoURL ?? user.photoURL ?? undefined}
         displayName={profile?.displayName ?? user.displayName ?? "U"}
-        size={36}
+        size={32}
       />
       <div className="min-w-0 flex-1">
         <textarea

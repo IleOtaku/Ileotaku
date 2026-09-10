@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { BadgeCheck, Sparkles } from "lucide-react";
-import { getCoverGradient } from "@/components/profile/CoverStylePicker";
+import { getCoverGradient } from "@/lib/coverStyles";
+import { Avatar } from "@/components/ui/Avatar";
 import { getUserByHandle } from "@/lib/firestore";
 import { getPostsByCreator } from "@/lib/creatorFeed";
 import { getPublishedSeriesByAuthor } from "@/lib/publishedSeries";
-import { initials, stringToColor } from "@/lib/utils";
 import CreatorProfileTabs from "@/components/creator/CreatorProfileTabs";
 import TipCreatorButton from "@/components/monetisation/TipCreatorButton";
 import BlockButton from "@/components/social/BlockButton";
@@ -90,22 +90,13 @@ export default async function CreatorProfilePage({ params }: CreatorProfilePageP
       <div className="mx-auto max-w-5xl px-4 pb-16 sm:px-6">
         <div className="relative z-10 -mt-14 flex flex-col items-start gap-4 sm:-mt-16 sm:flex-row sm:items-end sm:justify-between">
           <div className="flex items-end gap-4">
-            {creator.photoURL ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-            loading="lazy"
-                src={creator.photoURL}
-                alt={creator.displayName}
-                className="h-28 w-28 rounded-full border-4 border-bg object-cover sm:h-32 sm:w-32"
-              />
-            ) : (
-              <div
-                className="flex h-28 w-28 items-center justify-center rounded-full border-4 border-bg font-cinzel text-3xl font-bold text-ivory sm:h-32 sm:w-32"
-                style={{ backgroundColor: stringToColor(creator.displayName) }}
-              >
-                {initials(creator.displayName)}
-              </div>
-            )}
+            <Avatar
+              uid={creator.uid}
+              photoURL={creator.photoURL}
+              displayName={creator.displayName}
+              size={80}
+              className="border-4 border-bg font-cinzel text-2xl"
+            />
 
             <div className="pb-2">
               <div className="flex items-center gap-2">

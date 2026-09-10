@@ -5,8 +5,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { BookMarked, Home, User as UserIcon } from "lucide-react";
+import { Avatar } from "@/components/ui/Avatar";
 import { useAuth } from "@/hooks/useAuth";
-import { initials, stringToColor, truncate } from "@/lib/utils";
+import { truncate } from "@/lib/utils";
 
 /** Floating quick-nav button for the mobile reader — avatar/Sign In pill, opens a small menu. */
 export default function ReaderFab() {
@@ -102,12 +103,12 @@ export default function ReaderFab() {
         className="flex h-12 items-center gap-2 rounded-full border border-muted2 bg-bg2/95 px-3 shadow-lg backdrop-blur"
       >
         {user ? (
-          <span
-            className="flex h-8 w-8 items-center justify-center rounded-full font-syne text-xs font-bold text-ivory"
-            style={{ backgroundColor: stringToColor(profile?.displayName ?? user.displayName ?? "U") }}
-          >
-            {initials(profile?.displayName ?? user.displayName ?? "U")}
-          </span>
+          <Avatar
+            uid={user.uid}
+            photoURL={profile?.photoURL ?? user.photoURL ?? undefined}
+            displayName={profile?.displayName ?? user.displayName ?? "U"}
+            size={32}
+          />
         ) : (
           <span className="px-1 font-syne text-xs font-semibold text-text">Sign In</span>
         )}

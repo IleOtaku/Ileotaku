@@ -40,7 +40,7 @@ export default function PersonCard({ person }: PersonCardProps) {
     <div className="flex flex-col gap-3 rounded-2xl border border-bg4 bg-bg2 p-5">
       <div className="flex items-start gap-3">
         <Link href={profileHref} className="shrink-0">
-          <Avatar uid={person.uid} photoURL={person.photoURL} displayName={person.displayName} size={48} />
+          <Avatar uid={person.uid} photoURL={person.photoURL} displayName={person.displayName} size={40} />
         </Link>
 
         <div className="min-w-0 flex-1">

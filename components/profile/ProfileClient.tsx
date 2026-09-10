@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import { updateProfile } from "firebase/auth";
 import { Camera, Crown, LogOut, Palette, Pencil } from "lucide-react";
-import { getCoverGradient } from "@/components/profile/CoverStylePicker";
+import { getCoverGradient } from "@/lib/coverStyles";
 import ReadingStatsCard from "@/components/profile/ReadingStatsCard";
 import ProfileSidebar from "@/components/profile/ProfileSidebar";
 import FollowListModal from "@/components/social/FollowListModal";

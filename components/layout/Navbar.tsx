@@ -126,7 +126,7 @@ export default function Navbar() {
                   uid={user.uid}
                   photoURL={avatarURL}
                   displayName={user.displayName ?? user.email ?? "U"}
-                  size={28}
+                  size={32}
                 />
                 <span className="font-syne text-sm text-text">{user.displayName ?? "Reader"}</span>
                 {isPlatinum && <span className="badge-plat">Platinum</span>}

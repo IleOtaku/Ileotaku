@@ -911,7 +911,7 @@ export default function MessagesClient() {
           )}
         </div>
 
-        <div className={`flex-col ${selectedId ? "flex" : "hidden sm:flex"}`}>
+        <div className={`h-full min-h-0 flex-col overflow-hidden ${selectedId ? "flex" : "hidden sm:flex"}`}>
           {!selectedId ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
               <p className="font-noto text-sm text-muted">Select a conversation or start a new one.</p>
@@ -921,7 +921,7 @@ export default function MessagesClient() {
             </div>
           ) : (
             <>
-              <div className="flex items-center gap-3 border-b border-bg4 px-4 py-3">
+              <div className="flex shrink-0 items-center gap-3 border-b border-bg4 px-4 py-3">
                 <button
                   type="button"
                   onClick={() => setSelectedId(null)}
@@ -1001,7 +1001,7 @@ export default function MessagesClient() {
                 )}
               </div>
 
-              <div ref={messagesContainerRef} className="flex-1 overflow-y-auto overscroll-contain p-4">
+              <div ref={messagesContainerRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
                 <div className="flex flex-col gap-2">
                   {messageItems.map((item) => {
                     if (item.kind === "separator") {
@@ -1026,7 +1026,7 @@ export default function MessagesClient() {
                     if (m.isDeleted) {
                       return (
                         <div key={m.id} className={`flex items-end gap-2 ${isOwn ? "justify-end" : "justify-start"}`}>
-                          {isGroupThread && !isOwn && <Avatar uid={m.senderId} photoURL={senderPhoto} displayName={senderName} size={24} />}
+                          {isGroupThread && !isOwn && <Avatar uid={m.senderId} photoURL={senderPhoto} displayName={senderName} size={32} />}
                           <div className="max-w-[75%] rounded-2xl bg-bg3 px-4 py-2 font-noto text-sm italic text-muted">
                             This message was deleted
                           </div>
@@ -1037,7 +1037,7 @@ export default function MessagesClient() {
                     return (
                       <div key={m.id} className={`group relative flex items-end gap-2 ${isOwn ? "justify-end" : "justify-start"}`}>
                         {isGroupThread && !isOwn && (
-                          <Avatar uid={m.senderId} photoURL={senderPhoto} displayName={senderName} size={24} className="mb-1" />
+                          <Avatar uid={m.senderId} photoURL={senderPhoto} displayName={senderName} size={32} className="mb-1" />
                         )}
                         <div className="flex max-w-[75%] flex-col" style={{ alignItems: isOwn ? "flex-end" : "flex-start" }}>
                           {isGroupThread && !isOwn && (
@@ -1205,12 +1205,12 @@ export default function MessagesClient() {
               </div>
 
               {conversationBlocked ? (
-                <div className="flex items-center justify-center gap-2 border-t border-bg4 p-4 font-noto text-sm text-muted">
+                <div className="flex shrink-0 items-center justify-center gap-2 border-t border-bg4 p-4 font-noto text-sm text-muted">
                   <ShieldOff className="h-4 w-4" />
                   {blockedByMe ? "You've blocked this user." : "You can't message this person."}
                 </div>
               ) : (
-                <div className="relative border-t border-bg4">
+                <div className="relative shrink-0 border-t border-bg4">
                   {mentionQuery !== null && selectedGroup && (
                     <div className="absolute bottom-full left-3 z-10 mb-1 w-56 overflow-hidden rounded-xl border border-bg4 bg-bg2 shadow-lg">
                       {Object.entries(selectedGroup.participantNames ?? {})
@@ -1368,7 +1368,7 @@ export default function MessagesClient() {
                       onClick={() => toggleGroupMember(u)}
                       className="flex items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-bg3"
                     >
-                      <Avatar uid={u.uid} photoURL={u.photoURL} displayName={u.displayName} size={36} />
+                      <Avatar uid={u.uid} photoURL={u.photoURL} displayName={u.displayName} size={40} />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate font-syne text-sm font-semibold text-text">{u.displayName}</span>
                         {u.handle && <span className="block truncate font-noto text-xs text-muted">@{u.handle}</span>}
@@ -1473,7 +1473,7 @@ export default function MessagesClient() {
                         onClick={() => toggleGroupMember(u)}
                         className="flex items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-bg3"
                       >
-                        <Avatar uid={u.uid} photoURL={u.photoURL} displayName={u.displayName} size={36} />
+                        <Avatar uid={u.uid} photoURL={u.photoURL} displayName={u.displayName} size={40} />
                         <span className="min-w-0 flex-1 truncate font-syne text-sm font-semibold text-text">{u.displayName}</span>
                         {picked && <Check className="h-4 w-4 shrink-0 text-clay" />}
                       </button>

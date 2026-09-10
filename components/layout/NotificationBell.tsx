@@ -66,10 +66,10 @@ const NotificationItem = memo(function NotificationItem({ notification: n, onCli
           loading="lazy"
           src={n.imageURL}
           alt=""
-          className="mt-0.5 h-7 w-7 shrink-0 rounded-full object-cover"
+          className="mt-0.5 h-9 w-9 shrink-0 rounded-full object-cover"
         />
       ) : (
-        <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center text-lg leading-none">
+        <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center text-lg leading-none">
           {TYPE_EMOJI[n.type] ?? "🔔"}
         </span>
       )}

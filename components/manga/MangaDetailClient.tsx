@@ -15,9 +15,9 @@ import CommentSection from "@/components/social/CommentSection";
 import RatingWidget from "@/components/social/RatingWidget";
 import ReportButton from "@/components/social/ReportButton";
 import { Skeleton } from "@/components/ui";
+import { Avatar } from "@/components/ui/Avatar";
 import { getMangaStats, type MangaStats } from "@/lib/contentLocking";
 import { getMangaDetail, getMangaList, proxyImg, type MangaDetailResponse } from "@/lib/manga-api";
-import { initials, stringToColor } from "@/lib/utils";
 
 export interface MangaDetailClientProps {
   id: string;
@@ -266,32 +266,12 @@ export default function MangaDetailClient({ id, from }: MangaDetailClientProps) 
                     href={`/creator/${detail.authorHandle}`}
                     className="flex items-center gap-3 transition-opacity hover:opacity-80"
                   >
-                    {detail.authorPhotoURL ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        loading="lazy"
-                        src={detail.authorPhotoURL}
-                        alt=""
-                        className="h-11 w-11 shrink-0 rounded-full object-cover"
-                      />
-                    ) : (
-                      <span
-                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full font-syne text-sm font-bold text-ivory"
-                        style={{ backgroundColor: stringToColor(detail.author) }}
-                      >
-                        {initials(detail.author)}
-                      </span>
-                    )}
+                    <Avatar uid={detail.authorId} photoURL={detail.authorPhotoURL} displayName={detail.author} size={40} />
                     <span className="font-syne text-sm font-semibold text-text">{detail.author}</span>
                   </Link>
                 ) : (
                   <div className="flex items-center gap-3">
-                    <span
-                      className="flex h-11 w-11 items-center justify-center rounded-full font-syne text-sm font-bold text-ivory"
-                      style={{ backgroundColor: stringToColor(detail.author) }}
-                    >
-                      {initials(detail.author)}
-                    </span>
+                    <Avatar displayName={detail.author} size={40} />
                     <span className="font-syne text-sm font-semibold text-text">{detail.author}</span>
                   </div>
                 )}

@@ -4,10 +4,10 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Users } from "lucide-react";
 import { Skeleton } from "@/components/ui";
+import { Avatar } from "@/components/ui/Avatar";
 import { useAuth } from "@/hooks/useAuth";
 import { subscribeToFollowingActivity, type FollowingActivityEntry } from "@/lib/readingActivity";
 import { proxyImg } from "@/lib/manga-api";
-import { initials, stringToColor } from "@/lib/utils";
 
 const MAX_SHOWN = 8;
 /** "Right now" vs a relative timestamp — mirrors the 10-minute window Sprint 9d's NowPlaying
@@ -74,22 +74,7 @@ export default function FriendActivity() {
                   className="flex items-center gap-3 rounded-xl p-2 transition-colors hover:bg-bg3"
                 >
                   <span className="relative shrink-0">
-                    {item.photoURL ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-            loading="lazy"
-                        src={item.photoURL}
-                        alt={item.displayName}
-                        className="h-8 w-8 rounded-full object-cover"
-                      />
-                    ) : (
-                      <span
-                        className="flex h-8 w-8 items-center justify-center rounded-full font-syne text-[10px] font-bold text-ivory"
-                        style={{ backgroundColor: stringToColor(item.displayName) }}
-                      >
-                        {initials(item.displayName)}
-                      </span>
-                    )}
+                    <Avatar uid={item.uid} photoURL={item.photoURL} displayName={item.displayName} size={36} />
                     {rightNow && (
                       <span
                         aria-label="Reading right now"
