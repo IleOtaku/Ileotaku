@@ -59,11 +59,20 @@ export async function getAfricanOriginals(take = 12): Promise<PublishedSeries[]>
  * client-side (by format/genre/title/reads/rating) from, rather than each running its own
  * differently-shaped Firestore query. That keeps this to the one already-proven query shape (a
  * single orderBy, no composite index to provision) instead of needing a new index per filter. */
-export async function getAllPublishedSeries(take = 300): Promise<PublishedSeries[]> {
+/** By default excludes any series an admin has Suspended (isHidden: true) — every reader-facing
+ * surface (Explore, Browse, search) reads from this shared list, so that's what actually makes a
+ * suspension take a series off all of them immediately. The admin Works panel's own Approved tab
+ * is the one caller that passes `includeHidden: true`, since it needs to see (and Restore)
+ * suspended series too. */
+export async function getAllPublishedSeries(
+  take = 300,
+  opts?: { includeHidden?: boolean }
+): Promise<PublishedSeries[]> {
   try {
     const q = query(collection(db, PUBLISHED_SERIES), orderBy("publishedAt", "desc"), limit(take));
     const snap = await getDocs(q);
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as PublishedSeries);
+    const all = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as PublishedSeries);
+    return opts?.includeHidden ? all : all.filter((s) => !s.isHidden);
   } catch (error) {
     await logError(error, { operation: "getAllPublishedSeries" });
     return [];
@@ -232,10 +241,21 @@ export async function getPublishedSeriesByCertId(certId: string): Promise<Publis
   }
 }
 
-export async function getPublishedSeries(workId: string): Promise<PublishedSeries | null> {
+/** By default returns null for a Suspended series (isHidden: true) — every reader-facing surface
+ * that loads a series by id (the manga detail page, the prose reader) uses this default, so a
+ * direct link to a suspended series 404s the same as a deleted one rather than staying reachable
+ * just because the URL was already known. Admin surfaces that need the doc even while suspended
+ * (Review Series) pass `includeHidden: true`. */
+export async function getPublishedSeries(
+  workId: string,
+  opts?: { includeHidden?: boolean }
+): Promise<PublishedSeries | null> {
   try {
     const snap = await getDoc(doc(db, PUBLISHED_SERIES, workId));
-    return snap.exists() ? ({ id: snap.id, ...snap.data() } as PublishedSeries) : null;
+    if (!snap.exists()) return null;
+    const series = { id: snap.id, ...snap.data() } as PublishedSeries;
+    if (series.isHidden && !opts?.includeHidden) return null;
+    return series;
   } catch (error) {
     await logError(error, { operation: "getPublishedSeries", workId });
     return null;
@@ -257,12 +277,34 @@ export function subscribeToPublishedSeries(
 }
 
 /** Live chapter count for one work — the header stats strip subscribes to this so a newly
- * published chapter shows up in "📖 N chapters" the instant the creator publishes it. */
+ * published chapter shows up in "📖 N chapters" the instant the creator publishes it, and a
+ * chapter the creator turns back to Draft (see setChapterStatus) drops back out immediately too —
+ * a draft was never meant to be visible or counted publicly. */
 export function subscribeToChapterCount(workId: string, callback: (count: number) => void): Unsubscribe {
   return onSnapshot(
     collection(db, SERIES, workId, "chapters"),
-    (snap) => callback(snap.size),
+    (snap) => callback(snap.docs.filter((d) => d.data().status !== "draft").length),
     () => callback(0)
+  );
+}
+
+/** Real-time chapter list for a series. The creator's Manage Chapters panel passes
+ * `includeDrafts: true` (it needs to show/manage both); every reader-facing surface uses the
+ * default (published-only) so a chapter the creator turns to Draft or deletes disappears from the
+ * public page/reader the instant that happens, with no manual refresh needed. */
+export function subscribeToSeriesChapters(
+  workId: string,
+  callback: (chapters: PublishedChapter[]) => void,
+  opts?: { includeDrafts?: boolean }
+): Unsubscribe {
+  const q = query(collection(db, SERIES, workId, "chapters"), orderBy("chapterNumber", "asc"));
+  return onSnapshot(
+    q,
+    (snap) => {
+      const chapters = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as PublishedChapter);
+      callback(opts?.includeDrafts ? chapters : chapters.filter((c) => c.status !== "draft"));
+    },
+    () => callback([])
   );
 }
 
@@ -287,11 +329,18 @@ export async function getPublishedSeriesByAuthor(opts: {
   }
 }
 
-export async function getSeriesChapters(workId: string): Promise<PublishedChapter[]> {
+/** By default returns only published chapters (every reader-facing caller — the manga detail
+ * page, the prose reader) — pass `includeDrafts: true` for the creator's own Manage Chapters
+ * panel, the one surface that needs to see (and act on) draft chapters too. */
+export async function getSeriesChapters(
+  workId: string,
+  opts?: { includeDrafts?: boolean }
+): Promise<PublishedChapter[]> {
   try {
     const q = query(collection(db, SERIES, workId, "chapters"), orderBy("chapterNumber", "asc"));
     const snap = await getDocs(q);
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as PublishedChapter);
+    const chapters = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as PublishedChapter);
+    return opts?.includeDrafts ? chapters : chapters.filter((c) => c.status !== "draft");
   } catch (error) {
     await logError(error, { operation: "getSeriesChapters", workId });
     return [];
@@ -529,6 +578,98 @@ export async function updateChapter(workId: string, chapterId: string, patch: Ch
   } catch (error) {
     await logError(error, { operation: "updateChapter", workId, chapterId });
     throw error;
+  }
+}
+
+/* ============================== Chapter status / delete (Sprint "Polish-2" Part 1) ============================== */
+
+/** Toggles a chapter between "published" and "draft" (Turn to Draft / Publish in the creator's
+ * Manage Chapters panel). A draft chapter is invisible to readers — filtered out of every
+ * reader-facing query (getSeriesChapters' default, subscribeToSeriesChapters' default,
+ * subscribeToChapterCount) — so its parent series' public chapterCount is kept in sync here too,
+ * the same increment/decrement addChapter itself performs when a chapter is first published. */
+export async function setChapterStatus(
+  workId: string,
+  chapterId: string,
+  status: "published" | "draft"
+): Promise<void> {
+  try {
+    const chapterRef = doc(db, SERIES, workId, "chapters", chapterId);
+    const snap = await getDoc(chapterRef);
+    const wasDraft = !snap.exists() || snap.data()?.status === "draft";
+    const becomingDraft = status === "draft";
+    await updateDoc(chapterRef, { status });
+
+    if (wasDraft !== becomingDraft) {
+      const delta = becomingDraft ? -1 : 1;
+      await updateDoc(doc(db, PUBLISHED_SERIES, workId), { chapterCount: increment(delta) }).catch(() => {});
+      await updateDoc(doc(db, "creatorWorks", workId), { chapterCount: increment(delta) }).catch(() => {});
+    }
+  } catch (error) {
+    await logError(error, { operation: "setChapterStatus", workId, chapterId, status });
+    throw error;
+  }
+}
+
+/**
+ * Permanently deletes one published chapter: removes its Firestore doc, decrements chapterCount
+ * on both publishedSeries and creatorWorks (mirroring addChapter's increment — skipped if the
+ * deleted chapter was already a draft, since drafts were never counted), then notifies the
+ * series' followers that it's gone.
+ *
+ * Cloudinary cleanup is deliberately skipped for the same reason deleteWork's own doc comment
+ * gives: chapter images are stored as plain secure_urls rather than the publicId deleteFile()
+ * needs, and parsing one out of the URL risks deleting the wrong asset — orphaned files are a
+ * storage cost, not a functional bug, which beats that risk.
+ *
+ * "Notifies affected readers" is approximated as the series' followers, the same audience
+ * addChapter() notifies on publish — there's no reverse index from a chapter id to specifically
+ * who paid to unlock it (deleteWork's doc comment flags the identical gap for a whole-series
+ * delete), so a wider, follower-based notification is the closest honest equivalent.
+ */
+export async function deleteChapter(workId: string, chapterId: string, chapterLabel: string): Promise<void> {
+  try {
+    const chapterRef = doc(db, SERIES, workId, "chapters", chapterId);
+    const snap = await getDoc(chapterRef);
+    const wasDraft = snap.exists() && snap.data()?.status === "draft";
+    await deleteDoc(chapterRef);
+
+    if (!wasDraft) {
+      await updateDoc(doc(db, PUBLISHED_SERIES, workId), { chapterCount: increment(-1) }).catch(() => {});
+      await updateDoc(doc(db, "creatorWorks", workId), { chapterCount: increment(-1) }).catch(() => {});
+    }
+
+    const series = await getPublishedSeries(workId);
+    if (series) {
+      const authorSnap = await getDoc(doc(db, "users", series.authorId));
+      const followers: string[] = authorSnap.exists() ? (authorSnap.data().followers ?? []) : [];
+      await Promise.all(
+        followers.map((uid) =>
+          createNotification(
+            uid,
+            NotificationType.ANNOUNCEMENT,
+            "Chapter removed",
+            `${chapterLabel} of ${series.title} has been removed by the creator.`,
+            `/manga/${workId}`
+          ).catch(() => {})
+        )
+      );
+    }
+  } catch (error) {
+    await logError(error, { operation: "deleteChapter", workId, chapterId });
+    throw error;
+  }
+}
+
+/** Best-effort per-chapter read counter — bumped by both readers (ReaderClient for
+ * manga/manhwa/manhua, ProseReaderClient for prose) alongside their existing incrementSeriesReads
+ * call, so the creator's Manage Chapters panel can show each chapter's own reads rather than only
+ * the series-wide total. Never throws into the reader's render path. */
+export async function incrementChapterReads(workId: string, chapterId: string): Promise<void> {
+  try {
+    await updateDoc(doc(db, SERIES, workId, "chapters", chapterId), { readCount: increment(1) });
+  } catch (error) {
+    await logError(error, { operation: "incrementChapterReads", workId, chapterId });
   }
 }
 

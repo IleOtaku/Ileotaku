@@ -112,6 +112,16 @@ export interface UserProfile {
   /** "HH:mm" 24-hour local time-of-day for the daily reading-reminder push notification —
    * Platinum-exclusive. Absent/undefined means no reminder is scheduled. */
   reminderTime?: string;
+  /** Platinum-exclusive: when true, this account's visits to OTHER people's profiles are
+   * recorded as anonymous (see lib/profileVisits.ts's recordVisit) rather than attributed. Has
+   * no effect on visits made by free accounts, which are always attributed regardless. */
+  hideProfileVisits?: boolean;
+  /** Per-notification-category push preferences (Sprint "Polish-2" Part 6) — a key absent from
+   * this object defaults to "on", so an account that predates this feature (or hasn't touched
+   * Settings yet) still gets every push it would have before. In-app notifications (the bell/
+   * notifications collection) are never gated by this; only whether createNotification() also
+   * fires a device push is. */
+  notificationPreferences?: NotificationCategoryPreferences;
 
   /* ---------------------------- Sprint 9d: inactivity auto-deletion ---------------------------- */
 
@@ -178,6 +188,36 @@ export interface ReadingPreferences {
 export interface NotificationPreferences {
   chapterAlerts: boolean;
   announcements: boolean;
+}
+
+/** The granular per-category push toggles behind Settings → Notifications' full preference
+ * list (Sprint "Polish-2" Part 6) — every key is optional and defaults to "on" when absent, so
+ * createNotification() only ever suppresses a push when a reader has explicitly turned a
+ * category off. Grouped in comments the same way the Settings UI groups its checkboxes.
+ *
+ * A few of these categories (newDM, postLike, newReaderOnSeries, chapterMilestone, newFeatures)
+ * don't have a live notification trigger wired up elsewhere in this codebase yet — the toggle
+ * still saves correctly and is ready for when one is added, it just has nothing to gate today. */
+export interface NotificationCategoryPreferences {
+  /* Reading */
+  newChapterFollowedSeries?: boolean;
+  newChapterFollowedCreator?: boolean;
+  /* Social */
+  newDM?: boolean;
+  commentReply?: boolean;
+  postLike?: boolean;
+  newFollower?: boolean;
+  mention?: boolean;
+  /* Creator (only meaningful/shown for isCreator accounts) */
+  workApprovedRejected?: boolean;
+  tipReceived?: boolean;
+  newReaderOnSeries?: boolean;
+  chapterMilestone?: boolean;
+  /* Profile */
+  profileVisit?: boolean;
+  /* Platform */
+  announcements?: boolean;
+  newFeatures?: boolean;
 }
 
 export type AdminType = "super" | "sub" | "accountant" | "technical" | "community";
@@ -336,6 +376,11 @@ export interface PublishedSeries {
   isFeatured?: boolean;
   /** Sum of every chapter's wordCount, kept in step by addChapter() — prose works only. */
   totalWordCount?: number;
+  /** Admin's "Suspend Series" (Sprint "Polish-2" Part 2's Review Series panel) — true hides this
+   * series from every reader-facing query (Explore, Browse, search all read from the same
+   * getAllPublishedSeries()/getPublishedSeries() this filters by default) without touching its
+   * chapters or any reader's unlock records, so "Restore Series" can bring it straight back. */
+  isHidden?: boolean;
 }
 
 /** One chapter of a creator-published work, stored at `series/{workId}/chapters/{chapterId}`.
@@ -348,7 +393,11 @@ export interface PublishedChapter {
   title: string;
   images: string[];
   coinPrice: number;
-  status: "published";
+  /** "draft" (Sprint "Polish-2" Part 1's Turn to Draft) hides a chapter from every reader-facing
+   * query — see getSeriesChapters/subscribeToSeriesChapters in lib/publishedSeries.ts, both of
+   * which filter it out by default — while keeping it in the creator's own Manage Chapters panel
+   * (which explicitly opts in via `includeDrafts: true`) so it can be edited or re-published. */
+  status: "published" | "draft";
   publishedAt: string;
   /** Prose-only: the chapter's full text. */
   content?: string;
@@ -356,6 +405,10 @@ export interface PublishedChapter {
   wordCount?: number;
   /** Prose-only: minutes, estimated from wordCount at ~200 words/minute. */
   estimatedReadTime?: number;
+  /** Per-chapter read count (Sprint "Polish-2" Part 1) — bumped by incrementChapterReads()
+   * alongside the series-wide totalReads counter every reader already bumps. Absent/0 on any
+   * chapter published before this field existed. */
+  readCount?: number;
 }
 
 /** A chapter saved but not yet published — series/{workId}/draftChapters/{draftId}. Same shape
@@ -586,6 +639,7 @@ export enum NotificationType {
   APPEAL_APPROVED = "APPEAL_APPROVED",
   APPEAL_DENIED = "APPEAL_DENIED",
   RESTRICTION_LIFTED = "RESTRICTION_LIFTED",
+  PROFILE_VISIT = "PROFILE_VISIT",
 }
 
 /** Named `AppNotification` (not `Notification`) to avoid colliding with the DOM Notification API. */
@@ -809,10 +863,17 @@ export interface CreatorPost {
   completedViews?: number;
   /** Times a video looped back to the start while still in view, via trackVideoReplay(). */
   replayCount?: number;
-  /** Times a viewer tapped through to the author's profile from this post, via trackProfileVisit(). */
-  profileVisits?: number;
+  /** Times a viewer tapped through to the author's profile from this post, via trackProfileVisit().
+   * Sprint "Polish-2" Part 8 renamed this field (from `profileVisits`) to match the spec's
+   * calculateForYouScore signature exactly — toPost() in lib/creatorFeed.ts still reads the older
+   * `profileVisits` key on any pre-existing post doc that predates the rename, so no engagement
+   * data already accumulated under the old name is lost. */
+  profileVisitsFromPost?: number;
   /** Times this post was shared (any share sheet option), via trackShare(). */
   shareCount?: number;
+  /** Times this post was bookmarked (Saved Posts) and still saved — incremented by savePost(),
+   * decremented by unsavePost(). Sprint "Polish-2" Part 8. */
+  bookmarkCount?: number;
 }
 
 /* ---------------------------- Feed post comments ---------------------------- */

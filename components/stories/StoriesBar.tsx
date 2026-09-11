@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus } from "lucide-react";
+import { Play, Plus } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { useAuth } from "@/hooks/useAuth";
-import { subscribeToStories } from "@/lib/stories";
+import { MAX_ACTIVE_STORIES, subscribeToStories } from "@/lib/stories";
 import type { Story } from "@/types";
 import StoryCreateModal from "./StoryCreateModal";
 import StoryViewer from "./StoryViewer";
@@ -41,7 +41,7 @@ export default function StoriesBar() {
   }
 
   return (
-    <div className="flex gap-4 overflow-x-auto pb-2">
+    <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide">
       <button
         type="button"
         onClick={() => (myStories.length > 0 ? setViewingUid(user.uid) : setCreateOpen(true))}
@@ -53,8 +53,27 @@ export default function StoriesBar() {
           }`}
         >
           <Avatar uid={user.uid} photoURL={profile?.photoURL ?? user.photoURL ?? undefined} displayName={profile?.displayName ?? "You"} size={56} />
-          {myStories.length === 0 && (
-            <span className="absolute -right-0.5 -bottom-0.5 flex h-5 w-5 items-center justify-center rounded-full border-2 border-bg bg-clay text-ivory">
+          {myStories.length > 1 && (
+            <span className="absolute -left-0.5 -top-0.5 flex h-5 min-w-[20px] items-center justify-center rounded-full border-2 border-bg bg-gold px-1 font-syne text-[10px] font-bold text-bg">
+              {myStories.length}
+            </span>
+          )}
+          {myStories.length < MAX_ACTIVE_STORIES && (
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(e) => {
+                e.stopPropagation();
+                setCreateOpen(true);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.stopPropagation();
+                  setCreateOpen(true);
+                }
+              }}
+              className="absolute -right-0.5 -bottom-0.5 flex h-5 w-5 items-center justify-center rounded-full border-2 border-bg bg-clay text-ivory"
+            >
               <Plus className="h-3 w-3" />
             </span>
           )}
@@ -72,8 +91,18 @@ export default function StoriesBar() {
             onClick={() => setViewingUid(uid)}
             className="flex w-16 shrink-0 flex-col items-center gap-1.5"
           >
-            <span className={`flex h-16 w-16 items-center justify-center rounded-full ${hasUnwatched(stories) ? "ring-2 ring-gold" : "ring-2 ring-muted2"}`}>
+            <span className={`relative flex h-16 w-16 items-center justify-center rounded-full ${hasUnwatched(stories) ? "ring-2 ring-gold" : "ring-2 ring-muted2"}`}>
               <Avatar uid={uid} photoURL={latest?.photoURL} displayName={latest?.displayName ?? "Reader"} size={56} />
+              {stories.length > 1 && (
+                <span className="absolute -left-0.5 -top-0.5 flex h-5 min-w-[20px] items-center justify-center rounded-full border-2 border-bg bg-gold px-1 font-syne text-[10px] font-bold text-bg">
+                  {stories.length}
+                </span>
+              )}
+              {latest?.mediaType === "video" && (
+                <span className="absolute -right-0.5 -bottom-0.5 flex h-5 w-5 items-center justify-center rounded-full border-2 border-bg bg-bg text-text">
+                  <Play className="h-2.5 w-2.5 fill-current" />
+                </span>
+              )}
             </span>
             <span className="max-w-[64px] truncate font-noto text-[11px] text-muted">{latest?.displayName ?? "Reader"}</span>
           </button>

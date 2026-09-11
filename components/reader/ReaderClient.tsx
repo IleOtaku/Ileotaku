@@ -17,6 +17,7 @@ import {
   updateUserPrefs,
 } from "@/lib/firestore";
 import {
+  incrementChapterReads,
   incrementSeriesReads,
   listAllCreatorWorks,
   listCreatorMangaWorks,
@@ -328,6 +329,14 @@ export default function ReaderClient() {
     if (trackedReads.current.has(key)) return;
     trackedReads.current.add(key);
     incrementSeriesReads(detail.id ?? selectedId ?? "");
+    // currentChapter.id here is the "creator:{workId}:{chapterDocId}" composite id
+    // getPublishedSeriesDetail() encodes chapters with — parse the real chapter doc id back out
+    // so Manage Chapters' per-chapter read count includes reads from this (manga/manhwa/manhua)
+    // reader too, not just the prose one.
+    if (currentChapter.id.startsWith("creator:")) {
+      const [, workId, chapterDocId] = currentChapter.id.split(":");
+      if (workId && chapterDocId) incrementChapterReads(workId, chapterDocId);
+    }
   }, [isCreatorSource, detail, currentChapter, pagesLoading, pages.length, selectedId]);
 
   const handleSelectManga = useCallback(

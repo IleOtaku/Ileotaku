@@ -13,6 +13,7 @@ import BlockedContentGate from "@/components/social/BlockedContentGate";
 import CurrentlyReadingCard from "@/components/social/CurrentlyReadingCard";
 import FollowButton from "@/components/social/FollowButton";
 import MessageButton from "@/components/social/MessageButton";
+import ProfileVisitRecorder from "@/components/social/ProfileVisitRecorder";
 import ReportButton from "@/components/social/ReportButton";
 import NowPlayingCard from "@/components/spotify/NowPlayingCard";
 import type { CreatorPost, PublishedSeries, UserProfile } from "@/types";
@@ -79,6 +80,7 @@ export default async function CreatorProfilePage({ params }: CreatorProfilePageP
 
   return (
     <BlockedContentGate targetUid={creator.uid} targetLabel={creator.handle ?? creator.displayName}>
+    <ProfileVisitRecorder profileUid={creator.uid} />
     <div className="relative">
       <div
         className="relative h-48 w-full overflow-hidden bg-bg2 sm:h-64"

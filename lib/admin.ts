@@ -47,6 +47,7 @@ import {
   type ErrorLogStatus,
   type MaintenanceRequest,
   type MaintenanceState,
+  type PublishedSeries,
   type Report,
   type ReportStatus,
   type ReportTargetType,
@@ -57,6 +58,7 @@ import { logError } from "./errorLogger";
 import { db } from "./firebase";
 import { getAllUsers, getUserProfile } from "./firestore";
 import { createNotification } from "./notifications";
+import { deleteWork, getAllPublishedSeries } from "./publishedSeries";
 
 const USERS = "users";
 const CREATOR_WORKS = "creatorWorks";
@@ -402,6 +404,58 @@ export async function getWorksByStatus(status: WorkStatus): Promise<CreatorWork[
   return snap.docs
     .map((d) => ({ id: d.id, ...d.data() }) as CreatorWork)
     .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+}
+
+/** One creatorWorks doc by id — the source-of-truth submission record behind a publishedSeries
+ * summary, used by the admin Approved tab to show a "Submitted" date (creatorWorks.createdAt)
+ * and revenue (creatorWorks.earnings) that publishedSeries doesn't itself carry. */
+export async function getCreatorWorkById(workId: string): Promise<CreatorWork | null> {
+  try {
+    const snap = await getDoc(doc(db, CREATOR_WORKS, workId));
+    return snap.exists() ? ({ id: snap.id, ...snap.data() } as CreatorWork) : null;
+  } catch (error) {
+    await logError(error, { operation: "getCreatorWorkById", workId });
+    return null;
+  }
+}
+
+/**
+ * Sprint "Polish-2" Part 2 fix: the admin Works panel's Approved tab used to query
+ * `creatorWorks` where `status == "approved"` — a value approveWork() never actually writes,
+ * since it promotes a submission straight from "pending" to "published" in one step (see
+ * approveWork's own doc comment). That query always came back empty, which was the reported bug.
+ * Every doc that exists in `publishedSeries` IS, by definition, a published/approved work (that
+ * collection carries no separate status field of its own — existence in it is the signal), so
+ * this is the query the Approved tab should actually run.
+ */
+export async function getApprovedSeriesForAdmin(): Promise<PublishedSeries[]> {
+  return getAllPublishedSeries(300, { includeHidden: true });
+}
+
+/** Suspend/Restore (Part 2's Review Series panel) — `isHidden` is checked by every reader-facing
+ * publishedSeries query the same way a draft chapter is: Explore/Browse/search all read from this
+ * same collection, so setting it hides a series from all of them immediately without touching its
+ * chapters or reader-owned unlock records. */
+export async function suspendSeries(workId: string): Promise<void> {
+  await updateDoc(doc(db, "publishedSeries", workId), { isHidden: true });
+}
+
+export async function restoreSeries(workId: string): Promise<void> {
+  await updateDoc(doc(db, "publishedSeries", workId), { isHidden: false });
+}
+
+/** Admin's "Delete Series" — the same underlying cleanup the creator's own DeleteWorkModal uses
+ * (deleteWork: every chapter doc, the publishedSeries summary, and the creatorWorks doc), plus a
+ * notification to the creator since this time it wasn't their own decision. */
+export async function adminDeleteSeries(series: PublishedSeries): Promise<void> {
+  await deleteWork(series.id);
+  await createNotification(
+    series.authorId,
+    NotificationType.MODERATION_ACTION,
+    "Series removed",
+    `"${series.title}" was removed by an ÍléOtaku moderator for violating platform guidelines.`,
+    "/creator"
+  ).catch(() => {});
 }
 
 /**

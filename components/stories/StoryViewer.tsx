@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
-import { Eye, Send, Trash2, X } from "lucide-react";
+import { Eye, Send, Trash2, Volume2, VolumeX, X } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { useAuth } from "@/hooks/useAuth";
 import { sendDM, startConversation } from "@/lib/dms";
@@ -47,21 +47,41 @@ export default function StoryViewer({ uids, startUid, storiesByUid, onClose, onA
   const touchStartY = useRef<number | null>(null);
   const rafRef = useRef<number | null>(null);
   const lastTickRef = useRef<number>(0);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  // Video segments track their own progress off the real <video> element's currentTime/duration
+  // (via onTimeUpdate/onLoadedMetadata below) rather than the rAF wall-clock timer every other
+  // segment type uses — that timer used to run against `segmentDuration: undefined` for video,
+  // which the rAF effect below just skips entirely, so a video's progress bar never filled.
+  const [videoProgress, setVideoProgress] = useState(0);
+  const [muted, setMuted] = useState(false);
 
   const uid = uids[personIndex];
   const stories = storiesByUid.get(uid) ?? [];
   const story = stories[segmentIndex];
   const isOwn = uid === user?.uid;
-  const segmentDuration = story?.mediaType === "video" ? undefined : (story?.duration ?? DEFAULT_SEGMENT_MS);
+  const isVideo = story?.mediaType === "video";
+  const segmentDuration = isVideo ? undefined : (story?.duration ?? DEFAULT_SEGMENT_MS);
 
   useEffect(() => {
     setSegmentIndex(0);
     setElapsed(0);
+    setVideoProgress(0);
   }, [personIndex]);
 
   useEffect(() => {
     setElapsed(0);
+    setVideoProgress(0);
   }, [segmentIndex]);
+
+  // Hover/hold-to-pause must actually pause video playback too, not just freeze a JS timer —
+  // otherwise the video keeps playing (and its sound keeps going) underneath the "⏸" overlay.
+  useEffect(() => {
+    if (!isVideo) return;
+    const el = videoRef.current;
+    if (!el) return;
+    if (paused) el.pause();
+    else el.play().catch(() => {});
+  }, [paused, isVideo, segmentIndex, personIndex]);
 
   // Marks the current segment viewed once, when it first becomes the active one.
   useEffect(() => {
@@ -247,7 +267,12 @@ export default function StoryViewer({ uids, startUid, storiesByUid, onClose, onA
                   // `paused` is true — the same practical effect as `animation-play-state:
                   // paused` on a CSS-keyframe bar, without needing this segment's whole-duration
                   // width to be expressed as a restartable CSS animation.
-                  width: i < segmentIndex ? "100%" : i === segmentIndex ? `${Math.min(100, (elapsed / (segmentDuration ?? 1)) * 100)}%` : "0%",
+                  width:
+                    i < segmentIndex
+                      ? "100%"
+                      : i === segmentIndex
+                        ? `${isVideo ? videoProgress : Math.min(100, (elapsed / (segmentDuration ?? 1)) * 100)}%`
+                        : "0%",
                 }}
               />
             </div>
@@ -290,7 +315,32 @@ export default function StoryViewer({ uids, startUid, storiesByUid, onClose, onA
               <p className="text-center font-cinzel text-2xl text-white">{story.textContent}</p>
             </div>
           ) : story.mediaType === "video" ? (
-            <video src={story.mediaUrl} autoPlay muted={false} className="h-full w-full object-contain" onEnded={goNextSegment} />
+            <>
+              <video
+                ref={videoRef}
+                src={story.mediaUrl}
+                autoPlay
+                muted={muted}
+                playsInline
+                className="h-full w-full object-contain"
+                onTimeUpdate={(e) => {
+                  const el = e.currentTarget;
+                  setVideoProgress(el.duration > 0 ? Math.min(100, (el.currentTime / el.duration) * 100) : 0);
+                }}
+                onEnded={goNextSegment}
+              />
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMuted((m) => !m);
+                }}
+                aria-label={muted ? "Unmute" : "Mute"}
+                className="absolute bottom-3 right-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-sm"
+              >
+                {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+              </button>
+            </>
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={story.mediaUrl} alt="" className="h-full w-full object-contain" />

@@ -19,6 +19,7 @@ import { Skeleton } from "@/components/ui";
 import { Avatar } from "@/components/ui/Avatar";
 import { subscribeToCommentsCount, subscribeToRatings } from "@/lib/firestore";
 import { getMangaDetail, getMangaList, proxyImg, type MangaDetailResponse } from "@/lib/manga-api";
+import { subscribeToSeriesChapters } from "@/lib/publishedSeries";
 
 /** Small live star-and-average row shown right under the title — the same average RatingWidget
  * computes further down the page, subscribed independently here since this row renders well
@@ -112,6 +113,30 @@ export default function MangaDetailClient({ id, from }: MangaDetailClientProps) 
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // Sprint "Polish-2" Part 1: once the initial detail load establishes this is a creator work,
+  // subscribe to its live (published-only) chapter list so an edit/turn-to-draft/delete made in
+  // the creator's Manage Chapters panel appears on this public page immediately — no refresh.
+  useEffect(() => {
+    if (!detail || detail.source !== "creator") return;
+    const unsub = subscribeToSeriesChapters(id, (chapters) => {
+      setDetail((prev) =>
+        prev
+          ? {
+              ...prev,
+              chapterList: chapters.map((c) => ({
+                id: `creator:${id}:${c.id}`,
+                chapter: c.title?.trim() || `Chapter ${c.chapterNumber}`,
+                createdAt: c.publishedAt,
+                coinPrice: c.coinPrice,
+              })),
+            }
+          : prev
+      );
+    });
+    return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail?.source, id]);
 
   if (status === "not-found") {
     notFound();

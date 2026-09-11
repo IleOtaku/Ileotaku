@@ -15,12 +15,75 @@
 
 html {
   scroll-behavior: smooth;
+  overflow-x: hidden;
+  max-width: 100vw;
 }
 
 body {
   color: var(--foreground);
   background: var(--background);
   font-family: "Noto Sans", ui-sans-serif, sans-serif;
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+/* ---------------------------- Custom scrollbars ---------------------------- */
+
+/* Webkit (Chrome, Safari, Edge) */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c4622d40; /* clay at 25% opacity */
+  border-radius: 999px;
+  transition: background 0.2s;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #c4622d; /* full clay on hover */
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #c4622d40 transparent;
+}
+
+*:hover {
+  scrollbar-color: #c4622d transparent;
+}
+
+/* Horizontal scrollbars (manga rows, admin tables, etc.) get a gold thumb instead, thinner still
+ * since these tracks are much shorter than a full-page vertical scrollbar. */
+.overflow-x-auto::-webkit-scrollbar {
+  height: 4px;
+}
+
+.overflow-x-auto::-webkit-scrollbar-thumb {
+  background: #d4a84340; /* gold at 25% opacity */
+}
+
+.overflow-x-auto::-webkit-scrollbar-thumb:hover {
+  background: #d4a843; /* full gold on hover */
+}
+
+/* Hide scrollbar but keep scrollable — stories bar, horizontal manga rows, bottom tab bar. */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
 }
 
 @layer utilities {

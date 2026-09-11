@@ -16,10 +16,36 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { db } from "./firebase";
-import { NotificationType, type AppNotification } from "@/types";
+import { NotificationType, type AppNotification, type NotificationCategoryPreferences } from "@/types";
 
 function notificationsCollection(uid: string) {
   return collection(db, "users", uid, "notifications");
+}
+
+/** Maps a NotificationType to the Settings → Notifications preference key that gates its push
+ * delivery — see NotificationCategoryPreferences' own doc comment. A type with no entry here
+ * (moderation actions, Platinum billing notices, achievements, ...) is never suppressible: it
+ * always sends, the same as before this preference system existed. */
+const PUSH_PREFERENCE_KEY: Partial<Record<NotificationType, keyof NotificationCategoryPreferences>> = {
+  [NotificationType.NEW_CHAPTER]: "newChapterFollowedCreator",
+  [NotificationType.COMMENT_REPLY]: "commentReply",
+  [NotificationType.NEW_FOLLOWER]: "newFollower",
+  [NotificationType.GROUP_MENTION]: "mention",
+  [NotificationType.WORK_APPROVED]: "workApprovedRejected",
+  [NotificationType.WORK_REJECTED]: "workApprovedRejected",
+  [NotificationType.COINS_RECEIVED]: "tipReceived",
+  [NotificationType.ANNOUNCEMENT]: "announcements",
+  [NotificationType.PROFILE_VISIT]: "profileVisit",
+};
+
+/** Whether `type`'s push should actually go out for a profile carrying `prefs` — absent
+ * preferences (the whole object, or just this one key) default to "on", per the spec's "not set
+ * = default all on". The in-app notification (already written by the time this is checked) is
+ * never gated by this, only the device push. */
+function isPushEnabled(type: NotificationType, prefs: NotificationCategoryPreferences | undefined): boolean {
+  const key = PUSH_PREFERENCE_KEY[type];
+  if (!key) return true;
+  return prefs?.[key] !== false;
 }
 
 /** Delivers one push notification to every FCM token on `uid`'s profile via
@@ -27,10 +53,12 @@ function notificationsCollection(uid: string) {
  * that route's own comment for why). Best-effort: a delivery failure never blocks the in-app
  * notification this always accompanies. A token the API reports as no-longer-registered is
  * pruned from the profile so it isn't retried on the next notification. */
-async function sendPushToUser(uid: string, title: string, body: string, url: string): Promise<void> {
+async function sendPushToUser(uid: string, type: NotificationType, title: string, body: string, url: string): Promise<void> {
   try {
     const snap = await getDoc(doc(db, "users", uid));
-    const tokens: string[] = snap.exists() ? (snap.data().fcmTokens ?? []) : [];
+    if (!snap.exists()) return;
+    if (!isPushEnabled(type, snap.data().notificationPreferences)) return;
+    const tokens: string[] = snap.data().fcmTokens ?? [];
     if (tokens.length === 0) return;
 
     const results = await Promise.all(
@@ -80,7 +108,7 @@ export async function createNotification(
     isRead: false,
     createdAt: new Date().toISOString(),
   });
-  await sendPushToUser(uid, title, body, actionURL);
+  await sendPushToUser(uid, type, title, body, actionURL);
 }
 
 export async function markAsRead(uid: string, notifId: string): Promise<void> {

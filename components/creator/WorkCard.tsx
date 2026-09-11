@@ -1,6 +1,6 @@
 import { useState } from "react";
 import Link from "next/link";
-import { Award, BookPlus, FileEdit, MoreVertical, Repeat, Trash2 } from "lucide-react";
+import { Award, BookPlus, FileEdit, ListChecks, MoreVertical, Repeat, Trash2 } from "lucide-react";
 import { getOptimizedImageUrl } from "@/lib/cloudinary";
 import { formatTime } from "@/lib/utils";
 import type { CreatorWork } from "@/types";
@@ -29,6 +29,9 @@ export interface WorkCardProps {
   onDeleteWork?: () => void;
   onViewDrafts?: () => void;
   onTransferOwnership?: () => void;
+  /** Sprint "Polish-2" Part 1 — opens the per-chapter management panel (edit/turn-to-draft/
+   * delete). Only meaningful once `work.status === "published"`, same as onAddChapter. */
+  onManageChapters?: () => void;
 }
 
 /** Reusable series card: cover, status badge, genre tags, view/submission stats, and earnings.
@@ -41,6 +44,7 @@ export default function WorkCard({
   onDeleteWork,
   onViewDrafts,
   onTransferOwnership,
+  onManageChapters,
 }: WorkCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const hasManagementMenu = onEditSeries || onDeleteWork || onViewDrafts || onTransferOwnership;
@@ -174,6 +178,15 @@ export default function WorkCard({
                 className="flex items-center gap-1.5 rounded-full bg-clay/15 px-3 py-1.5 font-noto text-xs font-semibold text-clay2 hover:bg-clay/25"
               >
                 <BookPlus className="h-3.5 w-3.5" /> Add Chapter
+              </button>
+            )}
+            {onManageChapters && (
+              <button
+                type="button"
+                onClick={onManageChapters}
+                className="flex items-center gap-1.5 rounded-full bg-bg3 px-3 py-1.5 font-noto text-xs font-semibold text-muted hover:bg-bg4 hover:text-text"
+              >
+                <ListChecks className="h-3.5 w-3.5" /> Manage Chapters
               </button>
             )}
             {work.certId && (

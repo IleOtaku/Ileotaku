@@ -1,10 +1,18 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import { ImagePlus, Loader2, Type, Video, X } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
-import { createStory, PLATINUM_STORY_DURATIONS, type StoryMedia } from "@/lib/stories";
+import {
+  createStory,
+  getUserStories,
+  MAX_ACTIVE_STORIES,
+  MAX_VIDEO_SECONDS_FREE,
+  MAX_VIDEO_SECONDS_PLATINUM,
+  PLATINUM_STORY_DURATIONS,
+  type StoryMedia,
+} from "@/lib/stories";
 
 export interface StoryCreateModalProps {
   open: boolean;
@@ -18,7 +26,7 @@ const BG_COLORS = ["#c4622d", "#d4a843", "#3d6b4f", "#1a1510", "#7c3aed", "#0369
  * silently locked to the default 24h by createStory() itself, not just this UI. */
 export default function StoryCreateModal({ open, onClose }: StoryCreateModalProps) {
   const { user, profile } = useAuth();
-  const [mode, setMode] = useState<"picker" | "text" | "preview">("picker");
+  const [mode, setMode] = useState<"picker" | "text" | "preview" | "add-another">("picker");
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [fileKind, setFileKind] = useState<"image" | "video">("image");
@@ -26,7 +34,15 @@ export default function StoryCreateModal({ open, onClose }: StoryCreateModalProp
   const [backgroundColor, setBackgroundColor] = useState(BG_COLORS[0]);
   const [durationMs, setDurationMs] = useState(PLATINUM_STORY_DURATIONS[4].ms); // 24h default
   const [submitting, setSubmitting] = useState(false);
+  const [activeStoryCount, setActiveStoryCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!open || !user) return;
+    getUserStories(user.uid).then((s) => setActiveStoryCount(s.length));
+    // Re-checked after each successful share (mode flips to "add-another") so the limit reflects
+    // the story just added without a full modal remount.
+  }, [open, user, mode]);
 
   if (!open || !user) return null;
 
@@ -47,8 +63,33 @@ export default function StoryCreateModal({ open, onClose }: StoryCreateModalProp
   function handleFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
     const picked = e.target.files?.[0];
     if (!picked) return;
+    const isVideo = picked.type.startsWith("video/");
+
+    if (isVideo) {
+      // Checked against the file's REAL duration (not just its container/size), per Part 7's
+      // spec — 30s for a free account, 90s for Platinum. Read via a throwaway <video> element's
+      // loadedmetadata event, the standard way to get a picked file's duration before upload.
+      const probe = document.createElement("video");
+      probe.preload = "metadata";
+      probe.onloadedmetadata = () => {
+        URL.revokeObjectURL(probe.src);
+        const maxSeconds = profile?.isPlatinum ? MAX_VIDEO_SECONDS_PLATINUM : MAX_VIDEO_SECONDS_FREE;
+        if (probe.duration > maxSeconds) {
+          toast.error(`Video must be under ${MAX_VIDEO_SECONDS_FREE}s (${MAX_VIDEO_SECONDS_PLATINUM}s for Platinum)`);
+          e.target.value = "";
+          return;
+        }
+        setFile(picked);
+        setFileKind("video");
+        setPreviewUrl(URL.createObjectURL(picked));
+        setMode("preview");
+      };
+      probe.src = URL.createObjectURL(picked);
+      return;
+    }
+
     setFile(picked);
-    setFileKind(picked.type.startsWith("video/") ? "video" : "image");
+    setFileKind("image");
     setPreviewUrl(URL.createObjectURL(picked));
     setMode("preview");
   }
@@ -67,10 +108,13 @@ export default function StoryCreateModal({ open, onClose }: StoryCreateModalProp
           : { kind: fileKind, file: file ?? undefined };
       await createStory(user.uid, profile, media, durationMs);
       toast.success("Story shared!");
-      reset();
-      onClose();
-    } catch {
-      toast.error("Couldn't share your story. Please try again.");
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      setFile(null);
+      setPreviewUrl(null);
+      setTextContent("");
+      setMode("add-another");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't share your story. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -131,6 +175,32 @@ export default function StoryCreateModal({ open, onClose }: StoryCreateModalProp
               </div>
             </button>
             <input ref={fileInputRef} type="file" accept="image/*,video/*" onChange={handleFilePicked} className="hidden" />
+          </div>
+        )}
+
+        {mode === "add-another" && (
+          <div className="flex w-full max-w-xs flex-col items-center gap-4 text-center">
+            <span className="text-4xl">✅</span>
+            <p className="font-cinzel text-lg text-text">Story shared!</p>
+            <p className="font-noto text-sm text-muted">Add another story?</p>
+            <div className="flex w-full gap-2">
+              <button type="button" onClick={handleClose} className="btn-ghost flex-1">
+                Done
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode("picker")}
+                disabled={activeStoryCount >= MAX_ACTIVE_STORIES}
+                className="btn-primary flex-1 disabled:opacity-40"
+              >
+                Add Another
+              </button>
+            </div>
+            {activeStoryCount >= MAX_ACTIVE_STORIES && (
+              <p className="font-noto text-xs text-muted">
+                You&apos;ve reached the {MAX_ACTIVE_STORIES}-story limit — delete one to add another.
+              </p>
+            )}
           </div>
         )}
 

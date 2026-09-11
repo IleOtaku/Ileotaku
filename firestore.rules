@@ -159,6 +159,26 @@ service cloud.firestore {
       match /savedPosts/{postId} {
         allow read, write: if isOwner(uid);
       }
+
+      // Sprint "Polish-2" Part 4: purchaseVisitorReveal()'s 24h unlock record — private to the
+      // account that bought it (whose profile it unlocks other visitors' identities on), same
+      // shape as `drafts`/`savedPosts` above.
+      match /revealedVisitors/{profileUid} {
+        allow read, write: if isOwner(uid);
+      }
+    }
+
+    // Sprint "Polish-2" Part 4: profileVisits/{profileUid}/visitors/{visitorUid} — who visited
+    // profileUid's profile. Read is owner-of-profileUid-or-admin only (a visitor list is private
+    // to the profile it belongs to, unlike most of this app's largely-public activity data).
+    // Write is any signed-in user, but ONLY on their own visitorUid subdocument — recordVisit()
+    // (lib/profileVisits.ts) always writes visitorUid == request.auth.uid, matching the same
+    // "narrow, self-scoped write on someone else's document" shape as the `blocked` subcollection
+    // above (isOwner(profileUid) can never be true here, since the writer is visiting SOMEONE
+    // ELSE's profile by definition).
+    match /profileVisits/{profileUid}/visitors/{visitorUid} {
+      allow read: if isSignedIn() && (request.auth.uid == profileUid || isAdmin());
+      allow write: if isSignedIn() && request.auth.uid == visitorUid;
     }
 
     // ---------------------------- Spotify Listen Along (Sprint 9d) ----------------------------
@@ -331,7 +351,15 @@ service cloud.firestore {
       // author to be able to remove their own chapters, not just an admin.
       match /chapters/{chapterId} {
         allow read: if true;
-        allow create, update, delete: if isSignedIn()
+        // Sprint "Polish-2" Part 1: incrementChapterReads() (lib/publishedSeries.ts) is called by
+        // ANY signed-in reader who opens a chapter, not just the work's own author — same
+        // "any signed-in user, one field only" carve-out publishedSeries' own totalReads field
+        // already has above, needed here for the identical reason.
+        allow update: if isSignedIn()
+          && (isAdmin()
+            || get(/databases/$(database)/documents/publishedSeries/$(seriesId)).data.authorId == request.auth.uid
+            || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["readCount"]));
+        allow create, delete: if isSignedIn()
           && (isAdmin()
             || get(/databases/$(database)/documents/publishedSeries/$(seriesId)).data.authorId == request.auth.uid);
       }
@@ -510,9 +538,14 @@ service cloud.firestore {
         && (resource.data.uid == request.auth.uid
           || isAdmin()
           || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["likes"])
+          // Sprint "Polish-2" Part 8: profileVisitsFromPost (trackProfileVisit's renamed field —
+          // profileVisits kept too, since bumpEngagementCounter's Math.max(0, ...) floor on
+          // savePost/unsavePost's bookmarkCount delta is the only other change to this list) and
+          // bookmarkCount (savePost()/unsavePost()) join the same "any signed-in user, engagement
+          // counters + forYouScore only" carve-out the rest of this list already covers.
           || request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(["viewCount", "watchTime", "forYouScore", "completedViews", "replayCount",
-                "profileVisits", "shareCount", "commentCount"]));
+                "profileVisits", "profileVisitsFromPost", "shareCount", "commentCount", "bookmarkCount"]));
       allow delete: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
 
       // ---------------------------- feed post comments ----------------------------

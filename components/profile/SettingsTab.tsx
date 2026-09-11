@@ -37,7 +37,7 @@ import { connectSpotify, disconnectSpotify, getSpotifyDisplayName } from "@/lib/
 import { formatTime, initials, stringToColor } from "@/lib/utils";
 import type {
   BugReport,
-  NotificationPreferences,
+  NotificationCategoryPreferences,
   ReaderTheme,
   ReadingPreferences,
   UserProfile,
@@ -66,11 +66,6 @@ const DEFAULT_PREFS: ReadingPreferences = {
   theme: "dark",
   autoload: true,
   showProgressBar: true,
-};
-
-const DEFAULT_NOTIFICATIONS: NotificationPreferences = {
-  chapterAlerts: true,
-  announcements: true,
 };
 
 /** blockUser() writes `blockedAt` via serverTimestamp(), so a freshly-read doc holds a real
@@ -115,7 +110,7 @@ export default function SettingsTab() {
   const [savingReminder, setSavingReminder] = useState(false);
 
   const prefs = profile?.preferences ?? DEFAULT_PREFS;
-  const notifications = profile?.notifications ?? DEFAULT_NOTIFICATIONS;
+  const notifPrefs: NotificationCategoryPreferences = profile?.notificationPreferences ?? {};
   const isPlatinum = profile?.isPlatinum === true;
   const [myBugReports, setMyBugReports] = useState<BugReport[]>([]);
   const [pushStatus, setPushStatus] = useState<NotificationPermissionStatus>("default");
@@ -205,10 +200,22 @@ export default function SettingsTab() {
     }
   }
 
-  async function updateNotifs(next: Partial<NotificationPreferences>) {
+  async function handleHideProfileVisits(value: boolean) {
+    if (!user || !isPlatinum) return;
+    try {
+      await updateUserPrefs(user.uid, { hideProfileVisits: value });
+      await refreshProfile();
+    } catch {
+      toast.error("Couldn't save your privacy setting.");
+    }
+  }
+
+  async function updateNotifPref(key: keyof NotificationCategoryPreferences, value: boolean) {
     if (!user) return;
     try {
-      await updateUserPrefs(user.uid, { notifications: { ...notifications, ...next } });
+      await updateUserPrefs(user.uid, {
+        notificationPreferences: { ...notifPrefs, [key]: value },
+      });
       await refreshProfile();
     } catch {
       toast.error("Couldn't save your notification settings.");
@@ -639,56 +646,161 @@ export default function SettingsTab() {
 
       <section>
         <h3 className="mb-4 font-syne text-sm font-semibold text-text">Notifications</h3>
-        <div className="flex flex-col gap-3 rounded-2xl border border-bg4 bg-bg2 p-5">
-          <Toggle
-            checked={notifications.chapterAlerts}
-            onChange={(v) => updateNotifs({ chapterAlerts: v })}
-            label="New chapter alerts"
-          />
-          <Toggle
-            checked={notifications.announcements}
-            onChange={(v) => updateNotifs({ announcements: v })}
-            label="ÍléOtaku announcements"
-          />
-
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-bg4 pt-4">
-            <div>
-              <p className="font-syne text-sm font-semibold text-text">Push notifications</p>
-              <p className="font-noto text-xs text-muted">
-                Status:{" "}
-                {pushStatus === "granted"
-                  ? "Enabled"
-                  : pushStatus === "denied"
-                    ? "Disabled"
-                    : pushStatus === "unsupported"
-                      ? "Not supported in this browser"
-                      : "Not asked"}
-              </p>
-              {pushStatus === "denied" && (
-                <p className="mt-1 max-w-sm font-noto text-xs text-clay2">
-                  Notifications are blocked for this site. Re-enable them from your browser&apos;s
-                  site settings (usually the padlock icon next to the address bar), then reload.
+        <div className="flex flex-col gap-5 rounded-2xl border border-bg4 bg-bg2 p-5">
+          <div>
+            <p className="mb-3 font-syne text-xs font-semibold uppercase tracking-wide text-muted">
+              📱 Device Notifications
+            </p>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="font-syne text-sm font-semibold text-text">Enable Device Notifications</p>
+                <p className="font-noto text-xs text-muted">
+                  Status:{" "}
+                  {pushStatus === "granted"
+                    ? "Enabled ✓"
+                    : pushStatus === "denied"
+                      ? "Disabled"
+                      : pushStatus === "unsupported"
+                        ? "Not supported in this browser"
+                        : "Not set up"}
                 </p>
+                {pushStatus === "denied" && (
+                  <p className="mt-1 max-w-sm font-noto text-xs text-clay2">
+                    Notifications are blocked for this site. Re-enable them from your browser&apos;s
+                    site settings (usually the padlock icon next to the address bar), then reload.
+                  </p>
+                )}
+              </div>
+              {pushStatus !== "denied" && pushStatus !== "unsupported" && (
+                <button
+                  type="button"
+                  onClick={handleEnablePush}
+                  disabled={requestingPush || pushStatus === "granted"}
+                  className="btn-ghost text-sm"
+                >
+                  {requestingPush ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : pushStatus === "granted" ? (
+                    <Bell className="h-4 w-4" />
+                  ) : (
+                    <BellOff className="h-4 w-4" />
+                  )}
+                  {pushStatus === "granted" ? "Enabled" : "Enable Notifications"}
+                </button>
               )}
             </div>
-            {pushStatus !== "denied" && pushStatus !== "unsupported" && (
-              <button
-                type="button"
-                onClick={handleEnablePush}
-                disabled={requestingPush || pushStatus === "granted"}
-                className="btn-ghost text-sm"
-              >
-                {requestingPush ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : pushStatus === "granted" ? (
-                  <Bell className="h-4 w-4" />
-                ) : (
-                  <BellOff className="h-4 w-4" />
-                )}
-                {pushStatus === "granted" ? "Enabled" : "Enable Notifications"}
-              </button>
-            )}
           </div>
+
+          {pushStatus !== "granted" ? (
+            <p className="rounded-lg border border-dashed border-muted2 bg-bg3 px-3 py-2.5 font-noto text-xs text-muted">
+              Enable device notifications above to choose what you get pushed.
+            </p>
+          ) : (
+            <>
+              <div className="border-t border-bg4 pt-4">
+                <p className="mb-2 font-syne text-xs font-semibold uppercase tracking-wide text-muted">📖 Reading</p>
+                <div className="flex flex-col gap-2.5">
+                  <Toggle
+                    checked={notifPrefs.newChapterFollowedSeries !== false}
+                    onChange={(v) => updateNotifPref("newChapterFollowedSeries", v)}
+                    label="New chapter from a series in your library"
+                  />
+                  <Toggle
+                    checked={notifPrefs.newChapterFollowedCreator !== false}
+                    onChange={(v) => updateNotifPref("newChapterFollowedCreator", v)}
+                    label="New chapter from a creator you follow"
+                  />
+                </div>
+              </div>
+
+              <div className="border-t border-bg4 pt-4">
+                <p className="mb-2 font-syne text-xs font-semibold uppercase tracking-wide text-muted">💬 Social</p>
+                <div className="flex flex-col gap-2.5">
+                  <Toggle checked={notifPrefs.newDM !== false} onChange={(v) => updateNotifPref("newDM", v)} label="New DM received" />
+                  <Toggle
+                    checked={notifPrefs.commentReply !== false}
+                    onChange={(v) => updateNotifPref("commentReply", v)}
+                    label="Someone replied to your comment"
+                  />
+                  <Toggle
+                    checked={notifPrefs.postLike !== false}
+                    onChange={(v) => updateNotifPref("postLike", v)}
+                    label="Someone liked your post"
+                  />
+                  <Toggle
+                    checked={notifPrefs.newFollower !== false}
+                    onChange={(v) => updateNotifPref("newFollower", v)}
+                    label="New follower"
+                  />
+                  <Toggle
+                    checked={notifPrefs.mention !== false}
+                    onChange={(v) => updateNotifPref("mention", v)}
+                    label="Someone mentioned you (@handle)"
+                  />
+                </div>
+              </div>
+
+              {profile?.isCreator && (
+                <div className="border-t border-bg4 pt-4">
+                  <p className="mb-2 font-syne text-xs font-semibold uppercase tracking-wide text-muted">🎨 Creator</p>
+                  <div className="flex flex-col gap-2.5">
+                    <Toggle
+                      checked={notifPrefs.workApprovedRejected !== false}
+                      onChange={(v) => updateNotifPref("workApprovedRejected", v)}
+                      label="Work approved/rejected by admin"
+                    />
+                    <Toggle
+                      checked={notifPrefs.tipReceived !== false}
+                      onChange={(v) => updateNotifPref("tipReceived", v)}
+                      label="Someone tipped you"
+                    />
+                    <Toggle
+                      checked={notifPrefs.newReaderOnSeries !== false}
+                      onChange={(v) => updateNotifPref("newReaderOnSeries", v)}
+                      label="New reader on your series"
+                    />
+                    <Toggle
+                      checked={notifPrefs.chapterMilestone !== false}
+                      onChange={(v) => updateNotifPref("chapterMilestone", v)}
+                      label="Chapter reached a reads milestone"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="border-t border-bg4 pt-4">
+                <p className="mb-2 font-syne text-xs font-semibold uppercase tracking-wide text-muted">👁 Profile</p>
+                <div className="flex flex-col gap-2.5">
+                  <Toggle
+                    checked={notifPrefs.profileVisit !== false}
+                    onChange={(v) => updateNotifPref("profileVisit", v)}
+                    label="Someone viewed your profile"
+                  />
+                  <Toggle
+                    checked={notifPrefs.newFollower !== false}
+                    onChange={(v) => updateNotifPref("newFollower", v)}
+                    label="Someone followed you"
+                  />
+                </div>
+              </div>
+
+              <div className="border-t border-bg4 pt-4">
+                <p className="mb-2 font-syne text-xs font-semibold uppercase tracking-wide text-muted">📢 Platform</p>
+                <div className="flex flex-col gap-2.5">
+                  <Toggle
+                    checked={notifPrefs.announcements !== false}
+                    onChange={(v) => updateNotifPref("announcements", v)}
+                    label="ÍléOtaku announcements"
+                  />
+                  <Toggle
+                    checked={notifPrefs.newFeatures !== false}
+                    onChange={(v) => updateNotifPref("newFeatures", v)}
+                    label="New features and updates"
+                  />
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </section>
 
@@ -771,6 +883,22 @@ export default function SettingsTab() {
             Your account will be permanently deleted if you don&apos;t log in within this period.
             You&apos;ll receive a warning email 2 weeks before deletion.
           </p>
+
+          <div className="border-t border-bg4 pt-4">
+            <div className="flex items-center gap-1.5">
+              <Toggle
+                checked={isPlatinum && profile?.hideProfileVisits === true}
+                onChange={(v) => handleHideProfileVisits(v)}
+                disabled={!isPlatinum}
+                label={isPlatinum ? "Hide my profile visits" : "Hide my profile visits (Platinum)"}
+              />
+              {!isPlatinum && <Lock className="h-3 w-3 text-muted" />}
+            </div>
+            <p className="mt-2 font-noto text-xs text-muted">
+              Free users can see that someone visited but not who. Platinum visitors are anonymous
+              by default.
+            </p>
+          </div>
         </div>
       </section>
 

@@ -129,7 +129,7 @@ export default function FeedClient() {
         const page: FeedPage =
           activeTab === "following"
             ? await getFollowingFeed(followingIds, PAGE_SIZE)
-            : await getForYouFeed(PAGE_SIZE);
+            : await getForYouFeed(PAGE_SIZE, null, { followingIds, viewerUid: user?.uid });
         setPosts(page.posts);
         setCursor(page.lastDoc);
         setHasMore(page.posts.length === PAGE_SIZE);
@@ -186,7 +186,7 @@ export default function FeedClient() {
       const page =
         tab === "following"
           ? await getFollowingFeed(followingIds, PAGE_SIZE, cursor)
-          : await getForYouFeed(PAGE_SIZE, cursor);
+          : await getForYouFeed(PAGE_SIZE, cursor, { followingIds, viewerUid: user?.uid });
       setPosts((prev) => {
         const knownIds = new Set(prev.map((p) => p.id));
         return [...prev, ...page.posts.filter((p) => !knownIds.has(p.id))];

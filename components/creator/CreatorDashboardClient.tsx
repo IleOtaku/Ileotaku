@@ -17,12 +17,14 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { getCreatorWorks, getUserProfile, subscribeToCreatorWorks, updateUserPrefs } from "@/lib/firestore";
 import CreatorFeedTab from "@/components/creator/CreatorFeedTab";
+import CreatorStoriesTab from "@/components/creator/CreatorStoriesTab";
 import WorkCard from "@/components/creator/WorkCard";
 import UploadModal from "@/components/creator/UploadModal";
 import AddChapterModal from "@/components/creator/AddChapterModal";
 import AddProseChapterModal from "@/components/creator/AddProseChapterModal";
 import ChapterDraftsModal from "@/components/creator/ChapterDraftsModal";
 import DeleteWorkModal from "@/components/creator/DeleteWorkModal";
+import ManageChaptersModal from "@/components/creator/ManageChaptersModal";
 import EditSeriesModal from "@/components/creator/EditSeriesModal";
 import TransferOwnershipModal from "@/components/creator/TransferOwnershipModal";
 import EarningsChart from "@/components/creator/EarningsChart";
@@ -77,7 +79,7 @@ const GUIDELINES = [
   },
 ];
 
-type TabValue = "works" | "feed" | "earnings" | "guidelines";
+type TabValue = "works" | "feed" | "stories" | "earnings" | "guidelines";
 
 function StatCard({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
   return (
@@ -100,6 +102,7 @@ export default function CreatorDashboardClient() {
   const [editingWork, setEditingWork] = useState<CreatorWork | null>(null);
   const [deletingWork, setDeletingWork] = useState<CreatorWork | null>(null);
   const [draftsWorkId, setDraftsWorkId] = useState<string | null>(null);
+  const [manageChaptersWorkId, setManageChaptersWorkId] = useState<string | null>(null);
   const [transferringWork, setTransferringWork] = useState<CreatorWork | null>(null);
   const [pendingTransfers, setPendingTransfers] = useState<OwnershipTransferRequest[]>([]);
 
@@ -310,6 +313,7 @@ export default function CreatorDashboardClient() {
               tabs={[
                 { label: "Works", value: "works" },
                 { label: "Feed", value: "feed" },
+                { label: "Stories", value: "stories" },
                 { label: "Earnings", value: "earnings" },
                 { label: "Guidelines", value: "guidelines" },
               ]}
@@ -353,12 +357,17 @@ export default function CreatorDashboardClient() {
                         onDeleteWork={() => setDeletingWork(work)}
                         onViewDrafts={() => setDraftsWorkId(work.id)}
                         onTransferOwnership={() => setTransferringWork(work)}
+                        onManageChapters={
+                          work.status === "published" ? () => setManageChaptersWorkId(work.id) : undefined
+                        }
                       />
                     ))}
                   </div>
                 ))}
 
               {tab === "feed" && <CreatorFeedTab uid={user.uid} />}
+
+              {tab === "stories" && <CreatorStoriesTab uid={user.uid} />}
 
               {tab === "earnings" && (
                 <div className="max-w-lg rounded-2xl border border-bg4 bg-bg2 p-6">
@@ -470,6 +479,13 @@ export default function CreatorDashboardClient() {
         onClose={() => setDraftsWorkId(null)}
         workId={draftsWorkId}
         onPublished={refreshWorks}
+      />
+
+      <ManageChaptersModal
+        open={manageChaptersWorkId !== null}
+        onClose={() => setManageChaptersWorkId(null)}
+        workId={manageChaptersWorkId}
+        onChanged={refreshWorks}
       />
 
       <TransferOwnershipModal

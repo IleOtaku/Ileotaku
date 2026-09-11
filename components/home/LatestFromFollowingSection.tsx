@@ -36,7 +36,7 @@ export default function LatestFromFollowingSection({ followingUids }: LatestFrom
 
   if (items === null) {
     return (
-      <div className="flex gap-4 overflow-x-auto pb-2">
+      <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide">
         {[0, 1, 2, 3].map((i) => (
           <div key={i} className="skeleton h-48 w-32 shrink-0 rounded-xl" />
         ))}
@@ -60,7 +60,7 @@ export default function LatestFromFollowingSection({ followingUids }: LatestFrom
   }
 
   return (
-    <div className="flex gap-4 overflow-x-auto pb-2">
+    <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide">
       {items.map((work) => (
         <Link
           key={work.id}

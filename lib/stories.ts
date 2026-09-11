@@ -19,6 +19,15 @@ import type { Story, UserProfile } from "@/types";
 
 const STORIES = "stories";
 const DEFAULT_DURATION_MS = 24 * 60 * 60 * 1000;
+/** A single account may have at most this many simultaneously-active stories (Sprint "Polish-2"
+ * Part 7) — enforced in createStory() itself, not just the "+" badge's UI gate, so a crafted
+ * client-side call can't exceed it either. */
+export const MAX_ACTIVE_STORIES = 10;
+/** Free accounts' video stories cap at 30s; Platinum gets up to 90s — checked client-side against
+ * the picked file's real `video.duration` (see StoryCreateModal) before it's ever uploaded, and
+ * re-validated here so a crafted call can't bypass that check either. */
+export const MAX_VIDEO_SECONDS_FREE = 30;
+export const MAX_VIDEO_SECONDS_PLATINUM = 90;
 /** Platinum's selectable range — 5 minutes to 5 days, per the spec's duration picker. Everyone
  * else is locked to DEFAULT_DURATION_MS (enforced by createStory itself, not just the UI, so a
  * crafted client-side call can't grant a free account a longer window than they're entitled to
@@ -51,6 +60,11 @@ export async function createStory(
   durationMs?: number
 ): Promise<string> {
   try {
+    const activeCount = (await getUserStories(uid)).length;
+    if (activeCount >= MAX_ACTIVE_STORIES) {
+      throw new Error(`You can only have ${MAX_ACTIVE_STORIES} active stories at once. Delete one to add another.`);
+    }
+
     const effectiveDuration = profile.isPlatinum && durationMs ? durationMs : DEFAULT_DURATION_MS;
     const now = Date.now();
 

@@ -56,7 +56,7 @@ export default function ContinueReadingRow({ mangaIds }: ContinueReadingRowProps
 
   if (loading) {
     return (
-      <div className="flex gap-4 overflow-x-auto pb-2">
+      <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide">
         {[0, 1, 2, 3].map((i) => (
           <div key={i} className="skeleton h-48 w-32 shrink-0 rounded-xl" />
         ))}
@@ -77,7 +77,7 @@ export default function ContinueReadingRow({ mangaIds }: ContinueReadingRowProps
   }
 
   return (
-    <div className="flex gap-4 overflow-x-auto pb-2">
+    <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide">
       {items.map((item) => (
         <Link
           key={item.id}

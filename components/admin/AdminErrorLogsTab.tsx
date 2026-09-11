@@ -93,7 +93,7 @@ export default function AdminErrorLogsTab() {
       ) : filtered.length === 0 ? (
         <p className="font-noto text-sm text-muted">No errors match these filters.</p>
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-bg4">
+        <div className="overflow-x-auto rounded-2xl border border-bg4">
           <table className="w-full min-w-[720px] border-collapse text-left">
             <thead>
               <tr className="border-b border-bg4 bg-bg2">

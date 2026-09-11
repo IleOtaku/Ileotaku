@@ -34,6 +34,7 @@ const TYPE_EMOJI: Record<NotificationType, string> = {
   [NotificationType.APPEAL_APPROVED]: "🎉",
   [NotificationType.APPEAL_DENIED]: "🚫",
   [NotificationType.RESTRICTION_LIFTED]: "🔓",
+  [NotificationType.PROFILE_VISIT]: "👁",
 };
 
 type GroupLabel = "Today" | "This Week" | "Earlier";

@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
-import { ArrowLeft, ChevronLeft, ChevronRight, Coins, Lock, Loader2, Settings2 } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+import { ChevronLeft, ChevronRight, Coins, Lock, Loader2, Moon, Settings2, Sun, X } from "lucide-react";
 import CommentSection from "@/components/social/CommentSection";
 import { Skeleton } from "@/components/ui";
 import { Avatar } from "@/components/ui/Avatar";
@@ -23,9 +24,14 @@ import {
   updateReadingProgress,
   updateUserPrefs,
 } from "@/lib/firestore";
-import { getPublishedSeries, getSeriesChapters, incrementSeriesReads } from "@/lib/publishedSeries";
+import {
+  getPublishedSeries,
+  incrementChapterReads,
+  incrementSeriesReads,
+  subscribeToSeriesChapters,
+} from "@/lib/publishedSeries";
 import { clearReadingActivity, updateReadingActivity } from "@/lib/readingActivity";
-import type { PublishedChapter, PublishedSeries } from "@/types";
+import type { PublishedChapter, PublishedSeries, ReadingPreferences } from "@/types";
 
 export interface ProseReaderClientProps {
   workId: string;
@@ -33,6 +39,9 @@ export interface ProseReaderClientProps {
 
 type FontSize = "sm" | "md" | "lg" | "xl";
 type LineSpacing = "compact" | "normal" | "relaxed";
+/** "cream" is stored under the shared profile.preferences.theme field as "sepia" (the manga
+ * reader's own name for the same less-contrast-than-dark idea) so the one Firestore-backed
+ * preference works for both readers — see syncThemeToProfile below. */
 type PageTheme = "cream" | "dark";
 
 const FONT_SIZE_CLASS: Record<FontSize, string> = {
@@ -46,9 +55,11 @@ const LINE_SPACING_CLASS: Record<LineSpacing, string> = {
   normal: "leading-relaxed",
   relaxed: "leading-loose",
 };
-const PAGE_THEME_CLASS: Record<PageTheme, { bg: string; text: string; muted: string; card: string }> = {
-  cream: { bg: "bg-[#f4ecd8]", text: "text-[#3b2f1f]", muted: "text-[#7a6a4f]", card: "bg-[#fdf9ef]" },
-  dark: { bg: "bg-[#121009]", text: "text-[#e8ddd0]", muted: "text-[#a3947e]", card: "bg-[#1a1510]" },
+/** Exact brand values per Part 3's spec — bg/ivory for dark mode, ivory/deep-charcoal (the same
+ * two colors, swapped) for light mode. */
+const PAGE_THEME_CLASS: Record<PageTheme, { bg: string; text: string; muted: string; card: string; border: string }> = {
+  cream: { bg: "#f5ede0", text: "#0c0a07", muted: "#7a6a4f", card: "#fdf9ef", border: "#e2d5bd" },
+  dark: { bg: "#0c0a07", text: "#f5ede0", muted: "#a3947e", card: "#151109", border: "#2a2218" },
 };
 
 const PREFS_KEY = "ileotaku-prose-prefs";
@@ -126,10 +137,21 @@ export default function ProseReaderClient({ workId }: ProseReaderClientProps) {
   const initializedFromUrl = useRef(false);
   const recordedRef = useRef<Set<string>>(new Set());
   const historyTrackingRef = useRef<{ id: string; startedAt: number } | null>(null);
+  const themeSyncedFromProfile = useRef(false);
 
   useEffect(() => {
     setPrefs(loadProsePrefs());
   }, []);
+
+  // Once, when the profile first loads, adopt its saved reader theme (dark stays dark; anything
+  // else — sepia included, the manga reader's own "less contrast than dark" theme — maps to this
+  // reader's "cream") so a preference set from either reader carries over to the other.
+  useEffect(() => {
+    if (themeSyncedFromProfile.current || !profile?.preferences?.theme) return;
+    themeSyncedFromProfile.current = true;
+    const mapped: PageTheme = profile.preferences.theme === "dark" ? "dark" : "cream";
+    setPrefs((prev) => ({ ...prev, theme: mapped }));
+  }, [profile?.preferences?.theme]);
 
   function updatePrefs(next: Partial<ProsePrefs>) {
     setPrefs((prev) => {
@@ -143,13 +165,36 @@ export default function ProseReaderClient({ workId }: ProseReaderClientProps) {
     });
   }
 
-  // ---- Load the series + its chapters once ----
+  async function handleThemeChange(next: PageTheme) {
+    updatePrefs({ theme: next });
+    if (!user) return;
+    const DEFAULT_PREFS: ReadingPreferences = {
+      mode: "scroll",
+      theme: "dark",
+      autoload: true,
+      showProgressBar: true,
+    };
+    try {
+      await updateUserPrefs(user.uid, {
+        preferences: { ...(profile?.preferences ?? DEFAULT_PREFS), theme: next === "cream" ? "sepia" : "dark" },
+      });
+    } catch {
+      // Non-fatal — the picked theme still applies for the rest of this session even if the
+      // save fails; it just won't have persisted for next time.
+    }
+  }
+
+  // ---- Load the series once, and subscribe to its (published-only) chapters in real time so a
+  // chapter the creator edits, turns to Draft, or deletes from the Manage Chapters panel updates
+  // this reader immediately, with no refresh needed. ----
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    Promise.all([getPublishedSeries(workId), getSeriesChapters(workId)]).then(([s, c]) => {
+    getPublishedSeries(workId).then((s) => {
+      if (!cancelled) setSeries(s);
+    });
+    const unsub = subscribeToSeriesChapters(workId, (c) => {
       if (cancelled) return;
-      setSeries(s);
       setChapters(c);
       if (!initializedFromUrl.current) {
         initializedFromUrl.current = true;
@@ -164,6 +209,7 @@ export default function ProseReaderClient({ workId }: ProseReaderClientProps) {
     });
     return () => {
       cancelled = true;
+      unsub();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workId]);
@@ -258,6 +304,7 @@ export default function ProseReaderClient({ workId }: ProseReaderClientProps) {
 
     const uid = user.uid;
     incrementSeriesReads(workId);
+    incrementChapterReads(workId, currentChapter.id);
     (async () => {
       try {
         const freshProfile = await getUserProfile(uid);
@@ -328,11 +375,22 @@ export default function ProseReaderClient({ workId }: ProseReaderClientProps) {
     [router, workId]
   );
 
+  /** Never loops back into this same reader: real browser history goes back a real step when
+   * there is any; a story opened directly (a shared link, a new tab) has no "back" to go to, so
+   * this falls through to the series' own base URL instead of leaving the reader stranded. */
+  function handleBack() {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back();
+    } else {
+      router.push(`/story/${workId}`);
+    }
+  }
+
   const palette = PAGE_THEME_CLASS[prefs.theme];
 
   if (loading) {
     return (
-      <div className={`min-h-screen ${palette.bg} p-6`}>
+      <div className="min-h-screen bg-bg2 p-6">
         <Skeleton className="mx-auto h-8 w-2/3 max-w-xl" />
         <Skeleton className="mx-auto mt-6 h-96 w-full max-w-2xl" />
       </div>
@@ -341,7 +399,7 @@ export default function ProseReaderClient({ workId }: ProseReaderClientProps) {
 
   if (!series || !currentChapter) {
     return (
-      <div className={`flex min-h-screen flex-col items-center justify-center gap-3 ${palette.bg} ${palette.text} p-6 text-center`}>
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-bg p-6 text-center text-text">
         <span className="text-4xl">📖</span>
         <h1 className="font-cinzel text-xl">This story couldn&apos;t be found</h1>
         <Link href="/reader" className="btn-primary">
@@ -351,42 +409,52 @@ export default function ProseReaderClient({ workId }: ProseReaderClientProps) {
     );
   }
 
+  const chapterLabel = currentChapter.title || `Chapter ${currentChapter.chapterNumber}`;
+  const percentComplete = chapters.length > 0 ? Math.round(((chapterIndex + 1) / chapters.length) * 100) : 0;
+
   return (
-    <div className={`min-h-screen ${palette.bg} ${palette.text}`}>
-      <div className="fixed inset-x-0 top-0 z-20 h-1 bg-black/10">
+    <div className="min-h-screen" style={{ backgroundColor: palette.bg, color: palette.text }}>
+      <div className="kente-bar" />
+
+      <div className="fixed inset-x-0 top-1 z-20 h-1 bg-black/10">
         <div className="h-full bg-clay transition-[width] duration-150" style={{ width: `${progress}%` }} />
       </div>
 
-      <header
-        className={`sticky top-0 z-10 flex items-center gap-3 border-b px-4 py-3 backdrop-blur ${palette.card}`}
-        style={{ borderColor: prefs.theme === "dark" ? "#2a2218" : "#d9c9a3" }}
-      >
-        <Link href={`/manga/${workId}`} className="shrink-0" aria-label="Back">
-          <ArrowLeft className="h-5 w-5" />
-        </Link>
+      {/* Toolbar chrome always matches the manga reader's own dark bg2/clay look, regardless of
+          the cream/dark reading-surface theme picked below. */}
+      <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-bg4 bg-bg2 px-4 py-3 backdrop-blur">
+        <button type="button" onClick={handleBack} className="shrink-0 text-text hover:text-gold" aria-label="Back">
+          <ChevronLeft className="h-5 w-5" />
+        </button>
         <div className="min-w-0 flex-1">
-          <p className="truncate font-syne text-sm font-semibold">{series.title}</p>
-          <p className={`truncate font-noto text-xs ${palette.muted}`}>
-            {currentChapter.title || `Chapter ${currentChapter.chapterNumber}`}
+          <p className="truncate font-syne text-sm font-semibold text-text">{series.title}</p>
+          <p className="truncate font-noto text-xs text-muted">
+            Chapter {chapterIndex + 1} of {chapters.length} · {percentComplete}% complete
           </p>
         </div>
         <button
           type="button"
+          onClick={() => handleThemeChange(prefs.theme === "dark" ? "cream" : "dark")}
+          aria-label={prefs.theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          className="shrink-0 rounded-full p-2 text-text hover:bg-bg3 hover:text-clay2"
+        >
+          {prefs.theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+        </button>
+        <button
+          type="button"
           onClick={() => setSettingsOpen((o) => !o)}
           aria-label="Reading settings"
-          className="shrink-0 rounded-full p-2 hover:bg-black/5"
+          className="shrink-0 rounded-full p-2 text-text hover:bg-bg3 hover:text-clay2"
         >
-          <Settings2 className="h-5 w-5" />
+          {settingsOpen ? <X className="h-5 w-5" /> : <Settings2 className="h-5 w-5" />}
         </button>
       </header>
 
       {settingsOpen && (
-        <div className={`border-b px-4 py-4 ${palette.card}`} style={{ borderColor: prefs.theme === "dark" ? "#2a2218" : "#d9c9a3" }}>
+        <div className="border-b border-bg4 bg-bg2 px-4 py-4">
           <div className="mx-auto flex max-w-2xl flex-col gap-4">
             <div>
-              <p className={`mb-1.5 font-syne text-xs font-semibold uppercase tracking-wide ${palette.muted}`}>
-                Font Size
-              </p>
+              <p className="mb-1.5 font-syne text-xs font-semibold uppercase tracking-wide text-muted">Font Size</p>
               <div className="flex gap-2">
                 {(["sm", "md", "lg", "xl"] as FontSize[]).map((size) => (
                   <button
@@ -394,7 +462,7 @@ export default function ProseReaderClient({ workId }: ProseReaderClientProps) {
                     type="button"
                     onClick={() => updatePrefs({ fontSize: size })}
                     className={`rounded-full border px-3 py-1 font-noto text-xs ${
-                      prefs.fontSize === size ? "border-clay bg-clay text-ivory" : "border-current/20"
+                      prefs.fontSize === size ? "border-clay bg-clay text-ivory" : "border-muted2 text-muted"
                     }`}
                   >
                     {size === "sm" ? "Small" : size === "md" ? "Medium" : size === "lg" ? "Large" : "XL"}
@@ -403,9 +471,7 @@ export default function ProseReaderClient({ workId }: ProseReaderClientProps) {
               </div>
             </div>
             <div>
-              <p className={`mb-1.5 font-syne text-xs font-semibold uppercase tracking-wide ${palette.muted}`}>
-                Line Spacing
-              </p>
+              <p className="mb-1.5 font-syne text-xs font-semibold uppercase tracking-wide text-muted">Line Spacing</p>
               <div className="flex gap-2">
                 {(["compact", "normal", "relaxed"] as LineSpacing[]).map((spacing) => (
                   <button
@@ -413,7 +479,7 @@ export default function ProseReaderClient({ workId }: ProseReaderClientProps) {
                     type="button"
                     onClick={() => updatePrefs({ lineSpacing: spacing })}
                     className={`rounded-full border px-3 py-1 font-noto text-xs capitalize ${
-                      prefs.lineSpacing === spacing ? "border-clay bg-clay text-ivory" : "border-current/20"
+                      prefs.lineSpacing === spacing ? "border-clay bg-clay text-ivory" : "border-muted2 text-muted"
                     }`}
                   >
                     {spacing}
@@ -422,24 +488,22 @@ export default function ProseReaderClient({ workId }: ProseReaderClientProps) {
               </div>
             </div>
             <div>
-              <p className={`mb-1.5 font-syne text-xs font-semibold uppercase tracking-wide ${palette.muted}`}>
-                Background
-              </p>
+              <p className="mb-1.5 font-syne text-xs font-semibold uppercase tracking-wide text-muted">Background</p>
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => updatePrefs({ theme: "cream" })}
+                  onClick={() => handleThemeChange("cream")}
                   className={`rounded-full border px-3 py-1 font-noto text-xs ${
-                    prefs.theme === "cream" ? "border-clay bg-clay text-ivory" : "border-current/20"
+                    prefs.theme === "cream" ? "border-clay bg-clay text-ivory" : "border-muted2 text-muted"
                   }`}
                 >
-                  Cream
+                  Light
                 </button>
                 <button
                   type="button"
-                  onClick={() => updatePrefs({ theme: "dark" })}
+                  onClick={() => handleThemeChange("dark")}
                   className={`rounded-full border px-3 py-1 font-noto text-xs ${
-                    prefs.theme === "dark" ? "border-clay bg-clay text-ivory" : "border-current/20"
+                    prefs.theme === "dark" ? "border-clay bg-clay text-ivory" : "border-muted2 text-muted"
                   }`}
                 >
                   Dark
@@ -450,58 +514,76 @@ export default function ProseReaderClient({ workId }: ProseReaderClientProps) {
         </div>
       )}
 
-      <main className="mx-auto max-w-2xl px-5 py-10">
-        <div className="mb-6 flex items-center gap-3">
-          <Avatar uid={series.authorId} photoURL={series.authorPhotoURL} displayName={series.authorName} size={36} />
-          <div className="min-w-0">
-            <p className="truncate font-syne text-sm font-semibold">{series.authorName}</p>
-            <p className={`font-noto text-xs ${palette.muted}`}>
-              {(currentChapter.wordCount ?? 0).toLocaleString()} words · ~{currentChapter.estimatedReadTime ?? 1} min
-              read
-            </p>
-          </div>
-        </div>
-
-        {gate.status === "checking" ? (
-          <div className="flex flex-col items-center gap-3 py-24">
-            <Loader2 className="h-6 w-6 animate-spin" />
-            <p className={`font-noto text-sm ${palette.muted}`}>Checking chapter access...</p>
-          </div>
-        ) : gate.status === "locked" ? (
-          <div className="relative overflow-hidden rounded-2xl border border-current/10 py-16">
-            <div className="pointer-events-none select-none px-6 text-justify blur-sm">
-              {paragraphs.slice(0, 2).map((p, i) => renderParagraph(p, i))}
-            </div>
-            <div className={`absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center ${palette.card}/90`}>
-              <Lock className="h-6 w-6 text-clay2" />
-              <p className="font-cinzel text-lg">{currentChapter.title || `Chapter ${currentChapter.chapterNumber}`}</p>
-              <p className={`font-noto text-sm ${palette.muted}`}>Unlock for {gate.config?.coinPrice ?? 0} coins</p>
-              <p className={`flex items-center gap-1.5 font-noto text-xs ${palette.muted}`}>
-                <Coins className="h-3.5 w-3.5 text-gold" /> Your balance: {balance} coins
-              </p>
-              <button type="button" onClick={handleUnlock} disabled={unlocking} className="btn-primary">
-                {unlocking ? <Loader2 className="h-4 w-4 animate-spin" /> : `Unlock for ${gate.config?.coinPrice ?? 0} 🪙`}
-              </button>
-              <Link href="/pricing" className="font-noto text-xs font-semibold text-plat2 hover:underline">
-                Or go Platinum for unlimited reading 💎
-              </Link>
-            </div>
-          </div>
-        ) : (
-          <div
-            ref={contentRef}
-            className={`font-serif ${FONT_SIZE_CLASS[prefs.fontSize]} ${LINE_SPACING_CLASS[prefs.lineSpacing]} text-justify`}
+      <main className="mx-auto max-w-2xl px-6 py-10">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={currentChapter.id}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25 }}
           >
-            {paragraphs.map((p, i) => renderParagraph(p, i, (el) => { paragraphRefs.current[i] = el; }))}
-          </div>
-        )}
+            <div className="mb-6 flex items-center gap-3">
+              <Avatar uid={series.authorId} photoURL={series.authorPhotoURL} displayName={series.authorName} size={36} />
+              <div className="min-w-0">
+                <p className="truncate font-syne text-sm font-semibold">{series.authorName}</p>
+                <p className="font-noto text-xs" style={{ color: palette.muted }}>
+                  ~{currentChapter.estimatedReadTime ?? 1} min read · {(currentChapter.wordCount ?? 0).toLocaleString()} words
+                </p>
+              </div>
+            </div>
 
-        <div className="mt-10 flex items-center justify-between gap-3 border-t border-current/10 pt-6">
+            <h1 className="mb-6 font-cinzel text-2xl text-gold sm:text-3xl">{chapterLabel}</h1>
+
+            {gate.status === "checking" ? (
+              <div className="flex flex-col items-center gap-3 py-24">
+                <Loader2 className="h-6 w-6 animate-spin" />
+                <p className="font-noto text-sm" style={{ color: palette.muted }}>
+                  Checking chapter access...
+                </p>
+              </div>
+            ) : gate.status === "locked" ? (
+              <div className="relative overflow-hidden rounded-2xl border py-16" style={{ borderColor: palette.border }}>
+                <div className="pointer-events-none select-none px-6 text-justify blur-sm">
+                  {paragraphs.slice(0, 2).map((p, i) => renderParagraph(p, i))}
+                </div>
+                <div
+                  className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center"
+                  style={{ backgroundColor: `${palette.card}e6` }}
+                >
+                  <Lock className="h-6 w-6 text-clay2" />
+                  <p className="font-cinzel text-lg">{chapterLabel}</p>
+                  <p className="font-noto text-sm" style={{ color: palette.muted }}>
+                    Unlock for {gate.config?.coinPrice ?? 0} coins
+                  </p>
+                  <p className="flex items-center gap-1.5 font-noto text-xs" style={{ color: palette.muted }}>
+                    <Coins className="h-3.5 w-3.5 text-gold" /> Your balance: {balance} coins
+                  </p>
+                  <button type="button" onClick={handleUnlock} disabled={unlocking} className="btn-primary">
+                    {unlocking ? <Loader2 className="h-4 w-4 animate-spin" /> : `Unlock for ${gate.config?.coinPrice ?? 0} 🪙`}
+                  </button>
+                  <Link href="/pricing" className="font-noto text-xs font-semibold text-plat2 hover:underline">
+                    Or go Platinum for unlimited reading 💎
+                  </Link>
+                </div>
+              </div>
+            ) : (
+              <div
+                ref={contentRef}
+                className={`font-serif ${FONT_SIZE_CLASS[prefs.fontSize]} ${LINE_SPACING_CLASS[prefs.lineSpacing]} text-justify`}
+              >
+                {paragraphs.map((p, i) => renderParagraph(p, i, (el) => { paragraphRefs.current[i] = el; }))}
+              </div>
+            )}
+          </motion.div>
+        </AnimatePresence>
+
+        <div className="mt-10 flex items-center justify-between gap-3 border-t pt-6" style={{ borderColor: palette.border }}>
           <button
             type="button"
             onClick={() => !isFirstChapter && goToChapter(chapterIndex - 1)}
             disabled={isFirstChapter}
-            className="btn-ghost disabled:opacity-40"
+            className="inline-flex items-center justify-center gap-2 rounded-full border-2 border-clay px-5 py-2.5 font-syne font-semibold text-clay2 transition-colors hover:bg-clay/10 disabled:opacity-40 disabled:pointer-events-none"
           >
             <ChevronLeft className="h-4 w-4" /> Previous Chapter
           </button>
@@ -516,7 +598,7 @@ export default function ProseReaderClient({ workId }: ProseReaderClientProps) {
         </div>
 
         {gate.status === "open" && (
-          <div className="mt-10 border-t border-current/10 pt-6">
+          <div className="mt-10 border-t pt-6" style={{ borderColor: palette.border }}>
             <CommentSection mangaId={workId} chapterId={currentChapter.id} />
           </div>
         )}

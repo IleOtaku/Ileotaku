@@ -209,6 +209,7 @@ export default function Navbar() {
             onOpen={() => setMobilePanel("search")}
             onClose={() => setMobilePanel(null)}
           />
+          {user && <NotificationBell />}
           <button
             type="button"
             onClick={() => setMobilePanel((p) => (p === "menu" ? null : "menu"))}

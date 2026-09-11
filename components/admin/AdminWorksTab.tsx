@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getWorksByStatus } from "@/lib/admin";
+import { getApprovedSeriesForAdmin, getWorksByStatus } from "@/lib/admin";
 import { Skeleton, Tabs } from "@/components/ui";
-import type { CreatorWork, UserProfile } from "@/types";
+import type { CreatorWork, PublishedSeries, UserProfile } from "@/types";
 import ApprovedWorkCard from "./ApprovedWorkCard";
 import PendingWorkCard from "./PendingWorkCard";
 import RejectedWorkCard from "./RejectedWorkCard";
@@ -20,21 +20,32 @@ const SUB_TABS: { label: string; value: WorksSubTab }[] = [
   { label: "Rejected", value: "rejected" },
 ];
 
-/** Works review queue with Pending/Approved/Rejected sub-tabs, each independently loaded. */
+/** Works review queue with Pending/Approved/Rejected sub-tabs, each independently loaded.
+ * Approved is sourced from `publishedSeries` (see getApprovedSeriesForAdmin's doc comment) —
+ * every other sub-tab still reads `creatorWorks`, which IS where pending/rejected submissions
+ * actually live. */
 export default function AdminWorksTab({ users }: AdminWorksTabProps) {
   const [sub, setSub] = useState<WorksSubTab>("pending");
   const [works, setWorks] = useState<CreatorWork[]>([]);
+  const [approvedSeries, setApprovedSeries] = useState<PublishedSeries[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    getWorksByStatus(sub)
-      .then((w) => {
-        if (!cancelled) setWorks(w);
-      })
+    const load =
+      sub === "approved"
+        ? getApprovedSeriesForAdmin().then((s) => {
+            if (!cancelled) setApprovedSeries(s);
+          })
+        : getWorksByStatus(sub).then((w) => {
+            if (!cancelled) setWorks(w);
+          });
+    load
       .catch(() => {
-        if (!cancelled) setWorks([]);
+        if (cancelled) return;
+        if (sub === "approved") setApprovedSeries([]);
+        else setWorks([]);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -50,9 +61,15 @@ export default function AdminWorksTab({ users }: AdminWorksTabProps) {
     setWorks((prev) => prev.filter((w) => w.id !== workId));
   }
 
-  function handleUpdated(workId: string, patch: Partial<CreatorWork>) {
-    setWorks((prev) => prev.map((w) => (w.id === workId ? { ...w, ...patch } : w)));
+  function handleSeriesUpdated(workId: string, patch: Partial<PublishedSeries>) {
+    setApprovedSeries((prev) => prev.map((s) => (s.id === workId ? { ...s, ...patch } : s)));
   }
+
+  function handleSeriesDeleted(workId: string) {
+    setApprovedSeries((prev) => prev.filter((s) => s.id !== workId));
+  }
+
+  const isEmpty = sub === "approved" ? approvedSeries.length === 0 : works.length === 0;
 
   return (
     <div className="flex flex-col gap-6">
@@ -61,7 +78,7 @@ export default function AdminWorksTab({ users }: AdminWorksTabProps) {
       <div className="flex flex-col gap-4">
         {loading ? (
           [0, 1].map((i) => <Skeleton key={i} className="h-40 w-full rounded-2xl" />)
-        ) : works.length === 0 ? (
+        ) : isEmpty ? (
           <p className="font-noto text-sm text-muted">No {sub} works right now.</p>
         ) : sub === "pending" ? (
           works.map((w) => (
@@ -73,12 +90,12 @@ export default function AdminWorksTab({ users }: AdminWorksTabProps) {
             />
           ))
         ) : sub === "approved" ? (
-          works.map((w) => (
+          approvedSeries.map((s) => (
             <ApprovedWorkCard
-              key={w.id}
-              work={w}
-              authorName={authorLookup.get(w.creatorId) ?? "Unknown creator"}
-              onUpdated={handleUpdated}
+              key={s.id}
+              series={s}
+              onUpdated={handleSeriesUpdated}
+              onDeleted={handleSeriesDeleted}
             />
           ))
         ) : (

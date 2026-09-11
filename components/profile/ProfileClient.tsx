@@ -9,6 +9,7 @@ import { Camera, Crown, LogOut, Palette, Pencil } from "lucide-react";
 import { getCoverGradient } from "@/lib/coverStyles";
 import ReadingStatsCard from "@/components/profile/ReadingStatsCard";
 import ProfileSidebar from "@/components/profile/ProfileSidebar";
+import ProfileVisitorsSection from "@/components/profile/ProfileVisitorsSection";
 import FollowListModal from "@/components/social/FollowListModal";
 import NowPlayingCard from "@/components/spotify/NowPlayingCard";
 import { Skeleton, Tabs } from "@/components/ui";
@@ -281,7 +282,7 @@ export default function ProfileClient() {
         <ReadingStatsCard uid={user.uid} profile={profile} />
       </div>
 
-      <div className="mt-8 grid grid-cols-3 gap-4 border-y border-bg4 py-6 sm:grid-cols-4 lg:grid-cols-7">
+      <div className="mt-8 grid grid-cols-2 gap-4 border-y border-bg4 py-6 sm:grid-cols-4 lg:grid-cols-7">
         {stats.map((s) =>
           s.onClick ? (
             <button key={s.label} type="button" onClick={s.onClick} className="text-center">
@@ -296,6 +297,8 @@ export default function ProfileClient() {
           )
         )}
       </div>
+
+      <ProfileVisitorsSection />
 
       <div className="mt-10 grid gap-10 lg:grid-cols-[1fr_280px]">
         <div>

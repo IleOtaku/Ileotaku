@@ -79,6 +79,10 @@ function toPost(d: QueryDocumentSnapshot<DocumentData>): CreatorPost {
     // Older posts counted views via the `views` field only — fold it into viewCount so an
     // old post doesn't read as having zero views just because it predates this sprint.
     viewCount: (data.viewCount as number | undefined) ?? (data.views as number | undefined) ?? 0,
+    // Sprint "Polish-2" Part 8 renamed `profileVisits` to `profileVisitsFromPost` — fold the old
+    // key in the same way, so a post's already-accumulated count survives the rename.
+    profileVisitsFromPost:
+      (data.profileVisitsFromPost as number | undefined) ?? (data.profileVisits as number | undefined) ?? 0,
     id: d.id,
     ...data,
   } as CreatorPost;
@@ -179,6 +183,7 @@ export async function chargeForResolution(
 
 type ScoreInput = Pick<
   CreatorPost,
+  | "uid"
   | "likes"
   | "commentCount"
   | "viewCount"
@@ -186,41 +191,83 @@ type ScoreInput = Pick<
   | "createdAt"
   | "boostLevel"
   | "boostExpiresAt"
-  | "completedViews"
   | "replayCount"
-  | "profileVisits"
+  | "profileVisitsFromPost"
   | "shareCount"
+  | "bookmarkCount"
+  | "isVerified"
+  | "isFoundingCreator"
+  | "isPlatinum"
+  | "mediaType"
 >;
 
+/** Per-viewer signals calculateForYouScore can't derive from the post document alone — see the
+ * function's own doc comment for why these are a separate optional argument rather than fields on
+ * the post itself. */
+export interface ForYouUserContext {
+  /** Does the viewer follow this post's author? */
+  followsAuthor?: boolean;
+  /** Has the viewer interacted with this post before? Approximated as "already liked it" — the
+   * one prior-interaction signal already sitting on the post doc (`likes`) with no extra read;
+   * there's no reverse index today from a viewer to every author they've ever engaged with, which
+   * a true "interacted with this AUTHOR before" check would need across the author's other posts. */
+  hasInteractedBefore?: boolean;
+}
+
 /**
- * Ranking score behind the For You feed. TikTok-style: watch-quality signals (a view that made
- * it past 80% of the video, a replay, a share, a profile visit, a comment) are weighted far
- * heavier than a bare view or like, since they're much stronger evidence someone actually cared
- * about the content rather than scrolling past it. The whole engagement sum is divided by an
- * age-based "gravity" term — the same shape as Hacker News's ranking formula — so a post needs
- * proportionally more engagement to stay near the top the older it gets, keeping the feed from
- * being dominated by a handful of old viral posts. An active boost then multiplies the whole
- * decayed score, which is intentional: boosting only *pays off* on a post that's already
- * earning some genuine engagement, rather than guaranteeing top placement outright.
+ * Ranking score behind the For You feed (Sprint "Polish-2" Part 8). Four components:
+ *  - engagementScore: raw activity on the post, likes/comments/shares/bookmarks/views/watch
+ *    time/replays/profile-visits, each weighted by how strong a "this person actually cared"
+ *    signal it is (a share counts for far more than a bare view).
+ *  - qualityScore: flat bonuses for trust/production signals — a verified or founding-creator
+ *    author, Platinum status, and richer media (video over images over text).
+ *  - relationshipScore: THIS viewer's own relationship to the post — do they follow the author,
+ *    have they engaged with it before. Optional and 0 by default (see ForYouUserContext) since
+ *    every call site that WRITES a post's stored forYouScore (createPost, likePost,
+ *    incrementViewCount, trackWatchTime, boostPost/expireBoosts) has no specific viewer in mind —
+ *    Firestore's `orderBy("forYouScore", "desc")` needs one shared score per post. getForYouFeed()
+ *    applies the real per-viewer relationship boost as a second pass on top of that shared score
+ *    (see its own doc comment) rather than baking a single viewer's context into the stored value.
+ *  - recencyBonus: a flat top-up for anything under 6 hours old, on top of the age-based decay
+ *    below, so a brand-new post doesn't need to out-engage a slower-decaying older one just to
+ *    surface at all in its first couple of hours.
+ * The engagement+quality+relationship+recency sum is divided by an age-based "gravity" term — the
+ * same shape as Hacker News's ranking formula — so a post needs proportionally more engagement to
+ * stay near the top the older it gets. An active boost then multiplies the whole decayed score,
+ * which is intentional: boosting only *pays off* on a post that's already earning some genuine
+ * engagement, rather than guaranteeing top placement outright.
  */
-export function calculateForYouScore(post: ScoreInput): number {
+export function calculateForYouScore(post: ScoreInput, userContext?: ForYouUserContext): number {
   const ageHours = Math.max(0, (Date.now() - new Date(post.createdAt).getTime()) / 3_600_000);
-  const engagement =
+
+  const engagementScore =
     post.likes.length * 3 +
-    post.commentCount * 40 +
-    post.viewCount * 1 +
-    post.watchTime * 0.05 +
-    (post.completedViews ?? 0) * 50 +
-    (post.replayCount ?? 0) * 30 +
-    (post.profileVisits ?? 0) * 20 +
-    (post.shareCount ?? 0) * 60;
-  const decayed = engagement / Math.pow(ageHours + 2, 1.5);
+    post.commentCount * 8 +
+    (post.shareCount ?? 0) * 12 +
+    (post.bookmarkCount ?? 0) * 6 +
+    post.viewCount * 0.5 +
+    post.watchTime * 0.1 +
+    (post.replayCount ?? 0) * 4 +
+    (post.profileVisitsFromPost ?? 0) * 10;
+
+  const qualityScore =
+    (post.isVerified ? 15 : 0) +
+    (post.isFoundingCreator ? 10 : 0) +
+    (post.isPlatinum ? 5 : 0) +
+    (post.mediaType === "video" ? 8 : 0) +
+    (post.mediaType === "image" || post.mediaType === "images" ? 4 : 0);
+
+  const relationshipScore = (userContext?.followsAuthor ? 25 : 0) + (userContext?.hasInteractedBefore ? 10 : 0);
+
+  const recencyBonus = ageHours < 2 ? 50 : ageHours < 6 ? 20 : 0;
+
+  const decay = Math.pow(ageHours + 2, 1.2);
 
   const boostActive =
     post.boostLevel > 0 && !!post.boostExpiresAt && new Date(post.boostExpiresAt).getTime() > Date.now();
-  const multiplier = boostActive ? BOOST_TIERS[post.boostLevel as 1 | 2 | 3].multiplier : 1;
+  const boostMultiplier = boostActive ? BOOST_TIERS[post.boostLevel as 1 | 2 | 3].multiplier : 1;
 
-  return Math.round(decayed * multiplier * 1000) / 1000;
+  return Math.round(((engagementScore + qualityScore + relationshipScore + recencyBonus) / decay) * boostMultiplier);
 }
 
 /* ---------------------------- Video upload ---------------------------- */
@@ -418,14 +465,33 @@ export async function getPosts(
   }
 }
 
+/** Real per-viewer context getForYouFeed needs to apply calculateForYouScore's relationshipScore
+ * — `followingIds` is the viewer's own `profile.following` array (already loaded by every screen
+ * that calls this), `viewerUid` powers the hasInteractedBefore proxy (see ForYouUserContext's
+ * doc comment). Both optional so a signed-out viewer still gets a (relationship-less) feed. */
+export interface ForYouFeedContext {
+  followingIds?: string[];
+  viewerUid?: string;
+}
+
 /** Paginated, algorithmically-ranked "For You" feed — only posts whose author is
- * `forYouEligible`, ordered by the precomputed `forYouScore` (kept fresh by createPost,
+ * `forYouEligible`, drawn from the precomputed `forYouScore` order (kept fresh by createPost,
  * likePost, incrementViewCount, trackWatchTime, and boostPost/expireBoosts, rather than
  * recomputed on every read, since Firestore can't order by a computed expression). Requires a
- * composite index on (forYouEligible ASC, forYouScore DESC) — see firestore.indexes.json. */
+ * composite index on (forYouEligible ASC, forYouScore DESC) — see firestore.indexes.json.
+ *
+ * `userContext` applies calculateForYouScore's relationshipScore (follows author / already liked
+ * this post) as a second pass ONLY within the page Firestore already returned — pagination itself
+ * still walks the shared, viewer-independent forYouScore order (a `lastDoc` cursor has to refer to
+ * a document from that same underlying query, so this can't re-rank a wider candidate pool without
+ * breaking `startAfter`). Two viewers loading the same page can therefore see it in a different
+ * order when their relationship signals differ, without needing a per-viewer-and-post score
+ * precomputed for every possible viewer ahead of time.
+ */
 export async function getForYouFeed(
   pageSize = 10,
-  lastDoc: QueryDocumentSnapshot<DocumentData> | null = null
+  lastDoc: QueryDocumentSnapshot<DocumentData> | null = null,
+  userContext?: ForYouFeedContext
 ): Promise<FeedPage> {
   try {
     const base = query(
@@ -435,8 +501,26 @@ export async function getForYouFeed(
     );
     const q = lastDoc ? query(base, startAfter(lastDoc), limit(pageSize)) : query(base, limit(pageSize));
     const snap = await getDocs(q);
+    const posts = snap.docs.map(toPost);
+    const followingIds = userContext?.followingIds ?? [];
+    const viewerUid = userContext?.viewerUid;
+
+    const rescored = viewerUid
+      ? [...posts].sort(
+          (a, b) =>
+            calculateForYouScore(b, {
+              followsAuthor: followingIds.includes(b.uid),
+              hasInteractedBefore: b.likes.includes(viewerUid),
+            }) -
+            calculateForYouScore(a, {
+              followsAuthor: followingIds.includes(a.uid),
+              hasInteractedBefore: a.likes.includes(viewerUid),
+            })
+        )
+      : posts;
+
     return {
-      posts: snap.docs.map(toPost),
+      posts: rescored,
       lastDoc: snap.docs.length > 0 ? snap.docs[snap.docs.length - 1] : null,
     };
   } catch (error) {
@@ -646,17 +730,25 @@ export async function trackWatchTime(postId: string, seconds: number): Promise<v
   }
 }
 
-/** Generic "bump one counter field by 1 and recompute forYouScore" helper — every TikTok-style
- * ranking signal below (completed view, replay, profile visit, share) follows the exact same
- * read-then-write shape as incrementViewCount()/trackWatchTime() above, so this factors it out
- * rather than repeating the same six lines four times. */
-async function bumpEngagementCounter(postId: string, field: keyof ScoreInput): Promise<void> {
+/** Generic "bump one counter field by `delta` and recompute forYouScore" helper — every
+ * TikTok-style ranking signal below (completed view, replay, profile visit, share, bookmark)
+ * follows the exact same read-then-write shape as incrementViewCount()/trackWatchTime() above,
+ * so this factors it out rather than repeating the same six lines five times. `delta` defaults to
+ * +1; unsavePost() below passes -1 to undo a bookmark. */
+async function bumpEngagementCounter(
+  postId: string,
+  // "completedViews" is a tracked signal that predates Part 8's scoring rewrite but isn't one of
+  // its formula's terms anymore (see calculateForYouScore's doc comment) — bumpEngagementCounter
+  // still accepts it since trackVideoCompleted() below still records it for other analytics.
+  field: keyof ScoreInput | "completedViews",
+  delta = 1
+): Promise<void> {
   try {
     const ref = doc(db, FEED, postId);
     const snap = await getDoc(ref);
     if (!snap.exists()) return;
     const post = toPost(snap as QueryDocumentSnapshot<DocumentData>);
-    const nextValue = ((post[field] as number | undefined) ?? 0) + 1;
+    const nextValue = Math.max(0, ((post[field] as number | undefined) ?? 0) + delta);
     const patch = { [field]: nextValue };
     await updateDoc(ref, { ...patch, forYouScore: calculateForYouScore({ ...post, ...patch }) });
   } catch {
@@ -680,7 +772,7 @@ export async function trackVideoReplay(postId: string): Promise<void> {
 /** Called when a viewer taps through to the author's profile from this specific post — +20 to
  * forYouScore. */
 export async function trackProfileVisit(postId: string): Promise<void> {
-  await bumpEngagementCounter(postId, "profileVisits");
+  await bumpEngagementCounter(postId, "profileVisitsFromPost");
 }
 
 /** Called once a share sheet option actually completes (not just opening the sheet) — +60 to
@@ -953,6 +1045,7 @@ export async function savePost(uid: string, post: CreatorPost): Promise<void> {
       videoPosterUrl: post.videoPosterUrl ?? null,
       savedAt: new Date().toISOString(),
     });
+    await bumpEngagementCounter(post.id, "bookmarkCount", 1);
   } catch (error) {
     await logError(error, { operation: "creatorFeed.savePost", uid, postId: post.id });
     throw error;
@@ -962,6 +1055,7 @@ export async function savePost(uid: string, post: CreatorPost): Promise<void> {
 export async function unsavePost(uid: string, postId: string): Promise<void> {
   try {
     await deleteDoc(doc(savedPostsCol(uid), postId));
+    await bumpEngagementCounter(postId, "bookmarkCount", -1);
   } catch (error) {
     await logError(error, { operation: "creatorFeed.unsavePost", uid, postId });
     throw error;
