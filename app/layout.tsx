@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Toaster } from "react-hot-toast";
+import MonetagScript from "@/components/ads/MonetagScript";
 import PropellerAdsScript from "@/components/ads/PropellerAdsScript";
 import AuthProvider from "@/components/layout/AuthProvider";
 import BannedGate from "@/components/layout/BannedGate";
@@ -110,6 +111,7 @@ export default function RootLayout({
           </AuthProvider>
         </ErrorBoundary>
         <PropellerAdsScript />
+        <MonetagScript />
         <ServiceWorkerRegister />
         <Toaster
           position="top-center"

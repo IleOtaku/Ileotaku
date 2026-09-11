@@ -1,7 +1,7 @@
-// PropellerAds
+// Monetag
 self.options = {
     "domain": "5gvci.com",
-    "zoneId": 11756578
+    "zoneId": 11773167
 }
 self.lary = ""
 importScripts('https://5gvci.com/act/files/service-worker.min.js?r=sw')
