@@ -1,9 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Shield } from "lucide-react";
+import { CheckCircle2, Shield } from "lucide-react";
 import { Tabs } from "@/components/ui";
-import ApiHealthMonitor from "./ApiHealthMonitor";
 import AdminBugReportsTab from "./AdminBugReportsTab";
 import AdminErrorLogsTab from "./AdminErrorLogsTab";
 import AdminMaintenanceTab from "./AdminMaintenanceTab";
@@ -49,7 +48,20 @@ export default function TechnicalDashboard({ adminName }: TechnicalDashboardProp
           {tab === "maintenance" && <AdminMaintenanceTab canApprove={false} />}
           {tab === "health" && (
             <div className="flex flex-col gap-6">
-              <ApiHealthMonitor />
+              <div className="flex items-center gap-3 rounded-2xl border border-green/30 bg-green/5 p-5">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-green/15 text-green2">
+                  <CheckCircle2 className="h-5 w-5" />
+                </span>
+                <div>
+                  <p className="font-syne text-sm font-semibold text-text">
+                    Platform is running on creator content only
+                  </p>
+                  <p className="mt-0.5 font-noto text-xs text-muted">
+                    No external manga APIs are in use — every title on ÍléOtaku is published
+                    directly by our creators (see lib/publishedSeries.ts).
+                  </p>
+                </div>
+              </div>
               <PlatformStatusPanel />
             </div>
           )}

@@ -1,10 +1,10 @@
 "use client";
 
 import { memo, useState } from "react";
-import { Search } from "lucide-react";
+import Link from "next/link";
+import { Search, Sparkles } from "lucide-react";
 import { proxyImg, type ContentSource } from "@/lib/manga-api";
 import { Skeleton } from "@/components/ui";
-import SourceBadge from "./SourceBadge";
 
 export interface MangaListItemView {
   id: string;
@@ -13,6 +13,7 @@ export interface MangaListItemView {
   chapter?: string;
   view?: string;
   source?: ContentSource;
+  format?: string;
 }
 
 export const READER_GENRES = [
@@ -28,6 +29,15 @@ export const READER_GENRES = [
   "Comedy",
 ];
 
+/** Which slice of the creator catalog Browse shows — see ReaderClient's browseTab state. */
+export type BrowseTab = "all" | "manga" | "prose";
+
+export const BROWSE_TABS: { value: BrowseTab; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "manga", label: "Manga & Comics" },
+  { value: "prose", label: "Prose Stories" },
+];
+
 export interface MangaListProps {
   items: MangaListItemView[];
   loading: boolean;
@@ -37,40 +47,38 @@ export interface MangaListProps {
   onSearchChange: (value: string) => void;
   activeGenre: string;
   onGenreChange: (genre: string) => void;
+  browseTab: BrowseTab;
+  onBrowseTabChange: (tab: BrowseTab) => void;
 }
 
 export function MangaThumb({
   src,
   title,
-  source,
 }: {
   src: string;
   title: string;
+  /** Kept as an accepted (unused) prop so callers passing it from list data don't need a
+   * separate code path — every result is creator-published now, so there's nothing left for a
+   * per-source badge to distinguish. */
   source?: ContentSource;
 }) {
   const [error, setError] = useState(false);
 
   if (!src || error) {
     return (
-      <div className="relative flex h-full w-full items-center justify-center bg-bg3 text-xl">
-        📖
-        <SourceBadge source={source} />
-      </div>
+      <div className="flex h-full w-full items-center justify-center bg-bg3 text-xl">📖</div>
     );
   }
 
   return (
-    <div className="relative h-full w-full">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={proxyImg(src)}
-        alt={title}
-        className="h-full w-full object-cover"
-        loading="lazy"
-        onError={() => setError(true)}
-      />
-      <SourceBadge source={source} />
-    </div>
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={proxyImg(src)}
+      alt={title}
+      className="h-full w-full object-cover"
+      loading="lazy"
+      onError={() => setError(true)}
+    />
   );
 }
 
@@ -95,8 +103,9 @@ const MangaListRow = memo(function MangaListRow({ item, active, onSelect }: Mang
         <MangaThumb src={item.image} title={item.title} source={item.source} />
       </div>
       <div className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
-        <p className={`truncate font-syne text-xs font-semibold ${active ? "text-clay2" : "text-text"}`}>
-          {item.title}
+        <p className={`flex items-center gap-1 truncate font-syne text-xs font-semibold ${active ? "text-clay2" : "text-text"}`}>
+          {item.format?.toLowerCase() === "prose" && <span className="shrink-0">📖</span>}
+          <span className="truncate">{item.title}</span>
         </p>
         {item.chapter && <p className="truncate font-noto text-[11px] text-muted">{item.chapter}</p>}
         {item.view && <p className="font-noto text-[10px] text-muted">{item.view} views</p>}
@@ -115,16 +124,32 @@ export default function MangaList({
   onSearchChange,
   activeGenre,
   onGenreChange,
+  browseTab,
+  onBrowseTabChange,
 }: MangaListProps) {
   return (
     <aside className="hidden h-full w-[258px] shrink-0 flex-col border-r border-bg4 bg-bg2 md:flex">
       <div className="border-b border-bg4 p-3">
+        <div className="mb-3 flex gap-1 rounded-lg bg-bg3 p-1">
+          {BROWSE_TABS.map((tab) => (
+            <button
+              key={tab.value}
+              type="button"
+              onClick={() => onBrowseTabChange(tab.value)}
+              className={`flex-1 rounded-md px-1.5 py-1.5 font-noto text-[10px] font-semibold transition-colors ${
+                browseTab === tab.value ? "bg-clay text-ivory" : "text-muted hover:text-text"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
           <input
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search manga..."
+            placeholder="Search creator works..."
             className="input-base pl-9 text-sm"
           />
         </div>
@@ -161,12 +186,24 @@ export default function MangaList({
             ))}
           </div>
         ) : items.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 px-4 py-16 text-center">
-            <Search className="h-6 w-6 text-muted" />
-            <p className="font-noto text-xs text-muted">
-              No manga found. Try another search or genre.
-            </p>
-          </div>
+          searchQuery.trim() || activeGenre !== "All" ? (
+            <div className="flex flex-col items-center gap-2 px-4 py-16 text-center">
+              <Search className="h-6 w-6 text-muted" />
+              <p className="font-noto text-xs text-muted">
+                No creator works found. Try another search or genre.
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-3 px-4 py-16 text-center">
+              <Sparkles className="h-6 w-6 text-gold" />
+              <p className="font-noto text-xs text-muted">
+                No works published yet — be the first creator to publish!
+              </p>
+              <Link href="/creator" className="btn-primary text-xs">
+                Become a Creator
+              </Link>
+            </div>
+          )
         ) : (
           <div className="flex flex-col gap-1">
             {items.map((item) => (

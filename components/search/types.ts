@@ -3,12 +3,15 @@ export interface SearchResultItem {
   title: string;
   image: string;
   author: string;
+  authorVerified: boolean;
   genres: string[];
-  status: string;
-  rating: number;
+  format: string;
+  reads: number;
   chapters: number;
-  views: string;
+  rating: number;
 }
+
+export type WorksFormatFilter = "all" | "manga" | "prose";
 
 export interface SearchFilters {
   genres: string[];

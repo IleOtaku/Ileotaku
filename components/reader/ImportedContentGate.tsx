@@ -25,7 +25,8 @@ export interface ImportedContentGateProps {
   chapterId: string;
   /** 0-based — chapters 1-7 (index 0-6) are always free, per getLockConfig(). */
   chapterIndex: number;
-  /** The manga's ContentSource ("mangadex"/"comick"/"mangahook"/"fallback"/"creator"/"african"). */
+  /** The manga's ContentSource ("creator", or the legacy "african" alias getLockConfig() still
+   * treats the same way). */
   source: string | undefined;
   /** Only meaningful when source is "creator"/"african" — that specific chapter's own author-set
    * coin price (see ReaderClient, which reads it off the chapter's MangaChapterSummary). */
@@ -47,7 +48,7 @@ type GateState =
   | { status: "coins"; config: LockConfig };
 
 /**
- * Gates one chapter of an imported title behind its engagement-tier lock (see
+ * Gates one chapter of a creator-published work behind its own author-set coin price (see
  * lib/contentLocking.ts's getLockConfig()). Renders `children` (the actual reader) untouched
  * whenever the chapter is free, Platinum-bypassed, or already unlocked; otherwise replaces it
  * with an ad-watch or coin-purchase overlay until the reader clears one of those.

@@ -8,7 +8,6 @@ import { checkAndAwardAchievements } from "@/lib/achievements";
 import { useAuth } from "@/hooks/useAuth";
 import { markChatRead } from "@/hooks/useChatUnread";
 import { useVisualViewportHeight } from "@/hooks/useVisualViewportHeight";
-import { trackMangaRead } from "@/lib/contentLocking";
 import {
   addHistoryEntry,
   getUserProfile,
@@ -16,20 +15,27 @@ import {
   updateReadingProgress,
   updateUserPrefs,
 } from "@/lib/firestore";
+import {
+  incrementSeriesReads,
+  listAllCreatorWorks,
+  listCreatorMangaWorks,
+  listCreatorProseWorksAsList,
+  searchAllCreatorWorks,
+  searchCreatorMangaWorks,
+  searchCreatorProseWorksAsList,
+} from "@/lib/publishedSeries";
 import { clearReadingActivity, updateReadingActivity } from "@/lib/readingActivity";
 import { PLATINUM_READER_THEMES, type ReaderTheme, type ReadingPreferences } from "@/types";
 import {
   getChapterPages,
   getMangaDetail,
-  getMangaList,
   proxyImg,
-  searchManga,
   type MangaDetailResponse,
   type MangaListItem,
 } from "@/lib/manga-api";
 import CommentSection from "@/components/social/CommentSection";
 import ImportedContentGate from "./ImportedContentGate";
-import MangaList from "./MangaList";
+import MangaList, { type BrowseTab } from "./MangaList";
 import MobileBrowseSheet from "./MobileBrowseSheet";
 import MobileTabBar from "./MobileTabBar";
 import NextChapterCard from "./NextChapterCard";
@@ -39,12 +45,6 @@ import ReaderSidebar, { ChatTab, type ReaderSidebarTab } from "./ReaderSidebar";
 import ReaderToolbar from "./ReaderToolbar";
 
 type ReadingMode = "scroll" | "paged";
-
-/** Sources with a real, licensed-catalog engagement-tier lock (Sprint 9c) — everything else
- * (the offline "fallback" demo catalog, and any future "creator"/"african" source once those
- * have their own reading flow) skips ImportedContentGate entirely, matching
- * getLockConfig()'s own free-pass for non-imported sources. */
-const IMPORTED_SOURCES = new Set(["mangadex", "comick", "mangahook"]);
 
 const DEFAULT_PREFS: ReadingPreferences = {
   mode: "scroll",
@@ -69,6 +69,10 @@ export default function ReaderClient() {
   const [listLoading, setListLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeGenre, setActiveGenre] = useState("All");
+  // Which slice of the creator catalog the sidebar/mobile sheet shows — "All Works" mixes
+  // formats (a prose result routes straight to /story/[id] on select, see handleSelectManga
+  // below); "Manga & Comics" and "Prose Stories" are pre-filtered by format.
+  const [browseTab, setBrowseTab] = useState<BrowseTab>("all");
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<MangaDetailResponse["data"] | null>(null);
@@ -111,19 +115,29 @@ export default function ReaderClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---- List: debounced search, or genre filter when search is empty ----
+  // ---- List: debounced search, or genre filter when search is empty — source depends on
+  // browseTab (all formats / manga only / prose only). ----
   useEffect(() => {
     let cancelled = false;
     const handle = setTimeout(() => {
       setListLoading(true);
       const query = searchQuery.trim();
+      const genre = activeGenre === "All" ? undefined : activeGenre;
       const request = query
-        ? searchManga(query)
-        : getMangaList(1, activeGenre === "All" ? undefined : activeGenre);
+        ? browseTab === "prose"
+          ? searchCreatorProseWorksAsList(query)
+          : browseTab === "manga"
+            ? searchCreatorMangaWorks(query)
+            : searchAllCreatorWorks(query)
+        : browseTab === "prose"
+          ? listCreatorProseWorksAsList(genre)
+          : browseTab === "manga"
+            ? listCreatorMangaWorks(genre)
+            : listAllCreatorWorks(genre);
 
       request
-        .then((res) => {
-          if (!cancelled) setMangaList(res.data.mangaList);
+        .then((items) => {
+          if (!cancelled) setMangaList(items);
         })
         .catch(() => {
           if (!cancelled) setMangaList([]);
@@ -137,7 +151,7 @@ export default function ReaderClient() {
       cancelled = true;
       clearTimeout(handle);
     };
-  }, [searchQuery, activeGenre]);
+  }, [searchQuery, activeGenre, browseTab]);
 
   // ---- Detail: load whenever the selected manga changes ----
   useEffect(() => {
@@ -212,11 +226,10 @@ export default function ReaderClient() {
   const chapters = useMemo(() => detail?.chapterList ?? [], [detail]);
   const currentChapter = chapters[chapterIndex];
   const mangaSource = detail?.source;
-  const isImportedSource = mangaSource !== undefined && IMPORTED_SOURCES.has(mangaSource);
-  // Creator-published works also go through ImportedContentGate (despite the name) — unlike
-  // imported sources, they're never locked by engagement tier, only by whatever coin price their
-  // own author set per chapter (getLockConfig's "creator"/"african" branch), which defaults to
-  // free and so renders no gate at all for most chapters.
+  // Every work read through this page is now creator-published — ImportedContentGate (despite
+  // the name) still gates it, but only by whatever coin price its own author set per chapter
+  // (getLockConfig's "creator" branch), which defaults to free and so renders no gate at all for
+  // most chapters.
   const isCreatorSource = mangaSource === "creator";
 
   // Leaving a chapter (switching chapters, or unmounting) back-fills how long it was open onto
@@ -304,28 +317,35 @@ export default function ReaderClient() {
     };
   }, [currentChapter]);
 
-  // ---- Sprint 9c: count this as a read of the manga (not the chapter itself — trackMangaRead
-  // increments the whole title's totalReads, which is what engagement-tier locking keys off of)
-  // once its pages have actually loaded, for imported sources only. Dedupe per chapter per
-  // mount the same way the chaptersRead-tracking effect above does, so re-renders (or toggling
-  // reading mode) don't inflate the count.
+  // ---- Counts this as a read of the series (bumps publishedSeries.totalReads, which feeds
+  // Explore's Trending rail and every work card's read count) once its pages have actually
+  // loaded. Deduped per chapter per mount the same way the chaptersRead-tracking effect above
+  // does, so re-renders (or toggling reading mode) don't inflate the count.
   useEffect(() => {
-    if (!isImportedSource || !detail || !currentChapter || pagesLoading || pages.length === 0) return;
+    if (!isCreatorSource || !detail || !currentChapter || pagesLoading || pages.length === 0) return;
     const key = `${detail.id ?? selectedId}:${currentChapter.id}`;
     if (trackedReads.current.has(key)) return;
     trackedReads.current.add(key);
-    trackMangaRead(detail.id ?? selectedId ?? "", mangaSource);
-  }, [isImportedSource, detail, currentChapter, pagesLoading, pages.length, selectedId, mangaSource]);
+    incrementSeriesReads(detail.id ?? selectedId ?? "");
+  }, [isCreatorSource, detail, currentChapter, pagesLoading, pages.length, selectedId]);
 
   const handleSelectManga = useCallback(
     (id: string) => {
+      // A prose result (only reachable from the "All Works" tab, since "Prose Stories" is its
+      // own tab too) has no image-page reading pane here — send it to its own reader instead of
+      // loading it into this one.
+      const picked = mangaList.find((m) => m.id === id);
+      if (picked?.format?.toLowerCase() === "prose") {
+        router.push(`/story/${encodeURIComponent(id)}`);
+        return;
+      }
       setSelectedId(id);
       setSidebarTab("details");
       setMobileSheetOpen(false);
       setBrowseSheetOpen(false);
       router.replace(`/reader?id=${encodeURIComponent(id)}`, { scroll: false });
     },
-    [router]
+    [router, mangaList]
   );
 
   const isFirstChapter = chapters.length === 0 || chapterIndex === chapters.length - 1;
@@ -351,6 +371,8 @@ export default function ReaderClient() {
           onSearchChange={setSearchQuery}
           activeGenre={activeGenre}
           onGenreChange={setActiveGenre}
+          browseTab={browseTab}
+          onBrowseTabChange={setBrowseTab}
         />
 
         <div className="flex min-w-0 flex-1 flex-col">
@@ -379,7 +401,7 @@ export default function ReaderClient() {
           />
 
           <div className="relative flex min-h-0 flex-1 flex-col">
-          {(isImportedSource || isCreatorSource) && detail && currentChapter && !detailLoading && !pagesLoading ? (
+          {isCreatorSource && detail && currentChapter && !detailLoading && !pagesLoading ? (
             <ImportedContentGate
               mangaId={detail.id ?? selectedId ?? ""}
               chapterId={currentChapter.id}
@@ -449,6 +471,8 @@ export default function ReaderClient() {
         onSearchChange={setSearchQuery}
         activeGenre={activeGenre}
         onGenreChange={setActiveGenre}
+        browseTab={browseTab}
+        onBrowseTabChange={setBrowseTab}
       />
 
       <MobileTabBar

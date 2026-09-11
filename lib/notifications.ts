@@ -1,8 +1,10 @@
 import {
   addDoc,
+  arrayRemove,
   collection,
   deleteDoc,
   doc,
+  getDoc,
   getDocs,
   limit,
   onSnapshot,
@@ -20,9 +22,47 @@ function notificationsCollection(uid: string) {
   return collection(db, "users", uid, "notifications");
 }
 
-/** Writes one new notification to users/{uid}/notifications. Any signed-in user may call this
- * for any target uid — it's how cross-user events (a follow, a reply, a tip) notify someone
- * else; read/update/delete stay locked to the notification's own owner (see firestore.rules). */
+/** Delivers one push notification to every FCM token on `uid`'s profile via
+ * app/api/notifications/send/route.ts (a plain server-side fetch, not a Cloud Function — see
+ * that route's own comment for why). Best-effort: a delivery failure never blocks the in-app
+ * notification this always accompanies. A token the API reports as no-longer-registered is
+ * pruned from the profile so it isn't retried on the next notification. */
+async function sendPushToUser(uid: string, title: string, body: string, url: string): Promise<void> {
+  try {
+    const snap = await getDoc(doc(db, "users", uid));
+    const tokens: string[] = snap.exists() ? (snap.data().fcmTokens ?? []) : [];
+    if (tokens.length === 0) return;
+
+    const results = await Promise.all(
+      tokens.map(async (token) => {
+        try {
+          const res = await fetch("/api/notifications/send", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token, title, body, url }),
+          });
+          const data = await res.json().catch(() => ({}));
+          return { token, notRegistered: data?.notRegistered === true };
+        } catch {
+          return { token, notRegistered: false };
+        }
+      })
+    );
+
+    const staleTokens = results.filter((r) => r.notRegistered).map((r) => r.token);
+    if (staleTokens.length > 0) {
+      await updateDoc(doc(db, "users", uid), { fcmTokens: arrayRemove(...staleTokens) }).catch(() => {});
+    }
+  } catch {
+    // Non-fatal — push delivery is a bonus on top of the in-app notification, never a
+    // requirement for it.
+  }
+}
+
+/** Writes one new notification to users/{uid}/notifications, then best-effort delivers it as a
+ * device push. Any signed-in user may call this for any target uid — it's how cross-user events
+ * (a follow, a reply, a tip) notify someone else; read/update/delete stay locked to the
+ * notification's own owner (see firestore.rules). */
 export async function createNotification(
   uid: string,
   type: NotificationType,
@@ -40,6 +80,7 @@ export async function createNotification(
     isRead: false,
     createdAt: new Date().toISOString(),
   });
+  await sendPushToUser(uid, title, body, actionURL);
 }
 
 export async function markAsRead(uid: string, notifId: string): Promise<void> {

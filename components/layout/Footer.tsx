@@ -111,28 +111,11 @@ export default function Footer() {
       <div className="border-t border-bg4 px-4 py-4 text-center font-noto text-xs text-muted sm:px-6">
         <p>© {new Date().getFullYear()} ÍléOtaku. All rights reserved.</p>
         <p className="mt-1">
-          Manga content via{" "}
-          <a
-            href="https://mangadex.org"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="transition-colors hover:text-gold"
-          >
-            MangaDex
-          </a>{" "}
-          ·{" "}
-          <a
-            href="https://comick.io"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="transition-colors hover:text-gold"
-          >
-            Comick
-          </a>{" "}
-          ·{" "}
+          Every story on ÍléOtaku is published by{" "}
           <Link href="/creator" className="transition-colors hover:text-gold">
             our creators
           </Link>
+          .
         </p>
       </div>
     </footer>

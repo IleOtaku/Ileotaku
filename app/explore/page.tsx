@@ -1,32 +1,30 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { BadgeCheck, Sparkles, TrendingUp } from "lucide-react";
+import { BadgeCheck, Star } from "lucide-react";
 import EmailSignupForm from "@/components/explore/EmailSignupForm";
 import GenreBrowser from "@/components/explore/GenreBrowser";
-import NewReleasesLive from "@/components/explore/NewReleasesLive";
-import PlatinumExclusivesLive from "@/components/explore/PlatinumExclusivesLive";
 import SpotlightCreatorLive from "@/components/explore/SpotlightCreatorLive";
 import TrendingSoundsSection, { TrendingSoundsEmpty } from "@/components/explore/TrendingSoundsSection";
 import Trending from "@/components/landing/Trending";
 import Reveal from "@/components/landing/Reveal";
 import { SectionEyebrow } from "@/components/ui";
-import { getMangaIdsByTier } from "@/lib/contentLocking";
-import { FALLBACK_SUMMARIES } from "@/lib/fallback-manga";
 import { proxyImg } from "@/lib/manga-api";
-import { getAfricanOriginals } from "@/lib/publishedSeries";
+import {
+  getAfricanOriginals,
+  getFeaturedPublishedSeries,
+  getTopRatedPublishedSeries,
+  listCreatorProseWorks,
+} from "@/lib/publishedSeries";
 import { getTrendingSounds } from "@/lib/sounds";
-import { parseViewCount } from "@/lib/utils";
+import type { PublishedSeries } from "@/types";
 
 export const metadata: Metadata = {
   title: "Explore",
 };
 
-const RANK_COLORS = ["#d4a843", "#c8c8d2", "#c4622d"];
-const LANGUAGE_COLUMNS = [
-  { flag: "🇫🇷", name: "French Picks" },
-  { flag: "🇳🇬", name: "Yorùbá Picks" },
-  { flag: "🇰🇪", name: "Swahili Picks" },
-];
+function seriesHref(work: PublishedSeries): string {
+  return work.format?.toLowerCase() === "prose" ? `/story/${work.id}` : `/manga/${encodeURIComponent(work.id)}`;
+}
 
 function SectionHeader({
   eyebrow,
@@ -55,33 +53,73 @@ function SectionHeader({
   );
 }
 
+function WorkCardGrid({
+  works,
+  emptyText,
+  accent,
+}: {
+  works: PublishedSeries[];
+  emptyText: string;
+  accent?: "plat";
+}) {
+  if (works.length === 0) {
+    return <p className="rounded-2xl border border-dashed border-muted2 p-8 text-center font-noto text-sm text-muted">{emptyText}</p>;
+  }
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {works.map((work) => (
+        <Link
+          key={work.id}
+          href={seriesHref(work)}
+          className={`group overflow-hidden rounded-2xl border bg-bg2 transition-colors hover:border-clay ${
+            accent === "plat" ? "border-plat/30" : "border-bg4"
+          }`}
+        >
+          <div className="aspect-[16/9] overflow-hidden bg-bg3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              loading="lazy"
+              src={proxyImg(work.coverImage)}
+              alt={work.title}
+              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+            />
+          </div>
+          <div className="p-4">
+            {work.format?.toLowerCase() === "prose" && (
+              <span className="badge-plat mb-2 inline-flex items-center gap-1 whitespace-nowrap">📖 Prose</span>
+            )}
+            <p className="truncate font-syne text-base font-semibold text-text">{work.title}</p>
+            <p className="mt-0.5 flex items-center gap-1 truncate font-noto text-xs text-muted">
+              {work.authorName}
+              {work.authorVerified && <BadgeCheck className="h-3 w-3 shrink-0 text-plat" />}
+            </p>
+            {work.averageRating > 0 && (
+              <p className="mt-1 flex items-center gap-1 font-noto text-xs text-gold2">
+                <Star className="h-3 w-3 fill-gold text-gold" /> {work.averageRating.toFixed(1)}
+              </p>
+            )}
+          </div>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
 export default async function ExplorePage() {
-  const hallOfFame = [...FALLBACK_SUMMARIES]
-    .sort((a, b) => parseViewCount(b.views) - parseViewCount(a.views))
-    .slice(0, 3);
-
-  const rising = FALLBACK_SUMMARIES.slice(0, 4).map((item, i) => ({
-    ...item,
-    trend: [18, 12, 27, 9][i],
-  }));
-
-  const editorsPicks = FALLBACK_SUMMARIES.slice(0, 3);
-
-  // Sprint 9c: real high/viral-tier titles — the ids themselves come from Firestore (unaffected
-  // by the MangaDex IP block, so this stays server-side), resolved against the live New Releases
-  // pool client-side by PlatinumExclusivesLive below (see its own comment for why).
-  const highViralIds = await getMangaIdsByTier(["high", "viral"], 6);
+  const africanOriginals = await getAfricanOriginals(12);
+  const featuredWorks = await getFeaturedPublishedSeries(6);
+  const latestProse = await listCreatorProseWorks(6);
+  const topRated = await getTopRatedPublishedSeries(6);
 
   const trendingSounds = await getTrendingSounds(6);
-  const africanOriginals = await getAfricanOriginals(12);
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6">
       <div className="mb-14 text-center">
         <h1 className="font-cinzel text-3xl text-text sm:text-4xl">Explore ÍléOtaku</h1>
         <p className="mx-auto mt-2 max-w-xl font-noto text-sm text-muted">
-          Every corner of the catalog — trending series, hidden gems, and the creators building
-          Africa&apos;s next big story.
+          Every corner of the catalog — manga, prose, and the creators building Africa&apos;s next
+          big story.
         </p>
       </div>
 
@@ -119,13 +157,13 @@ export default async function ExplorePage() {
                   {africanOriginals.map((work) => (
                     <Link
                       key={work.id}
-                      href={`/manga/${encodeURIComponent(work.id)}`}
+                      href={seriesHref(work)}
                       className="group overflow-hidden rounded-2xl border border-ivory/15 bg-bg/70 backdrop-blur transition-colors hover:border-gold"
                     >
                       <div className="aspect-[16/9] overflow-hidden bg-bg3">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-            loading="lazy"
+                          loading="lazy"
                           src={proxyImg(work.coverImage)}
                           alt={work.title}
                           className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
@@ -164,50 +202,11 @@ export default async function ExplorePage() {
         </section>
       </Reveal>
 
-      {/* Trending Today */}
+      {/* Featured Creator Works */}
       <Reveal>
         <section className="mb-16">
-          <Trending />
-        </section>
-      </Reveal>
-
-      {/* Editor's Picks */}
-      <Reveal>
-        <section className="mb-16">
-          <SectionHeader eyebrow="⭐ Editor's Picks" title="Hand-picked for you" viewAllHref="/search" />
-          <div className="grid gap-6 sm:grid-cols-3">
-            {editorsPicks.map((item) => (
-              <Link
-                key={item.id}
-                href={`/manga/${encodeURIComponent(item.id)}`}
-                className="group overflow-hidden rounded-2xl border border-bg4 bg-bg2"
-              >
-                <div className="aspect-[16/10] overflow-hidden bg-bg3">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-            loading="lazy"
-                    src={proxyImg(item.image)}
-                    alt={item.title}
-                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                  />
-                </div>
-                <div className="p-4">
-                  <p className="font-syne text-base font-semibold text-text">{item.title}</p>
-                  <p className="mt-1.5 line-clamp-2 font-noto text-xs text-muted">
-                    {item.description}
-                  </p>
-                </div>
-              </Link>
-            ))}
-          </div>
-        </section>
-      </Reveal>
-
-      {/* New Releases */}
-      <Reveal>
-        <section id="new-releases" className="mb-16 scroll-mt-24">
-          <SectionHeader eyebrow="🆕 New Releases" title="Fresh off the press" viewAllHref="/search?sort=newest" />
-          <NewReleasesLive />
+          <SectionHeader eyebrow="⭐ Featured Creator Works" title="Hand-picked by our editors" viewAllHref="/search" />
+          <WorkCardGrid works={featuredWorks} emptyText="No featured works yet — check back soon." />
         </section>
       </Reveal>
 
@@ -219,119 +218,26 @@ export default async function ExplorePage() {
         </section>
       </Reveal>
 
-      {/* Rising */}
+      {/* Latest Prose Stories */}
       <Reveal>
         <section className="mb-16">
-          <SectionHeader eyebrow="📈 Rising" title="Climbing the charts" viewAllHref="/search?sort=most-read" />
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {rising.map((item) => (
-              <Link
-                key={item.id}
-                href={`/manga/${encodeURIComponent(item.id)}`}
-                className="group relative overflow-hidden rounded-xl border border-bg4 bg-bg2"
-              >
-                <span className="absolute left-2 top-2 z-10 flex items-center gap-1 rounded-full bg-green/90 px-2 py-1 font-syne text-[10px] font-bold text-ivory">
-                  <TrendingUp className="h-3 w-3" /> +{item.trend}%
-                </span>
-                <div className="aspect-[3/4] overflow-hidden bg-bg3">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-            loading="lazy"
-                    src={proxyImg(item.image)}
-                    alt={item.title}
-                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                  />
-                </div>
-                <p className="truncate p-2 font-syne text-xs font-semibold text-text">{item.title}</p>
-              </Link>
-            ))}
-          </div>
+          <SectionHeader eyebrow="📖 Latest Prose Stories" title="Text-first tales, chapter by chapter" viewAllHref="/search?tab=works&format=prose" />
+          <WorkCardGrid works={latestProse} emptyText="No prose stories published yet — be the first creator to publish one!" accent="plat" />
         </section>
       </Reveal>
 
-      {/* Hall of Fame */}
+      {/* Trending by reads */}
       <Reveal>
         <section className="mb-16">
-          <SectionHeader eyebrow="🏆 Hall of Fame" title="All-time greats" viewAllHref="/search?sort=highest-rated" />
-          <div className="grid gap-6 sm:grid-cols-3">
-            {hallOfFame.map((item, i) => (
-              <Link
-                key={item.id}
-                href={`/manga/${encodeURIComponent(item.id)}`}
-                className="group relative overflow-hidden rounded-2xl border border-bg4 bg-bg2"
-              >
-                <span
-                  className="absolute left-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full font-cinzel text-sm font-bold text-bg shadow-lg"
-                  style={{ backgroundColor: RANK_COLORS[i] }}
-                >
-                  {i + 1}
-                </span>
-                <div className="aspect-[3/4] overflow-hidden bg-bg3">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-            loading="lazy"
-                    src={proxyImg(item.image)}
-                    alt={item.title}
-                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                  />
-                </div>
-                <div className="p-3">
-                  <p className="font-syne text-sm font-semibold text-text">{item.title}</p>
-                  <p className="mt-1 font-noto text-xs text-muted">{item.views} views</p>
-                </div>
-              </Link>
-            ))}
-          </div>
+          <Trending />
         </section>
       </Reveal>
 
-      {/* By Language */}
+      {/* Top Rated */}
       <Reveal>
         <section className="mb-16">
-          <SectionHeader eyebrow="🌐 By Language" title="Read in your language" />
-          <div className="grid gap-6 sm:grid-cols-3">
-            {LANGUAGE_COLUMNS.map((col) => (
-              <div key={col.name}>
-                <p className="mb-3 flex items-center gap-2 font-syne text-sm font-semibold text-text">
-                  <span className="text-lg">{col.flag}</span> {col.name}
-                </p>
-                <div className="flex flex-col gap-2">
-                  {[0, 1, 2].map((i) => (
-                    <div
-                      key={i}
-                      className="flex items-center gap-3 rounded-xl border border-dashed border-muted2 bg-bg2 p-2.5"
-                    >
-                      <div className="flex h-12 w-9 shrink-0 items-center justify-center rounded bg-bg3 text-lg">
-                        {col.flag}
-                      </div>
-                      <div>
-                        <p className="font-noto text-xs text-muted">Title coming soon</p>
-                        <span className="mt-1 inline-block rounded-full bg-gold/15 px-2 py-0.5 font-syne text-[10px] font-semibold text-gold">
-                          Coming Soon
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      </Reveal>
-
-      {/* Platinum Exclusives */}
-      <Reveal>
-        <section className="mb-16">
-          <SectionHeader eyebrow="💎 Platinum Exclusives" title="Read it before anyone else" />
-          <PlatinumExclusivesLive highViralIds={highViralIds} />
-          <div className="mt-6 flex flex-col items-center gap-3 rounded-2xl border border-plat/30 bg-plat/5 p-6 text-center">
-            <p className="font-syne text-sm font-semibold text-text">
-              Get Platinum to access early chapters
-            </p>
-            <Link href="/pricing" className="btn-plat">
-              <Sparkles className="h-4 w-4" /> Go Platinum
-            </Link>
-          </div>
+          <SectionHeader eyebrow="🏆 Top Rated" title="Readers' favorites" viewAllHref="/search?sort=highest-rated" />
+          <WorkCardGrid works={topRated} emptyText="No ratings yet — be the first to rate a series." />
         </section>
       </Reveal>
 

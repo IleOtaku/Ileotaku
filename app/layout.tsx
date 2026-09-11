@@ -6,6 +6,7 @@ import BetaFeedback from "@/components/layout/BetaFeedback";
 import ErrorBoundary from "@/components/layout/ErrorBoundary";
 import InstallPrompt from "@/components/layout/InstallPrompt";
 import MaintenanceGate from "@/components/layout/MaintenanceGate";
+import NotificationPrompt from "@/components/layout/NotificationPrompt";
 import Preloader from "@/components/layout/Preloader";
 import ServiceWorkerRegister from "@/components/layout/ServiceWorkerRegister";
 import SiteChrome from "@/components/layout/SiteChrome";
@@ -46,12 +47,12 @@ export const metadata: Metadata = {
     siteName: "ÍléOtaku",
     title: "ÍléOtaku — Africa's Manga Home",
     description:
-      "Thousands of manga, manhwa and African original stories. Born from the Motherland.",
+      "African original manga, manhwa and prose stories. Born from the Motherland.",
   },
   twitter: {
     card: "summary_large_image",
     title: "ÍléOtaku — Africa's Manga Home",
-    description: "Thousands of manga, manhwa and African original stories.",
+    description: "African original manga, manhwa and prose stories.",
     creator: "@ileotaku",
   },
   robots: { index: true, follow: true },
@@ -101,6 +102,7 @@ export default function RootLayout({
                 <SiteChrome>{children}</SiteChrome>
               </MaintenanceGate>
               <InstallPrompt />
+              <NotificationPrompt />
             </FeedAudioProvider>
           </AuthProvider>
         </ErrorBoundary>

@@ -262,11 +262,15 @@ service cloud.firestore {
       allow read: if true;
       allow create: if isAdmin();
       // See creatorWorks' update rule above for the same ownership-transfer-acceptance carve-out
-      // (same 5 fields, same trust-the-app-layer reasoning).
+      // (same 5 fields, same trust-the-app-layer reasoning). The `totalReads` carve-out is new:
+      // incrementSeriesReads() (lib/publishedSeries.ts) is called by ANY signed-in reader who
+      // opens a chapter, not just the work's own author, so it needs its own narrow allowance —
+      // same "any signed-in user, one field only" shape as `likes` elsewhere in this ruleset.
       allow update: if isAdmin()
         || (isSignedIn() && resource.data.authorId == request.auth.uid)
         || (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(["authorId", "authorName", "authorHandle", "authorPhotoURL"]));
+              .hasOnly(["authorId", "authorName", "authorHandle", "authorPhotoURL"]))
+        || (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["totalReads"]));
       allow delete: if isAdmin() || (isSignedIn() && resource.data.authorId == request.auth.uid);
     }
 
@@ -282,9 +286,9 @@ service cloud.firestore {
     }
 
     // ---------------------------- series (comments & ratings) ----------------------------
-    // The manga catalog itself is served from MangaHook, not Firestore — `series/{seriesId}`
-    // (keyed by that external id) is just the lightweight Firestore-side home for social
-    // metadata: comments, ratings, and the average/count rollup submitRating recomputes.
+    // `series/{seriesId}` is keyed by the creator work's own id (see lib/publishedSeries.ts) —
+    // it holds each work's chapters subcollection plus social metadata: comments, ratings, and
+    // the average/count rollup submitRating recomputes.
     match /series/{seriesId} {
       allow read: if true;
       allow create, update: if isSignedIn();

@@ -5,16 +5,15 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { LayoutGrid, List, Search, SlidersHorizontal, UsersRound, X } from "lucide-react";
 import { EmptyState, Skeleton } from "@/components/ui";
 import { useAuth } from "@/hooks/useAuth";
-import { FALLBACK_SUMMARIES } from "@/lib/fallback-manga";
 import { getBlockedUsers } from "@/lib/blocking";
 import { getPopularCreators, searchUsers } from "@/lib/firestore";
-import { getMangaList, searchManga, type MangaListItem } from "@/lib/manga-api";
+import { searchPublishedWorks } from "@/lib/publishedSeries";
 import { parseViewCount } from "@/lib/utils";
-import type { UserProfile } from "@/types";
+import type { PublishedSeries, UserProfile } from "@/types";
 import FilterSidebar from "./FilterSidebar";
 import PersonCard from "./PersonCard";
 import ResultCard from "./ResultCard";
-import { DEFAULT_FILTERS, type SearchFilters, type SearchResultItem } from "./types";
+import { DEFAULT_FILTERS, type SearchFilters, type SearchResultItem, type WorksFormatFilter } from "./types";
 
 const RECENT_KEY = "ileotaku-recent-searches";
 const RECENT_LIMIT = 8;
@@ -30,6 +29,12 @@ const PEOPLE_FILTERS: { label: string; value: PeopleFilter }[] = [
   { label: "Verified Only", value: "verified" },
 ];
 
+const WORKS_FORMAT_FILTERS: { label: string; value: WorksFormatFilter }[] = [
+  { label: "All", value: "all" },
+  { label: "Manga", value: "manga" },
+  { label: "Prose", value: "prose" },
+];
+
 function applyPeopleFilter(people: UserProfile[], filter: PeopleFilter): UserProfile[] {
   switch (filter) {
     case "creators":
@@ -43,18 +48,43 @@ function applyPeopleFilter(people: UserProfile[], filter: PeopleFilter): UserPro
   }
 }
 
-function toResultItem(item: MangaListItem): SearchResultItem {
+function toResultItem(series: PublishedSeries): SearchResultItem {
   return {
-    id: item.id,
-    title: item.title,
-    image: item.image,
-    author: "Unknown",
-    genres: [],
-    status: "Ongoing",
-    rating: 4.0,
-    chapters: 0,
-    views: item.view ?? "0",
+    id: series.id,
+    title: series.title,
+    image: series.coverImage,
+    author: series.authorName,
+    authorVerified: series.authorVerified === true,
+    genres: series.genres,
+    format: series.format,
+    reads: series.totalReads ?? 0,
+    chapters: series.chapterCount ?? 0,
+    rating: series.averageRating ?? 0,
   };
+}
+
+async function runSearch(
+  query: string,
+  filters: SearchFilters,
+  worksFormat: WorksFormatFilter
+): Promise<SearchResultItem[]> {
+  const format = worksFormat === "all" ? undefined : worksFormat;
+  const series = await searchPublishedWorks(query, format);
+  let items = series.map(toResultItem);
+
+  if (filters.genres.length > 0) {
+    items = items.filter((i) => i.genres.some((g) => filters.genres.includes(g)));
+  }
+
+  if (filters.sort === "highest-rated") {
+    items = [...items].sort((a, b) => b.rating - a.rating);
+  } else if (filters.sort === "newest") {
+    // searchPublishedWorks already reads from a newest-first query — leave order as-is.
+  } else {
+    items = [...items].sort((a, b) => parseViewCount(String(b.reads)) - parseViewCount(String(a.reads)));
+  }
+
+  return items;
 }
 
 function loadRecent(): string[] {
@@ -69,7 +99,6 @@ function loadRecent(): string[] {
 function saveRecent(query: string): string[] {
   try {
     const current = loadRecent().filter((q) => q.toLowerCase() !== query.toLowerCase());
-    // Newest first, oldest dropped once there are more than RECENT_LIMIT stored.
     const updated = [query, ...current].slice(0, RECENT_LIMIT);
     localStorage.setItem(RECENT_KEY, JSON.stringify(updated));
     return updated;
@@ -96,64 +125,6 @@ function clearAllRecent(): void {
   }
 }
 
-function enrichWithFallback(item: SearchResultItem): SearchResultItem {
-  const match = FALLBACK_SUMMARIES.find((f) => f.id === item.id);
-  return match
-    ? {
-        ...item,
-        author: match.author,
-        genres: match.genres,
-        status: match.status,
-        rating: match.rating,
-        chapters: match.chapters,
-        views: match.views,
-      }
-    : item;
-}
-
-async function runSearch(query: string, filters: SearchFilters): Promise<SearchResultItem[]> {
-  const trimmed = query.trim();
-  let items: SearchResultItem[];
-
-  if (trimmed) {
-    const q = trimmed.toLowerCase();
-    // Title/keyword search from the API (or its fallback), plus a genre-name match against
-    // our known catalog — readers naturally search "Action" or "Romance" expecting tagged
-    // titles back, not just titles with that word literally in them.
-    const res = await searchManga(trimmed);
-    const titleMatches = res.data.mangaList.map((item) => enrichWithFallback(toResultItem(item)));
-    const genreMatches = FALLBACK_SUMMARIES.filter((f) =>
-      f.genres.some((g) => g.toLowerCase().includes(q))
-    ).map((f) => enrichWithFallback(toResultItem({ id: f.id, title: f.title, image: f.image })));
-
-    const merged = new Map<string, SearchResultItem>();
-    for (const item of [...titleMatches, ...genreMatches]) {
-      merged.set(item.id, item);
-    }
-    items = Array.from(merged.values());
-  } else {
-    const res = await getMangaList(1);
-    items = res.data.mangaList.map((item) => enrichWithFallback(toResultItem(item)));
-  }
-
-  if (filters.genres.length > 0) {
-    items = items.filter((i) => i.genres.some((g) => filters.genres.includes(g)));
-  }
-  if (filters.status) {
-    items = items.filter((i) => i.status.toLowerCase() === filters.status.toLowerCase());
-  }
-
-  if (filters.sort === "highest-rated") {
-    items = [...items].sort((a, b) => b.rating - a.rating);
-  } else {
-    // "newest" / "most-read" / "most-bookmarked" all fall back to view-count ordering — none
-    // of our data sources (live API or fallback catalog) model those distinctly yet.
-    items = [...items].sort((a, b) => parseViewCount(b.views) - parseViewCount(a.views));
-  }
-
-  return items;
-}
-
 /** Full search experience: auto-focused search bar, filter sidebar, grid/list results. */
 export default function SearchClient() {
   const router = useRouter();
@@ -161,8 +132,6 @@ export default function SearchClient() {
   const { user } = useAuth();
   const [blockedUids, setBlockedUids] = useState<Set<string>>(new Set());
 
-  // People search has no query-level way to exclude an arbitrary per-viewer set of users, so
-  // blocked users are filtered out client-side, same pattern as CommentSection/FeedClient.
   useEffect(() => {
     if (!user) {
       setBlockedUids(new Set());
@@ -184,6 +153,10 @@ export default function SearchClient() {
       ...DEFAULT_FILTERS,
       sort: sortParam && validSorts.includes(sortParam) ? sortParam : DEFAULT_FILTERS.sort,
     };
+  });
+  const [worksFormat, setWorksFormat] = useState<WorksFormatFilter>(() => {
+    const param = searchParams.get("format");
+    return param === "manga" || param === "prose" ? param : "all";
   });
   const [results, setResults] = useState<SearchResultItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -220,18 +193,19 @@ export default function SearchClient() {
     let cancelled = false;
     const handle = setTimeout(() => {
       setLoading(true);
-      runSearch(query, filters)
+      runSearch(query, filters, worksFormat)
         .then((items) => {
           if (cancelled) return;
           setResults(items);
           setHasSearched(true);
           if (query.trim()) {
             setRecentSearches(saveRecent(query.trim()));
-            router.replace(
-              `/search?q=${encodeURIComponent(query.trim())}${tab === "people" ? "&tab=people" : ""}`,
-              { scroll: false }
-            );
           }
+          const params = new URLSearchParams();
+          if (query.trim()) params.set("q", query.trim());
+          if (tab === "people") params.set("tab", "people");
+          if (worksFormat !== "all") params.set("format", worksFormat);
+          router.replace(`/search${params.toString() ? `?${params.toString()}` : ""}`, { scroll: false });
         })
         .catch(() => {
           if (!cancelled) setResults([]);
@@ -246,7 +220,7 @@ export default function SearchClient() {
       clearTimeout(handle);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, filters]);
+  }, [query, filters, worksFormat]);
 
   useEffect(() => {
     const trimmed = query.trim().replace(/^@/, "");
@@ -326,7 +300,7 @@ export default function SearchClient() {
               tab === "manga" ? "bg-clay text-ivory" : "text-muted hover:text-text"
             }`}
           >
-            Manga
+            Works
           </button>
           <button
             type="button"
@@ -399,7 +373,24 @@ export default function SearchClient() {
       </div>
 
       {tab === "manga" && (
-      <div className="mt-8 flex items-center justify-between lg:hidden">
+        <div className="mt-6 flex justify-center gap-2">
+          {WORKS_FORMAT_FILTERS.map((f) => (
+            <button
+              key={f.value}
+              type="button"
+              onClick={() => setWorksFormat(f.value)}
+              className={`rounded-full border px-4 py-1.5 font-noto text-sm transition-colors ${
+                worksFormat === f.value ? "border-clay bg-clay text-ivory" : "border-muted2 bg-bg3 text-muted"
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {tab === "manga" && (
+      <div className="mt-6 flex items-center justify-between lg:hidden">
         <button
           type="button"
           onClick={() => setMobileFiltersOpen(true)}
@@ -442,7 +433,7 @@ export default function SearchClient() {
                 ? "Searching..."
                 : query
                   ? `${results.length} results for "${query}"`
-                  : `${results.length} titles`}
+                  : `${results.length} works`}
             </p>
             <div className="flex items-center gap-1 rounded-full border border-muted2 bg-bg3 p-1">
               <button
@@ -487,7 +478,7 @@ export default function SearchClient() {
             <EmptyState
               icon={<span className="text-4xl">🔍</span>}
               title="No Results Found"
-              description="Try different keywords or filters."
+              description="Try different keywords or filters, or be the first creator to publish one."
             />
           ) : (
             <div

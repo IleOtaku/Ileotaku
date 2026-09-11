@@ -15,7 +15,7 @@ import {
 import type { SeriesRating } from "@/types";
 
 export interface RatingWidgetProps {
-  /** External MangaHook manga id — the key the underlying series/{id} doc is stored under. */
+  /** The creator-published work id — the key the underlying series/{id} doc is stored under. */
   seriesId: string;
 }
 

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { MessagesSquare, Users } from "lucide-react";
 import { Skeleton } from "@/components/ui";
 import { Avatar } from "@/components/ui/Avatar";
+import MentionText from "@/components/ui/MentionText";
 import { useAuth } from "@/hooks/useAuth";
 import { getRecentChatMessages } from "@/lib/firestore";
 import { formatTime } from "@/lib/utils";
@@ -110,7 +111,9 @@ export default function LiveChatPreview({ mangaId }: LiveChatPreviewProps) {
                     {m.senderIsPlatinum && <span className="text-plat">✦</span>}
                     <span className="font-noto text-[10px] text-muted">{formatTime(m.createdAt)}</span>
                   </div>
-                  <p className="break-words font-noto text-xs text-text/90">{m.text}</p>
+                  <p className="break-words font-noto text-xs text-text/90">
+                    <MentionText text={m.text} />
+                  </p>
                 </div>
               </div>
             ))}

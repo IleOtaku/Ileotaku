@@ -29,6 +29,7 @@ import {
 import BlockButton from "@/components/social/BlockButton";
 import { Modal, Skeleton } from "@/components/ui";
 import { Avatar } from "@/components/ui/Avatar";
+import MentionText from "@/components/ui/MentionText";
 import { useAuth } from "@/hooks/useAuth";
 import { getBlockedUsers, isBlockedBy } from "@/lib/blocking";
 import { uploadImage } from "@/lib/cloudinary";
@@ -1081,7 +1082,7 @@ export default function MessagesClient() {
                               </div>
                             ) : (
                               <>
-                                {m.text}
+                                <MentionText text={m.text} />
                                 <span className="mt-1 flex items-center gap-1 text-[10px]">
                                   <span className={isOwn ? "text-ivory/70" : "text-muted"}>{formatTime(m.createdAt)}</span>
                                   {m.isEdited && <span className={isOwn ? "text-ivory/70" : "text-muted"}>(edited)</span>}

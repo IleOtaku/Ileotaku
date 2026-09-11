@@ -1,9 +1,10 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Search, X } from "lucide-react";
+import Link from "next/link";
+import { Search, Sparkles, X } from "lucide-react";
 import { Skeleton } from "@/components/ui";
-import { MangaThumb, READER_GENRES, type MangaListItemView } from "./MangaList";
+import { BROWSE_TABS, MangaThumb, READER_GENRES, type BrowseTab, type MangaListItemView } from "./MangaList";
 
 export interface MobileBrowseSheetProps {
   open: boolean;
@@ -16,6 +17,8 @@ export interface MobileBrowseSheetProps {
   onSearchChange: (value: string) => void;
   activeGenre: string;
   onGenreChange: (genre: string) => void;
+  browseTab: BrowseTab;
+  onBrowseTabChange: (tab: BrowseTab) => void;
 }
 
 /**
@@ -35,6 +38,8 @@ export default function MobileBrowseSheet({
   onSearchChange,
   activeGenre,
   onGenreChange,
+  browseTab,
+  onBrowseTabChange,
 }: MobileBrowseSheetProps) {
   return (
     <motion.div
@@ -72,12 +77,26 @@ export default function MobileBrowseSheet({
       </motion.div>
 
       <div className="shrink-0 border-b border-bg4 p-3">
+        <div className="mb-3 flex gap-1 rounded-lg bg-bg3 p-1">
+          {BROWSE_TABS.map((tab) => (
+            <button
+              key={tab.value}
+              type="button"
+              onClick={() => onBrowseTabChange(tab.value)}
+              className={`min-h-[36px] flex-1 rounded-md px-1.5 font-noto text-[11px] font-semibold transition-colors ${
+                browseTab === tab.value ? "bg-clay text-ivory" : "text-muted"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
           <input
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search manga..."
+            placeholder="Search creator works..."
             className="input-base pl-9"
             style={{ fontSize: "16px" }}
           />
@@ -115,10 +134,22 @@ export default function MobileBrowseSheet({
             ))}
           </div>
         ) : items.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 px-4 py-16 text-center">
-            <Search className="h-8 w-8 text-muted" />
-            <p className="font-noto text-sm text-muted">No manga found. Try another search or genre.</p>
-          </div>
+          searchQuery.trim() || activeGenre !== "All" ? (
+            <div className="flex flex-col items-center gap-2 px-4 py-16 text-center">
+              <Search className="h-8 w-8 text-muted" />
+              <p className="font-noto text-sm text-muted">No creator works found. Try another search or genre.</p>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-3 px-4 py-16 text-center">
+              <Sparkles className="h-8 w-8 text-gold" />
+              <p className="font-noto text-sm text-muted">
+                No works published yet — be the first creator to publish!
+              </p>
+              <Link href="/creator" className="btn-primary text-sm">
+                Become a Creator
+              </Link>
+            </div>
+          )
         ) : (
           <div className="flex flex-col gap-2">
             {items.map((item) => {
@@ -136,8 +167,9 @@ export default function MobileBrowseSheet({
                     <MangaThumb src={item.image} title={item.title} source={item.source} />
                   </div>
                   <div className="flex min-w-0 flex-1 flex-col justify-center gap-1">
-                    <p className={`truncate font-syne text-base font-semibold ${active ? "text-clay2" : "text-text"}`}>
-                      {item.title}
+                    <p className={`flex items-center gap-1 truncate font-syne text-base font-semibold ${active ? "text-clay2" : "text-text"}`}>
+                      {item.format?.toLowerCase() === "prose" && <span className="shrink-0">📖</span>}
+                      <span className="truncate">{item.title}</span>
                     </p>
                     {item.chapter && <p className="truncate font-noto text-sm text-muted">{item.chapter}</p>}
                     {item.view && <p className="font-noto text-xs text-muted">{item.view} views</p>}

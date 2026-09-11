@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { FALLBACK_SUMMARIES } from "@/lib/fallback-manga";
 import { proxyImg } from "@/lib/manga-api";
+import { listAllCreatorWorks } from "@/lib/publishedSeries";
 import { GENRES } from "@/lib/utils";
+import type { MangaListItem } from "@/lib/apis/types";
+import { Skeleton } from "@/components/ui";
 
 const GENRE_EMOJIS: Record<string, string> = {
   Action: "⚔️",
@@ -35,15 +37,29 @@ const GENRE_EMOJIS: Record<string, string> = {
   Thriller: "🎯",
 };
 
-/** Genre chip grid — clicking a chip filters the catalog grid rendered directly below it. */
+/** Genre chip grid — clicking a chip filters the creator catalog grid rendered directly below it. */
 export default function GenreBrowser() {
   const [activeGenre, setActiveGenre] = useState<string | null>(null);
+  const [items, setItems] = useState<MangaListItem[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const filtered = activeGenre
-    ? FALLBACK_SUMMARIES.filter((m) =>
-        m.genres.some((g) => g.toLowerCase() === activeGenre.toLowerCase())
-      )
-    : FALLBACK_SUMMARIES;
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    listAllCreatorWorks(activeGenre ?? undefined)
+      .then((res) => {
+        if (!cancelled) setItems(res);
+      })
+      .catch(() => {
+        if (!cancelled) setItems([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeGenre]);
 
   return (
     <div>
@@ -69,21 +85,23 @@ export default function GenreBrowser() {
       </div>
 
       <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-        {filtered.length === 0 ? (
+        {loading ? (
+          Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="aspect-[3/4] rounded-xl" />)
+        ) : items.length === 0 ? (
           <p className="col-span-full font-noto text-sm text-muted">
             No titles in this genre yet — check back soon.
           </p>
         ) : (
-          filtered.map((item) => (
+          items.slice(0, 12).map((item) => (
             <Link
               key={item.id}
-              href={`/manga/${encodeURIComponent(item.id)}`}
+              href={item.format?.toLowerCase() === "prose" ? `/story/${item.id}` : `/manga/${encodeURIComponent(item.id)}`}
               className="group overflow-hidden rounded-xl border border-bg4 bg-bg2"
             >
               <div className="aspect-[3/4] overflow-hidden bg-bg3">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-            loading="lazy"
+                  loading="lazy"
                   src={proxyImg(item.image)}
                   alt={item.title}
                   className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"

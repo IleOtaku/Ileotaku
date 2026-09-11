@@ -6,7 +6,7 @@ const STEPS = [
   {
     icon: Compass,
     title: "Discover",
-    text: "Browse thousands of titles across every genre, curated for African readers.",
+    text: "Browse African original manga and prose stories across every genre, curated for African readers.",
   },
   {
     icon: BookOpen,

@@ -3,6 +3,5 @@ Allow: /
 Disallow: /admin
 Disallow: /api
 Disallow: /auth/spotify/callback
-Disallow: /test-upload
 
 Sitemap: https://ileotaku.vercel.app/sitemap.xml

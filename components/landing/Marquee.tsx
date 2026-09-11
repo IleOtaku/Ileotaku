@@ -1,5 +1,5 @@
 const FEATURES = [
-  "2,400+ titles across every genre",
+  "African original manga, manhwa and prose",
   "Read in 30+ African languages",
   "180+ creators earning directly from readers",
   "New chapters drop every week",

@@ -511,9 +511,9 @@ export function subscribeToPendingWorkCount(callback: (count: number) => void): 
 }
 
 /* ---------------------------- Comments ---------------------------- */
-// Comments (and ratings, below) live under a `series/{mangaId}` doc keyed by the external
-// MangaHook id — the catalog itself is served from that API rather than Firestore, so this is
-// the lightweight Firestore-side home for social metadata about each title.
+// Comments (and ratings, below) live under a `series/{mangaId}` doc keyed by the creator work's
+// own id (see lib/publishedSeries.ts) — this collection also holds each work's chapters
+// subcollection, so it doubles as the lightweight Firestore-side home for social metadata.
 
 function commentsCollection(mangaId: string, chapterId?: string) {
   return chapterId

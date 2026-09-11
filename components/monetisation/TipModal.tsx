@@ -13,8 +13,8 @@ import { tipCreator } from "@/lib/payments";
 export interface TipModalProps {
   open: boolean;
   onClose: () => void;
-  /** The real ÍléOtaku uid to credit. Null when the "creator" isn't a real account yet (e.g. a
-   * MangaHook-sourced author) — the modal still opens but tipping is disabled with an explanation. */
+  /** The real ÍléOtaku uid to credit. Null only if the work's author lookup somehow failed — the
+   * modal still opens but tipping is disabled with an explanation. */
   creatorId: string | null;
   creatorName: string;
   mangaId?: string;

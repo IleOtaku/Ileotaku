@@ -16,6 +16,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
+import MentionText from "@/components/ui/MentionText";
 import { useAuth } from "@/hooks/useAuth";
 import { getBlockedUsers } from "@/lib/blocking";
 import { deleteComment, editComment, postComment, subscribeToComments, toggleCommentLike } from "@/lib/firestore";
@@ -25,7 +26,7 @@ import ReportModal from "./ReportModal";
 import type { SeriesComment } from "@/types";
 
 export interface CommentSectionProps {
-  /** External MangaHook manga id. */
+  /** The creator-published work id. */
   mangaId: string;
   /** When provided, shows this chapter's comments instead of the series-wide thread. */
   chapterId?: string;
@@ -159,7 +160,9 @@ const CommentRow = memo(function CommentRow({
               <Eye className="h-3.5 w-3.5" /> Show spoiler
             </button>
           ) : (
-            <p className="mt-1 font-noto text-sm text-text">{comment.text}</p>
+            <p className="mt-1 font-noto text-sm text-text">
+              <MentionText text={comment.text} />
+            </p>
           )}
 
           {!comment.isDeleted && (

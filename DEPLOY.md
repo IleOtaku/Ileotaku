@@ -61,6 +61,7 @@ Apply each to Production, Preview, and Development unless noted otherwise.
 | `NEXT_PUBLIC_PROPELLERADS_ZONE_PROFILE` | PropellerAds zone ID for the profile-sidebar ad slot — placeholder ok |
 | `NEXT_PUBLIC_APP_URL` | `https://ileotaku.vercel.app` — used for SEO metadata and the sitemap |
 | `NEXT_TELEMETRY_DISABLED` | `1` — disables Next.js telemetry |
+| `FIREBASE_SERVICE_ACCOUNT` | Server-only. The full contents of your Firebase service account JSON (Firebase Console → Project Settings → Service Accounts → Generate new private key), collapsed to a single-line string. Used by `app/api/notifications/send/route.ts` (via firebase-admin) to deliver push notifications — never exposed to the browser. |
 
 ## Step 4: Deploy
 
@@ -73,7 +74,8 @@ Once the deploy finishes, work through this list against the real `ileotaku.verc
 
 - [ ] Visit `ileotaku.vercel.app` — confirm the landing page loads
 - [ ] Sign in with `admin@ileotaku.com` — confirm the admin dashboard works
-- [ ] Browse manga — confirm MangaDex content loads
+- [ ] Browse manga — confirm published creator works load (the catalog is empty until a creator
+      publishes something; ÍléOtaku has no external manga API anymore)
 - [ ] Test a Paystack payment (use a [Paystack test card](https://paystack.com/docs/payments/test-payments/) while on test keys)
 - [ ] Confirm Cloudinary uploads work (try a profile photo or cover image)
 - [ ] Submit a beta feedback item via the floating Feedback button, and confirm it shows up in

@@ -5,9 +5,15 @@
  * `users/{uid}/notifications/{notifId}` (every in-app notification ÍléOtaku already writes —
  * new follower, chapter alert, moderation action, announcement, etc.) and delivers the same
  * title/body to every FCM token registered on that user's profile (see lib/fcm.ts, which is
- * what populates `fcmTokens`). This is the server half of push notifications — the client never
- * sends pushes directly, it only ever creates the Firestore notification document and this
- * function fans it out.
+ * what populates `fcmTokens`).
+ *
+ * SUPERSEDED by app/api/notifications/send/route.ts: lib/notifications.ts's createNotification()
+ * now calls that Next.js API route directly (a plain Vercel serverless function, needing no
+ * Blaze-plan upgrade or separate `firebase deploy`), so this function is redundant wherever the
+ * app already runs that code path. If this function is deployed on this project, undeploy it —
+ * `firebase functions:delete sendPushOnNotification` — to avoid every push notification being
+ * sent twice. Left in the repo only in case a future need for a Firestore-trigger-based delivery
+ * path (independent of the Next.js app, e.g. a push sent by another backend service) comes up.
  *
  * Deploy: `cd functions && npm install && npm run deploy` (requires the project to be on the
  * Blaze pay-as-you-go plan — Cloud Functions cannot deploy on the free Spark plan).

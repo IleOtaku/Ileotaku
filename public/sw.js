@@ -59,12 +59,9 @@ function isStaticAsset(url) {
 }
 
 function isMangaCoverImage(url) {
-  // MangaDex/Comick cover art and our own image proxy route — cached opportunistically as
-  // covers are viewed, so previously-browsed series still show art while offline.
-  return (
-    url.pathname.startsWith("/api/proxy") ||
-    /mangadex|comick|uploads\.mangadex/i.test(url.hostname)
-  );
+  // Creator cover art and chapter pages, all served from Cloudinary — cached opportunistically
+  // as they're viewed, so previously-browsed series still show art while offline.
+  return /res\.cloudinary\.com/i.test(url.hostname);
 }
 
 function isNavigationRequest(request) {

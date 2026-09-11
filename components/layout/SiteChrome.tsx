@@ -10,11 +10,13 @@ import Navbar from "./Navbar";
  * - /auth/*    — the split-screen AuthLayout shell
  * - /reader*   — the full-height manga reader, which needs the whole viewport and its own
  *                back/nav controls rather than the global navbar + footer squeezed around it
+ * - /story/*   — the prose reader, same reasoning (its own sticky header + reading-theme
+ *                background, which a global navbar bar would visually clash with)
  */
 export default function SiteChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isImmersiveRoute =
-    pathname?.startsWith("/auth") || pathname?.startsWith("/reader") || false;
+    pathname?.startsWith("/auth") || pathname?.startsWith("/reader") || pathname?.startsWith("/story") || false;
 
   if (isImmersiveRoute) {
     return <>{children}</>;

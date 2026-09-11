@@ -20,16 +20,24 @@ export interface AvatarProps {
  * drift of a dozen near-identical photoURL-or-initials blocks (Navbar, DM lists, comments, feed
  * cards, search results, admin tables, ...) each handling the no-photo case slightly differently.
  *
- * A broken/404ing photoURL falls back to the initials circle (state-driven, like
- * components/reader/MangaList.tsx's MangaThumb already did) rather than just hiding the <img>
- * on error and leaving a blank circle-shaped hole — the same visual outcome as never having had
- * a photoURL at all, which is what a viewer actually wants to see. */
+ * Universal profile-picture fix: a Google OAuth photoURL (lh3.googleusercontent.com) 404s/errors
+ * without `referrerPolicy="no-referrer"` — Google's image CDN rejects the request entirely when
+ * it sees a Referer header from a third-party origin, which every browser sends by default.
+ * `crossOrigin="anonymous"` similarly avoids CORS failures on other externally-hosted photos
+ * (this app's own Cloudinary uploads don't need it, but a photoURL can also be a raw Google/other
+ * OAuth url that predates any Cloudinary migration). Explicit `width`/`height` in `style` (not
+ * just the width/height attributes, which Tailwind's own classes can override) guarantees the
+ * rendered box is actually `size` pixels regardless of what className brings in.
+ *
+ * A broken/404ing photoURL falls back to the initials circle (via `imgError` below) rather than
+ * just hiding the <img> on error and leaving a blank circle-shaped hole — the same visual outcome
+ * as never having had a photoURL at all, which is what a viewer actually wants to see. */
 export function Avatar({ uid, photoURL, displayName, size = 36, className }: AvatarProps) {
-  const [errored, setErrored] = useState(false);
+  const [imgError, setImgError] = useState(false);
   const color = stringToColor(uid || displayName || "user");
   const text = initials(displayName || "U");
 
-  if (photoURL && !errored) {
+  if (photoURL && !imgError) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
@@ -37,8 +45,11 @@ export function Avatar({ uid, photoURL, displayName, size = 36, className }: Ava
         alt={displayName || ""}
         width={size}
         height={size}
-        className={cn("rounded-full object-cover", className)}
-        onError={() => setErrored(true)}
+        referrerPolicy="no-referrer"
+        crossOrigin="anonymous"
+        className={cn("rounded-full object-cover shrink-0", className)}
+        style={{ width: size, height: size }}
+        onError={() => setImgError(true)}
       />
     );
   }

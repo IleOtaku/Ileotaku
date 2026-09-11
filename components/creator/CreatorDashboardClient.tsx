@@ -20,6 +20,7 @@ import CreatorFeedTab from "@/components/creator/CreatorFeedTab";
 import WorkCard from "@/components/creator/WorkCard";
 import UploadModal from "@/components/creator/UploadModal";
 import AddChapterModal from "@/components/creator/AddChapterModal";
+import AddProseChapterModal from "@/components/creator/AddProseChapterModal";
 import ChapterDraftsModal from "@/components/creator/ChapterDraftsModal";
 import DeleteWorkModal from "@/components/creator/DeleteWorkModal";
 import EditSeriesModal from "@/components/creator/EditSeriesModal";
@@ -429,15 +430,24 @@ export default function CreatorDashboardClient() {
         onUploaded={refreshWorks}
       />
 
-      {chapterWorkId && (
-        <AddChapterModal
-          open={!!chapterWorkId}
-          onClose={() => setChapterWorkId(null)}
-          workId={chapterWorkId}
-          suggestedNumber={(works.find((w) => w.id === chapterWorkId)?.chapterCount ?? 0) + 1}
-          onAdded={refreshWorks}
-        />
-      )}
+      {chapterWorkId &&
+        (works.find((w) => w.id === chapterWorkId)?.format?.toLowerCase() === "prose" ? (
+          <AddProseChapterModal
+            open={!!chapterWorkId}
+            onClose={() => setChapterWorkId(null)}
+            workId={chapterWorkId}
+            suggestedNumber={(works.find((w) => w.id === chapterWorkId)?.chapterCount ?? 0) + 1}
+            onAdded={refreshWorks}
+          />
+        ) : (
+          <AddChapterModal
+            open={!!chapterWorkId}
+            onClose={() => setChapterWorkId(null)}
+            workId={chapterWorkId}
+            suggestedNumber={(works.find((w) => w.id === chapterWorkId)?.chapterCount ?? 0) + 1}
+            onAdded={refreshWorks}
+          />
+        ))}
 
       <EditSeriesModal
         open={editingWork !== null}

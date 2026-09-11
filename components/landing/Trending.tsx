@@ -3,26 +3,26 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { SectionEyebrow, Skeleton } from "@/components/ui";
-import { getMangaList, proxyImg } from "@/lib/manga-api";
+import { proxyImg } from "@/lib/manga-api";
+import { getTrendingPublishedSeries } from "@/lib/publishedSeries";
+import type { PublishedSeries } from "@/types";
 import Reveal from "./Reveal";
 
-type TrendingItem = { id: string; title: string; image: string; chapter?: string };
-
 /**
- * Fetches the live trending list from MangaDex/Comick/MangaHook and renders a ranked grid.
- * Runs entirely in the browser (was a Server Component) — those catalogs block requests from
- * datacenter IP ranges, Vercel's included, but not ordinary browser traffic, so this needs to
- * originate from the visitor's own connection to reliably load in production.
+ * Explore's "Trending by reads" rail (also reused on Home, signed-in view) — the highest-
+ * totalReads creator works across every format, newest-read-count-first. All content is now
+ * creator-published (see lib/publishedSeries.ts); this used to fetch MangaDex/Comick/MangaHook's
+ * own trending list client-side, back when those catalogs blocked server-side requests.
  */
 export default function Trending() {
-  const [items, setItems] = useState<TrendingItem[]>([]);
+  const [items, setItems] = useState<PublishedSeries[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
-    getMangaList(1)
+    getTrendingPublishedSeries(6)
       .then((res) => {
-        if (!cancelled) setItems(res.data.mangaList.slice(0, 6));
+        if (!cancelled) setItems(res);
       })
       .catch(() => {
         if (!cancelled) setItems([]);
@@ -44,7 +44,7 @@ export default function Trending() {
       <Reveal>
         <div className="mb-10 flex items-end justify-between gap-4">
           <div>
-            <SectionEyebrow>Trending Now</SectionEyebrow>
+            <SectionEyebrow>Trending by Reads</SectionEyebrow>
             <h2 className="font-cinzel text-2xl text-text sm:text-3xl">
               What everyone&apos;s reading
             </h2>
@@ -65,7 +65,11 @@ export default function Trending() {
             : items.map((item, i) => (
                 <Link
                   key={item.id}
-                  href={`/manga/${encodeURIComponent(item.id)}`}
+                  href={
+                    item.format?.toLowerCase() === "prose"
+                      ? `/story/${item.id}`
+                      : `/manga/${encodeURIComponent(item.id)}`
+                  }
                   className="group relative overflow-hidden rounded-xl border border-bg4 bg-bg2 transition-transform hover:-translate-y-1"
                 >
                   <span className="absolute left-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-clay font-syne text-xs font-bold text-ivory">
@@ -74,7 +78,7 @@ export default function Trending() {
                   <div className="aspect-[3/4] w-full overflow-hidden bg-bg3">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={proxyImg(item.image)}
+                      src={proxyImg(item.coverImage)}
                       alt={item.title}
                       className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
                       loading="lazy"
@@ -82,9 +86,9 @@ export default function Trending() {
                   </div>
                   <div className="p-2.5">
                     <p className="truncate font-syne text-xs font-semibold text-text">{item.title}</p>
-                    {item.chapter && (
-                      <p className="mt-0.5 font-noto text-[11px] text-muted">{item.chapter}</p>
-                    )}
+                    <p className="mt-0.5 font-noto text-[11px] text-muted">
+                      {(item.totalReads ?? 0).toLocaleString()} reads
+                    </p>
                   </div>
                 </Link>
               ))}

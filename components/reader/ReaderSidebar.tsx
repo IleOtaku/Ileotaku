@@ -6,10 +6,11 @@ import toast from "react-hot-toast";
 import { BookOpen, Ellipsis, MessagesSquare, Pencil, Send, Trash2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { deleteChatMessage, editChatMessage, sendChatMessage, subscribeToChat } from "@/lib/firestore";
-import { proxyImg, type ContentSource, type MangaDetailResponse } from "@/lib/manga-api";
+import { proxyImg, type MangaDetailResponse } from "@/lib/manga-api";
 import { formatTime } from "@/lib/utils";
 import { Skeleton } from "@/components/ui";
 import { Avatar } from "@/components/ui/Avatar";
+import MentionText from "@/components/ui/MentionText";
 import type { ChatMessage } from "@/types";
 
 export type ReaderSidebarTab = "details" | "chapters" | "chat";
@@ -81,17 +82,6 @@ export default function ReaderSidebar({
     </aside>
   );
 }
-
-const SOURCE_LINKS: Record<ContentSource | "fallback", { label: string; href: string }> = {
-  mangadex: { label: "MangaDex", href: "https://mangadex.org" },
-  comick: { label: "Comick", href: "https://comick.io" },
-  mangahook: { label: "MangaHook API", href: "https://mangahook-api.vercel.app" },
-  fallback: { label: "ÍléOtaku sample catalog", href: "https://mangahook-api.vercel.app" },
-  // Not actually rendered from this table — DetailsTab special-cases source === "creator" with
-  // its own "African Original 🌍" badge and a link to the creator's own profile instead. Kept
-  // here only so this Record stays exhaustive over every ContentSource.
-  creator: { label: "ÍléOtaku Creator", href: "/explore" },
-};
 
 /* ---------------------------- Details tab ---------------------------- */
 
@@ -175,14 +165,7 @@ function DetailsTab({
           View creator&apos;s profile →
         </Link>
       ) : (
-      <a
-        href={SOURCE_LINKS[detail.source as ContentSource]?.href ?? SOURCE_LINKS.fallback.href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="mt-auto font-noto text-[11px] text-muted underline decoration-dotted hover:text-gold"
-      >
-        Source: {SOURCE_LINKS[detail.source as ContentSource]?.label ?? SOURCE_LINKS.fallback.label}
-      </a>
+        <p className="mt-auto font-noto text-[11px] text-muted">An ÍléOtaku creator original.</p>
       )}
     </div>
   );
@@ -412,7 +395,9 @@ export function ChatTab({ mangaId, mangaTitle }: { mangaId: string | null; manga
                         </div>
                       </div>
                     ) : (
-                      <p className="break-words font-noto text-xs text-text/90">{m.text}</p>
+                      <p className="break-words font-noto text-xs text-text/90">
+                        <MentionText text={m.text} />
+                      </p>
                     )}
                   </div>
                 </div>

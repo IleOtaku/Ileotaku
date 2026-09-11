@@ -296,7 +296,7 @@ export async function approveWork(workId: string, creatorId: string, title: stri
     const authorVerified = creator?.isVerified === true || creator?.verified === true;
     const coverImage = work?.coverURL ?? "";
     const genres = work?.genres ?? [];
-    const format = work?.format ?? "Manga";
+    const format = work?.format ?? "manga";
     const language = work?.language ?? "English";
     const contentRating = work?.contentRating ?? "Teen";
     const updateSchedule = work?.updateSchedule ?? "Weekly";
@@ -356,6 +356,8 @@ export async function approveWork(workId: string, creatorId: string, title: stri
       totalBookmarks: 0,
       averageRating: 0,
       chapterCount: 0,
+      totalWordCount: 0,
+      isFeatured: false,
       publishedAt: now,
       certId,
       issuedAt: now,
@@ -441,6 +443,11 @@ export async function toggleWorkFlags(
   flags: Partial<Pick<CreatorWork, "isFeatured" | "isAfricanOriginal">>
 ): Promise<void> {
   await updateDoc(doc(db, CREATOR_WORKS, workId), { ...flags, updatedAt: new Date().toISOString() });
+  // isFeatured is also mirrored onto publishedSeries (when the work has one) so Explore's
+  // "Featured Creator Works" rail can query it directly without read access to creatorWorks.
+  if ("isFeatured" in flags) {
+    await updateDoc(doc(db, "publishedSeries", workId), { isFeatured: flags.isFeatured }).catch(() => {});
+  }
 }
 
 /* ============================== Reports: filtered queue ============================== */

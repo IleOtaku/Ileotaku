@@ -58,8 +58,8 @@ export default function PlatinumSpotlight() {
             Everything unlocked. Nothing in the way.
           </h2>
           <p className="mx-auto mt-3 max-w-lg font-noto text-sm text-muted">
-            Access 65,000+ titles including all premium chapters — no ads, no ad-watches, no coin
-            spends, ever.
+            Access African original manga and prose stories, including all premium chapters — no
+            ads, no ad-watches, no coin spends, ever.
           </p>
         </div>
 

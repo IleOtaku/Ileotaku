@@ -8,13 +8,18 @@ interface ContinueReadingItem {
   id: string;
   title: string;
   image: string;
+  format: string | undefined;
 }
 
 export interface ContinueReadingRowProps {
   mangaIds: string[];
 }
 
-/** Fetches detail for each saved manga id client-side and renders them as a horizontal scroll row. */
+/** Fetches detail for each saved manga/prose id client-side and renders them as a horizontal
+ * scroll row. Every id that no longer resolves to a real publishedSeries doc (an id saved from
+ * before external APIs were removed, or a work since deleted) is silently dropped rather than
+ * shown as a broken card — getMangaDetail() throws for anything not in that collection, and the
+ * catch below just excludes it. */
 export default function ContinueReadingRow({ mangaIds }: ContinueReadingRowProps) {
   const [items, setItems] = useState<ContinueReadingItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,7 +38,7 @@ export default function ContinueReadingRow({ mangaIds }: ContinueReadingRowProps
       mangaIds.slice(0, 10).map(async (id) => {
         try {
           const res = await getMangaDetail(id);
-          return { id, title: res.data.title, image: res.data.image };
+          return { id, title: res.data.title, image: res.data.image, format: res.data.format };
         } catch {
           return null;
         }
@@ -74,11 +79,15 @@ export default function ContinueReadingRow({ mangaIds }: ContinueReadingRowProps
   return (
     <div className="flex gap-4 overflow-x-auto pb-2">
       {items.map((item) => (
-        <Link key={item.id} href={`/manga/${encodeURIComponent(item.id)}`} className="group w-32 shrink-0">
+        <Link
+          key={item.id}
+          href={item.format?.toLowerCase() === "prose" ? `/story/${item.id}` : `/manga/${encodeURIComponent(item.id)}`}
+          className="group w-32 shrink-0"
+        >
           <div className="aspect-[3/4] w-32 overflow-hidden rounded-xl border border-bg4 bg-bg2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-            loading="lazy"
+              loading="lazy"
               src={proxyImg(item.image)}
               alt={item.title}
               className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"

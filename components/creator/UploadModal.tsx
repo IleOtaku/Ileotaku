@@ -7,7 +7,7 @@ import { Modal } from "@/components/ui";
 import { uploadImage } from "@/lib/cloudinary";
 import { submitWork } from "@/lib/firestore";
 import { GENRES } from "@/lib/utils";
-import type { CreatorWork } from "@/types";
+import type { CreatorWork, WorkFormat } from "@/types";
 
 export interface UploadModalProps {
   open: boolean;
@@ -16,8 +16,19 @@ export interface UploadModalProps {
   onUploaded: () => void;
 }
 
-/** Upload-new-work modal: title/description/genre-chip form, cover upload, validation and submit. */
+const FORMAT_OPTIONS: { value: WorkFormat; label: string; hint: string }[] = [
+  { value: "manga", label: "Manga", hint: "Black & white, right-to-left page art" },
+  { value: "manhwa", label: "Manhwa", hint: "Full-color, vertical-scroll page art" },
+  { value: "manhua", label: "Manhua", hint: "Chinese-style page art" },
+  { value: "prose", label: "Prose Story", hint: "Text chapters, Wattpad-style — no page images" },
+];
+
+/** Upload-new-work modal: format selector, title/description/genre-chip form, cover upload,
+ * validation and submit. The format picked here decides how chapters are added later — a manga/
+ * manhwa/manhua work gets the page-image uploader (AddChapterModal), a prose work gets the rich
+ * text editor (AddProseChapterModal) — and where it's read: /manga/[id] vs /story/[id]. */
 export default function UploadModal({ open, onClose, creatorId, onUploaded }: UploadModalProps) {
+  const [format, setFormat] = useState<WorkFormat>("manga");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [genres, setGenres] = useState<string[]>([]);
@@ -39,6 +50,7 @@ export default function UploadModal({ open, onClose, creatorId, onUploaded }: Up
   }
 
   function resetForm() {
+    setFormat("manga");
     setTitle("");
     setDescription("");
     setGenres([]);
@@ -77,6 +89,7 @@ export default function UploadModal({ open, onClose, creatorId, onUploaded }: Up
         description: description.trim(),
         coverURL,
         genres,
+        format,
         status: "pending",
         views: 0,
         earnings: 0,
@@ -96,6 +109,29 @@ export default function UploadModal({ open, onClose, creatorId, onUploaded }: Up
   return (
     <Modal open={open} onClose={handleClose} title="Upload New Work">
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <div>
+          <label className="mb-1.5 block font-syne text-xs font-semibold text-muted">Format</label>
+          <div className="grid grid-cols-2 gap-2">
+            {FORMAT_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setFormat(opt.value)}
+                className={`rounded-lg border p-2.5 text-left transition-colors ${
+                  format === opt.value ? "border-clay bg-clay/10" : "border-muted2 bg-bg3 hover:border-muted"
+                }`}
+              >
+                <span
+                  className={`block font-syne text-sm font-semibold ${format === opt.value ? "text-clay2" : "text-text"}`}
+                >
+                  {opt.label}
+                </span>
+                <span className="mt-0.5 block font-noto text-[11px] text-muted">{opt.hint}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div>
           <label className="mb-1.5 block font-syne text-xs font-semibold text-muted">Title</label>
           <input

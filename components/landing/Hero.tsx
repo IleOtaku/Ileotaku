@@ -6,7 +6,7 @@ import { ArrowRight, Play } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 
 const STATS = [
-  { value: "2,400+", label: "Titles" },
+  { value: "100%", label: "Creator-Owned" },
   { value: "180+", label: "Creators" },
   { value: "54", label: "Countries" },
   { value: "30", label: "Languages" },

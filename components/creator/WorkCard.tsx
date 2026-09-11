@@ -66,6 +66,9 @@ export default function WorkCard({
         >
           {STATUS_LABELS[work.status]}
         </span>
+        {work.format?.toLowerCase() === "prose" && (
+          <span className="badge-plat absolute bottom-3 left-3 whitespace-nowrap">📖 Prose</span>
+        )}
         {hasManagementMenu && (
           <div className="absolute right-3 top-3">
             <button

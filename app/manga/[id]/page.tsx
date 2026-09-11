@@ -7,12 +7,9 @@ interface MangaPageProps {
   searchParams: { from?: string };
 }
 
-// generateMetadata has no client-side equivalent — it always runs server-side, so this one call
-// is still subject to whatever's blocking MangaDex/Comick/MangaHook requests from Vercel's IP
-// ranges (see MangaDetailClient's own comment for the full story). That's an acceptable
-// trade-off here: the worst case if it's blocked is a generic <title> tag, caught below, rather
-// than a broken page — the actual content comes from MangaDetailClient's browser-side fetch,
-// which isn't affected by the same block.
+// generateMetadata always runs server-side and reads straight from Firestore (see
+// lib/publishedSeries.ts) — the worst case if that lookup ever fails is a generic <title> tag,
+// caught below, rather than a broken page.
 export async function generateMetadata({ params }: MangaPageProps): Promise<Metadata> {
   try {
     const res = await getMangaDetail(params.id);

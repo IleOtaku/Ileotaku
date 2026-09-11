@@ -2,21 +2,20 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, useRouter } from "next/navigation";
 import { ArrowLeft, BookOpen, MessageCircle, Star, Users } from "lucide-react";
 import AddToLibraryButton from "@/components/manga/AddToLibraryButton";
-import AuthorFollowButton from "@/components/manga/AuthorFollowButton";
 import BackToSearchButton from "@/components/manga/BackToSearchButton";
 import ChapterList from "@/components/manga/ChapterList";
 import LiveChatPreview from "@/components/manga/LiveChatPreview";
 import MobileCommentFab from "@/components/manga/MobileCommentFab";
 import TipCreatorButton from "@/components/monetisation/TipCreatorButton";
 import CommentSection from "@/components/social/CommentSection";
+import FollowButton from "@/components/social/FollowButton";
 import RatingWidget from "@/components/social/RatingWidget";
 import ReportButton from "@/components/social/ReportButton";
 import { Skeleton } from "@/components/ui";
 import { Avatar } from "@/components/ui/Avatar";
-import { getMangaStats, type MangaStats } from "@/lib/contentLocking";
 import { getMangaDetail, getMangaList, proxyImg, type MangaDetailResponse } from "@/lib/manga-api";
 
 export interface MangaDetailClientProps {
@@ -25,19 +24,17 @@ export interface MangaDetailClientProps {
 }
 
 /**
- * Owns every MangaDex/Comick/MangaHook-dependent fetch for the manga detail page, running
- * entirely in the browser. This used to be a Server Component's synchronous data load — moved
- * client-side because those three catalogs are fetched from api.mangadex.org et al., which
- * blocks requests from known datacenter IP ranges (Vercel's included) but allows ordinary
- * browser traffic. A request that originates from the visitor's own connection, exactly like the
- * reader page's chapter-loading already does, isn't affected by that block at all. The parent
- * Server Component (app/manga/[id]/page.tsx) still handles generateMetadata, since that has no
- * client-side equivalent — see its own comment for how it degrades if that one call is blocked.
+ * Owns the manga detail page's data fetch, running entirely in the browser. All content is now a
+ * creator-published work read from Firestore (see lib/publishedSeries.ts) — this used to also be
+ * where MangaDex/Comick/MangaHook detail lookups ran client-side (those catalogs blocked
+ * datacenter IPs, Vercel's included, but not ordinary browser traffic), which no longer applies
+ * now that those sources are gone. The parent Server Component (app/manga/[id]/page.tsx) still
+ * handles generateMetadata, since that has no client-side equivalent.
  */
 export default function MangaDetailClient({ id, from }: MangaDetailClientProps) {
+  const router = useRouter();
   const [status, setStatus] = useState<"loading" | "ready" | "not-found">("loading");
   const [detail, setDetail] = useState<MangaDetailResponse["data"] | null>(null);
-  const [stats, setStats] = useState<MangaStats | null>(null);
   const [related, setRelated] = useState<{ id: string; title: string; image: string }[]>([]);
 
   useEffect(() => {
@@ -57,18 +54,18 @@ export default function MangaDetailClient({ id, from }: MangaDetailClientProps) 
         setStatus("not-found");
         return;
       }
+      // A prose work has no image-page reading pane — this page (and /reader) only make sense
+      // for manga/manhwa/manhua. Redirect straight to its dedicated reader instead of rendering
+      // a "Start Reading" button that would lead nowhere useful.
+      if (loadedDetail.format?.toLowerCase() === "prose") {
+        router.replace(`/story/${encodeURIComponent(id)}`);
+        return;
+      }
 
-      const isImportedSource =
-        loadedDetail.source === "mangadex" || loadedDetail.source === "comick" || loadedDetail.source === "mangahook";
-
-      const [loadedStats, relatedRes] = await Promise.all([
-        isImportedSource ? getMangaStats(loadedDetail.id) : Promise.resolve(null),
-        getMangaList(1).catch(() => null),
-      ]);
+      const relatedRes = await getMangaList(1).catch(() => null);
       if (cancelled) return;
 
       setDetail(loadedDetail);
-      setStats(loadedStats);
       setRelated(
         relatedRes ? relatedRes.data.mangaList.filter((m) => m.id !== id).slice(0, 3) : []
       );
@@ -78,6 +75,7 @@ export default function MangaDetailClient({ id, from }: MangaDetailClientProps) 
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   if (status === "not-found") {
@@ -241,12 +239,7 @@ export default function MangaDetailClient({ id, from }: MangaDetailClientProps) 
         <div className="mt-12 grid grid-cols-1 gap-10 overflow-x-hidden lg:grid-cols-[1fr_280px]">
           <div className="min-w-0">
             <h2 className="mb-4 font-cinzel text-xl text-text">Chapters</h2>
-            <ChapterList
-              mangaId={id}
-              chapters={chapters}
-              engagementTier={stats?.engagementTier ?? "low"}
-              source={detail.source}
-            />
+            <ChapterList mangaId={id} chapters={chapters} />
 
             <div id="comments" className="w-full scroll-mt-20">
               <CommentSection mangaId={id} />
@@ -276,7 +269,7 @@ export default function MangaDetailClient({ id, from }: MangaDetailClientProps) 
                   </div>
                 )}
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <AuthorFollowButton authorName={detail.author} />
+                  {detail.authorId && <FollowButton targetUid={detail.authorId} hideCount />}
                   <TipCreatorButton
                     creatorId={isCreatorWork ? (detail.authorId ?? null) : null}
                     creatorName={detail.author}

@@ -155,6 +155,9 @@ export interface ReadingProgressEntry {
   totalChapters: number;
   progress: number;
   updatedAt: string;
+  /** Prose only — which paragraph (0-based) the reader last scrolled to within `chapterIndex`,
+   * so resuming a prose chapter can restore mid-chapter position rather than just the chapter. */
+  paragraphIndex?: number;
 }
 
 /** "light" predates Sprint 9e's 5-theme lineup and is kept only so old saved preferences don't
@@ -234,6 +237,12 @@ export interface ChatMessage {
 
 export type WorkStatus = "pending" | "approved" | "published" | "rejected";
 
+/** A creator work's content type. "prose" (Part 2's Wattpad-style stories) reads its chapters as
+ * plain text rather than image pages — see PublishedChapter's `content`/`wordCount` fields and
+ * app/story/[workId]/page.tsx, its dedicated reader. Everything else still reads through
+ * /manga/[id] and app/reader's image-page viewer. */
+export type WorkFormat = "manga" | "manhwa" | "manhua" | "prose";
+
 export interface CreatorWork {
   id: string;
   creatorId: string;
@@ -277,6 +286,9 @@ export interface CreatorWork {
   totalReads?: number;
   totalBookmarks?: number;
   averageRating?: number;
+  /** Free text historically ("Manga"/"Manhwa"/...); new submissions write one of WorkFormat's
+   * lowercase values via the creator dashboard's format selector — display code lowercases
+   * before comparing so older, capitalized values still match. */
   format?: string;
   language?: string;
   contentRating?: string;
@@ -306,6 +318,7 @@ export interface PublishedSeries {
   coverImage: string;
   genres: string[];
   source: "creator";
+  /** See WorkFormat — a prose work is browsed/read at /story/[id] instead of /manga/[id]. */
   format: string;
   language: string;
   contentRating: string;
@@ -318,9 +331,17 @@ export interface PublishedSeries {
   certId?: string;
   issuedAt?: string;
   registrationNumber?: string;
+  /** Mirrored from CreatorWork.isFeatured — powers Explore's "Featured Creator Works" rail
+   * without needing read access to the (creator-private) creatorWorks collection. */
+  isFeatured?: boolean;
+  /** Sum of every chapter's wordCount, kept in step by addChapter() — prose works only. */
+  totalWordCount?: number;
 }
 
-/** One chapter of a creator-published work, stored at `series/{workId}/chapters/{chapterId}`. */
+/** One chapter of a creator-published work, stored at `series/{workId}/chapters/{chapterId}`.
+ * A manga/manhwa/manhua chapter populates `images`; a prose chapter (format: "prose") instead
+ * populates `content`/`wordCount`/`estimatedReadTime` and leaves `images` empty — see
+ * app/story/[workId]/page.tsx, the reader that renders the latter. */
 export interface PublishedChapter {
   id: string;
   chapterNumber: number;
@@ -329,6 +350,12 @@ export interface PublishedChapter {
   coinPrice: number;
   status: "published";
   publishedAt: string;
+  /** Prose-only: the chapter's full text. */
+  content?: string;
+  /** Prose-only: word count of `content`, computed at write time. */
+  wordCount?: number;
+  /** Prose-only: minutes, estimated from wordCount at ~200 words/minute. */
+  estimatedReadTime?: number;
 }
 
 /** A chapter saved but not yet published — series/{workId}/draftChapters/{draftId}. Same shape
@@ -341,6 +368,9 @@ export interface ChapterDraft {
   images: string[];
   coinPrice: number;
   savedAt: string;
+  content?: string;
+  wordCount?: number;
+  estimatedReadTime?: number;
 }
 
 /** A creator-to-creator series handoff, pending the recipient's decision — see
@@ -599,8 +629,8 @@ export interface SeriesRating {
   createdAt: string;
 }
 
-/** Lightweight social-metadata doc ÍléOtaku keeps per external manga id (comments/ratings live
- * against this, since the catalog itself is served from MangaHook rather than Firestore). */
+/** Lightweight social-metadata doc keyed by a creator work's own id — the average rating/count
+ * rollup submitRating() recomputes each time a new rating comes in. */
 export interface SeriesMeta {
   averageRating: number;
   ratingCount: number;

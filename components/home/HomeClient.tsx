@@ -14,12 +14,12 @@ import CoinRoulette from "@/components/monetisation/CoinRoulette";
 import FriendActivity from "@/components/social/FriendActivity";
 import StoriesBar from "@/components/stories/StoriesBar";
 import { useAuth } from "@/hooks/useAuth";
-import { FALLBACK_SUMMARIES } from "@/lib/fallback-manga";
 import { proxyImg } from "@/lib/manga-api";
 import { timeOfDayGreeting } from "@/lib/utils";
 import type { PublishedSeries } from "@/types";
 import ContinueReadingRow from "./ContinueReadingRow";
 import CreatorUpdatesSection from "./CreatorUpdatesSection";
+import LatestFromFollowingSection from "./LatestFromFollowingSection";
 import PlatinumUpsellBanner from "./PlatinumUpsellBanner";
 import StreakCard from "./StreakCard";
 
@@ -80,10 +80,8 @@ export default function HomeClient({ trendingSlot, africanOriginals }: HomeClien
   const name = profile?.displayName ?? user.displayName ?? "Reader";
   const greeting = timeOfDayGreeting();
   const readingList = profile?.readingList ?? [];
+  const following = profile?.following ?? [];
   const isPlatinum = profile?.isPlatinum === true;
-
-  const editorsPicks = FALLBACK_SUMMARIES.slice(0, 3);
-  const newReleases = [...FALLBACK_SUMMARIES].reverse();
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6">
@@ -200,67 +198,12 @@ export default function HomeClient({ trendingSlot, africanOriginals }: HomeClien
       <Reveal>
         <section className="mt-14">
           <div className="mb-4 flex items-center justify-between">
-            <SectionEyebrow>Editor&apos;s Picks</SectionEyebrow>
+            <SectionEyebrow>Latest from Creators You Follow</SectionEyebrow>
             <Link href="/explore" className="font-syne text-xs text-gold hover:underline">
               View All
             </Link>
           </div>
-          <div className="grid gap-4 sm:grid-cols-3">
-            {editorsPicks.map((item) => (
-              <Link
-                key={item.id}
-                href={`/manga/${encodeURIComponent(item.id)}`}
-                className="group overflow-hidden rounded-2xl border border-bg4 bg-bg2"
-              >
-                <div className="aspect-[16/9] overflow-hidden bg-bg3">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-            loading="lazy"
-                    src={proxyImg(item.image)}
-                    alt={item.title}
-                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                  />
-                </div>
-                <div className="p-3">
-                  <p className="font-syne text-sm font-semibold text-text">{item.title}</p>
-                  <p className="mt-1 line-clamp-2 font-noto text-xs text-muted">
-                    by {item.author} · {item.genres.join(", ")}
-                  </p>
-                </div>
-              </Link>
-            ))}
-          </div>
-        </section>
-      </Reveal>
-
-      <Reveal>
-        <section className="mt-14">
-          <div className="mb-4 flex items-center justify-between">
-            <SectionEyebrow>New Releases</SectionEyebrow>
-            <Link href="/explore" className="font-syne text-xs text-gold hover:underline">
-              View All
-            </Link>
-          </div>
-          <div className="flex gap-4 overflow-x-auto pb-2">
-            {newReleases.map((item) => (
-              <Link
-                key={item.id}
-                href={`/manga/${encodeURIComponent(item.id)}`}
-                className="group w-32 shrink-0"
-              >
-                <div className="aspect-[3/4] w-32 overflow-hidden rounded-xl border border-bg4 bg-bg2">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-            loading="lazy"
-                    src={proxyImg(item.image)}
-                    alt={item.title}
-                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                  />
-                </div>
-                <p className="mt-2 truncate font-syne text-xs font-semibold text-text">{item.title}</p>
-              </Link>
-            ))}
-          </div>
+          <LatestFromFollowingSection followingUids={following} />
         </section>
       </Reveal>
 

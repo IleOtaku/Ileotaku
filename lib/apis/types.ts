@@ -1,11 +1,15 @@
 /**
- * Standard shapes every content source (MangaDex, Comick, MangaHook, and the hardcoded
- * fallback catalog) is transformed into before the orchestrator in lib/manga-api.ts hands it
- * to the rest of the app. Keeping one shared shape here — rather than in manga-api.ts itself —
- * lets each lib/apis/*.ts client import it without a circular dependency on the orchestrator.
+ * Standard shapes the manga reader works with. Historically these described whatever a given
+ * external catalog (MangaDex/Comick/MangaHook) returned before lib/manga-api.ts normalized it —
+ * that orchestration layer is gone now that ÍléOtaku serves creator-published content only (see
+ * lib/publishedSeries.ts), but the shapes themselves are kept as the one contract the reader,
+ * search, browse and explore surfaces all render against.
  */
 
-export type ContentSource = "mangadex" | "comick" | "mangahook" | "fallback" | "creator";
+/** Every manga/manhwa/manhua result on the platform is now creator-published. Kept as a union
+ * (rather than replaced with a plain boolean/removed entirely) so call sites that already switch
+ * on `source` don't need a second, unrelated refactor on top of this one. */
+export type ContentSource = "creator";
 
 export interface MangaListItem {
   id: string;
@@ -13,8 +17,10 @@ export interface MangaListItem {
   image: string;
   chapter?: string;
   view?: string;
-  /** Which catalog this result came from — powers the source badge on manga cards. */
   source?: ContentSource;
+  /** The work's WorkFormat ("manga"/"manhwa"/"manhua"/"prose") — Browse's All Works tab uses
+   * this to route a prose result to /story/[id] instead of loading it into the manga reader. */
+  format?: string;
 }
 
 export interface MangaListResponse {
@@ -33,9 +39,7 @@ export interface MangaChapterSummary {
   chapter: string;
   view?: string;
   createdAt?: string;
-  /** Set only for source === "creator" chapters — the coin price its author set for this
-   * specific chapter (0 for a free one). Ignored for every imported source, which prices by
-   * engagement tier instead (see lib/contentLocking.ts's getLockConfig). */
+  /** That specific chapter's own author-set coin price (0 for a free one). */
   coinPrice?: number;
 }
 
@@ -49,9 +53,8 @@ export interface MangaDetailData {
   genres?: string[];
   chapterList?: MangaChapterSummary[];
   source?: ContentSource;
-  /** Set only when source === "creator" — the publishing account behind this ÍléOtaku-native
-   * work, so /manga/[id] can link its Creator card to /creator/[handle] and the reader can show
-   * the "African Original 🌍" badge. */
+  /** The publishing account behind this work, so /manga/[id] can link its Creator card to
+   * /creator/[handle] and the reader can show the "African Original 🌍" badge. */
   authorId?: string;
   authorHandle?: string;
   authorPhotoURL?: string;
@@ -74,13 +77,4 @@ export interface ChapterPagesResponse {
     pages: string[];
     [key: string]: unknown;
   };
-}
-
-/** One entry in a client's manga-list response, before it's mapped to MangaListItem. */
-export interface MangaApiClient {
-  source: ContentSource;
-  getMangaList(page?: number, genre?: string): Promise<MangaListItem[]>;
-  searchManga(query: string): Promise<MangaListItem[]>;
-  getMangaDetail(id: string): Promise<MangaDetailData>;
-  getChapterPages(chapterId: string): Promise<string[]>;
 }

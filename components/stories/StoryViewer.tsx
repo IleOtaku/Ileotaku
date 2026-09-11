@@ -33,6 +33,11 @@ export default function StoryViewer({ uids, startUid, storiesByUid, onClose, onA
   const [personIndex, setPersonIndex] = useState(() => Math.max(0, uids.indexOf(startUid)));
   const [segmentIndex, setSegmentIndex] = useState(0);
   const [paused, setPaused] = useState(false);
+  // Brief "⏸" flash whenever a pause starts (hover, touch-hold, or focusing the reply input) —
+  // shown for a moment then faded, rather than staying on screen for the whole pause, so it
+  // reads as an acknowledgement rather than a persistent status icon.
+  const [showPauseIcon, setShowPauseIcon] = useState(false);
+  const pauseIconTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [reply, setReply] = useState("");
   const [sendingReply, setSendingReply] = useState(false);
@@ -116,6 +121,24 @@ export default function StoryViewer({ uids, startUid, storiesByUid, onClose, onA
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paused, segmentIndex, personIndex, segmentDuration, viewersOpen]);
 
+  /** Pauses the story and flashes the "⏸" indicator for a moment. Safe to call repeatedly while
+   * still hovering/holding — each call just restarts the fade timer. */
+  function pause() {
+    setPaused(true);
+    setShowPauseIcon(true);
+    if (pauseIconTimerRef.current) clearTimeout(pauseIconTimerRef.current);
+    pauseIconTimerRef.current = setTimeout(() => setShowPauseIcon(false), 700);
+  }
+  function resume() {
+    setPaused(false);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (pauseIconTimerRef.current) clearTimeout(pauseIconTimerRef.current);
+    };
+  }, []);
+
   function handleTap(e: React.MouseEvent<HTMLDivElement>) {
     const { left, width } = e.currentTarget.getBoundingClientRect();
     const tapX = e.clientX - left;
@@ -125,10 +148,10 @@ export default function StoryViewer({ uids, startUid, storiesByUid, onClose, onA
 
   function handleTouchStart(e: React.TouchEvent) {
     touchStartY.current = e.touches[0].clientY;
-    setPaused(true);
+    pause();
   }
   function handleTouchEnd(e: React.TouchEvent) {
-    setPaused(false);
+    resume();
     if (touchStartY.current === null) return;
     const dy = e.changedTouches[0].clientY - touchStartY.current;
     touchStartY.current = null;
@@ -207,8 +230,10 @@ export default function StoryViewer({ uids, startUid, storiesByUid, onClose, onA
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black">
       <div
         className="relative flex h-full w-full max-w-md flex-col"
-        onMouseDown={() => setPaused(true)}
-        onMouseUp={() => setPaused(false)}
+        onMouseEnter={pause}
+        onMouseLeave={resume}
+        onMouseDown={pause}
+        onMouseUp={resume}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
@@ -218,11 +243,26 @@ export default function StoryViewer({ uids, startUid, storiesByUid, onClose, onA
               <div
                 className="h-full bg-white"
                 style={{
+                  // Driven by `elapsed`, which the rAF loop below stops advancing the instant
+                  // `paused` is true — the same practical effect as `animation-play-state:
+                  // paused` on a CSS-keyframe bar, without needing this segment's whole-duration
+                  // width to be expressed as a restartable CSS animation.
                   width: i < segmentIndex ? "100%" : i === segmentIndex ? `${Math.min(100, (elapsed / (segmentDuration ?? 1)) * 100)}%` : "0%",
                 }}
               />
             </div>
           ))}
+        </div>
+
+        {/* Brief paused indicator — fades in on any pause, then fades itself out after ~700ms
+            (see pause()) regardless of whether the pause itself is still active. */}
+        <div
+          className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center transition-opacity duration-300"
+          style={{ opacity: showPauseIcon ? 1 : 0 }}
+        >
+          <span className="flex h-14 w-14 items-center justify-center rounded-full bg-black/50 text-2xl text-white backdrop-blur-sm">
+            ⏸
+          </span>
         </div>
 
         <div className="absolute inset-x-0 top-6 z-10 flex items-center gap-2 px-3">
@@ -270,8 +310,8 @@ export default function StoryViewer({ uids, startUid, storiesByUid, onClose, onA
             <input
               value={reply}
               onChange={(e) => setReply(e.target.value)}
-              onFocus={() => setPaused(true)}
-              onBlur={() => setPaused(false)}
+              onFocus={pause}
+              onBlur={resume}
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleSendReply();
               }}
