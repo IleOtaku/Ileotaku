@@ -111,6 +111,10 @@ export async function sendDM(
       lastMessageAt: new Date().toISOString(),
       lastSenderId: senderId,
       ...unreadUpdates,
+      // A fresh message means the conversation is active again for everyone — clears it back
+      // into whoever had hidden it (see hideConversationForUser's own doc comment) rather than
+      // leaving it hidden forever the first time either side messages again.
+      ...(convo.hiddenFor && convo.hiddenFor.length > 0 ? { hiddenFor: [] } : {}),
     });
     await updateLastActive(senderId);
 
@@ -454,12 +458,16 @@ export async function getConversations(uid: string): Promise<Conversation[]> {
     orderBy("lastMessageAt", "desc")
   );
   const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Conversation);
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }) as Conversation)
+    .filter((c) => !c.hiddenFor?.includes(uid));
 }
 
 /** Real-time version of getConversations — the DM page's sidebar needs this rather than a
  * one-shot fetch so an incoming message bubbles that conversation to the top (and updates its
- * preview/unread badge) live, without the viewer having to refresh or reselect anything. */
+ * preview/unread badge) live, without the viewer having to refresh or reselect anything.
+ * Filters out anything `uid` has hidden (see hideConversationForUser) the same way
+ * getConversations does. */
 export function subscribeToConversations(
   uid: string,
   callback: (conversations: Conversation[]) => void
@@ -471,9 +479,22 @@ export function subscribeToConversations(
   );
   return onSnapshot(
     q,
-    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Conversation)),
+    (snap) =>
+      callback(
+        snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }) as Conversation)
+          .filter((c) => !c.hiddenFor?.includes(uid))
+      ),
     () => callback([])
   );
+}
+
+/** Beta feedback: "Allow us to delete people we no longer chat [with]." Hides a conversation from
+ * only `uid`'s own list — never touches the other participant(s)' view of it, and never deletes
+ * any messages. Reappears automatically (see sendDM's own hiddenFor-clearing) the next time
+ * anyone sends a new message into it. */
+export async function hideConversationForUser(conversationId: string, uid: string): Promise<void> {
+  await updateDoc(doc(db, CONVERSATIONS, conversationId), { hiddenFor: arrayUnion(uid) });
 }
 
 export async function markDMRead(conversationId: string, uid: string): Promise<void> {

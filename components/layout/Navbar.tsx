@@ -78,7 +78,12 @@ export default function Navbar() {
           Ílé<span className="text-clay">Otaku</span>
         </Link>
 
-        <div className="hidden items-center gap-8 md:flex">
+        {/* Beta feedback bug: "Browse is too close to the logo" on desktop — the outer nav's
+            justify-between only distributes LEFTOVER space between every pair of flex children,
+            so this gap shrank to almost nothing whenever NavSearch/the auth cluster took up more
+            room. A fixed md:ml-10 guarantees real breathing room next to the logo regardless of
+            how much space is left over to distribute elsewhere. */}
+        <div className="hidden items-center gap-8 md:ml-10 md:flex">
           {NAV_LINKS.map((link) => (
             <Link
               key={link.href}

@@ -25,6 +25,17 @@ export interface BlockedContentGateProps {
  * could still see the raw server HTML by disabling JS, but every real page view goes through
  * this gate.
  *
+ * Beta feedback bug: this used to render nothing at all (`return null`) for the entire time the
+ * block check was in flight — on a slow or flaky connection (confirmed live via error-log
+ * entries: `blocking.isBlocked` failing with "client is offline" repeatedly), that meant a
+ * completely blank page, matching a bug report of "can't view people's profiles... except
+ * message" almost exactly (the profile page IS this gate's children — a page that never finishes
+ * checking never shows anything). isBlocked()/isBlockedBy() below already catch their own errors
+ * and resolve `false` rather than rejecting, so this never hung forever, but it could stay blank
+ * for as long as the check took. Now content renders immediately and optimistically; the notice
+ * only swaps in once a block is actually confirmed, so the overwhelmingly common (unblocked) case
+ * never shows a blank page at all, and a real block still hides the content the moment it's known.
+ *
  * The two directions read differently: if the VIEWER blocked this profile, they're shown an
  * actionable "You've blocked this user" banner with an Unblock button — clicking it re-checks
  * and reveals the profile immediately, no page reload needed. If the PROFILE blocked the
@@ -34,23 +45,21 @@ export default function BlockedContentGate({ targetUid, targetLabel, children }:
   const { user } = useAuth();
   const [blockedByMe, setBlockedByMe] = useState(false);
   const [blockedByThem, setBlockedByThem] = useState(false);
-  const [checked, setChecked] = useState(false);
 
   useEffect(() => {
-    if (!user || user.uid === targetUid) {
-      setChecked(true);
-      return;
-    }
+    if (!user || user.uid === targetUid) return;
+    let cancelled = false;
     Promise.all([isBlocked(user.uid, targetUid), isBlocked(targetUid, user.uid)]).then(
       ([byMe, byThem]) => {
+        if (cancelled) return;
         setBlockedByMe(byMe);
         setBlockedByThem(byThem);
-        setChecked(true);
       }
     );
+    return () => {
+      cancelled = true;
+    };
   }, [user, targetUid]);
-
-  if (!checked) return null;
 
   if (blockedByThem) {
     return (

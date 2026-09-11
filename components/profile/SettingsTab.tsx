@@ -24,7 +24,7 @@ import {
 import { Modal, Select, Skeleton, Toggle } from "@/components/ui";
 import { SpotifyGlyph } from "@/components/spotify/NowPlayingCard";
 import { useAuth } from "@/hooks/useAuth";
-import { deleteMyAccount, friendlyError, resetPassword } from "@/lib/auth";
+import { deleteMyAccount, friendlyError, hasPasswordProvider, resetPassword } from "@/lib/auth";
 import { subscribeToBlockedUsers, unblockUser } from "@/lib/blocking";
 import { getHistory, getUserProfile, updateUserPrefs } from "@/lib/firestore";
 import { getMyBugReports } from "@/lib/admin";
@@ -90,6 +90,7 @@ export default function SettingsTab() {
   const [exporting, setExporting] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [spotifyName, setSpotifyName] = useState<string | null>(null);
   const [spotifyBusy, setSpotifyBusy] = useState(false);
@@ -271,13 +272,26 @@ export default function SettingsTab() {
     }
   }
 
+  const deleteNeedsPassword = hasPasswordProvider();
+
   async function handleConfirmDelete() {
     if (!user || deleteConfirmText !== "DELETE") return;
+    if (deleteNeedsPassword && !deletePassword) {
+      toast.error("Enter your password to confirm.");
+      return;
+    }
     setDeleting(true);
     try {
-      await deleteMyAccount(user.uid);
+      // Beta feedback/error-log bug fix: reauthenticating (via deletePassword, when the account
+      // has one) BEFORE any data is touched is what lets deleteMyAccount() actually finish
+      // removing the Auth credential too, not just the Firestore data — see its own doc comment.
+      const result = await deleteMyAccount(user.uid, deleteNeedsPassword ? deletePassword : undefined);
       setDeleteModalOpen(false);
-      toast.success("Account deleted. We're sorry to see you go.");
+      toast.success(
+        result.authRemoved
+          ? "Account deleted. We're sorry to see you go."
+          : "Your data has been deleted. Sign in once more within a few minutes and delete again to fully remove your login."
+      );
       router.push("/");
     } catch (err) {
       toast.error(friendlyError(err));
@@ -990,6 +1004,7 @@ export default function SettingsTab() {
           if (!deleting) {
             setDeleteModalOpen(false);
             setDeleteConfirmText("");
+            setDeletePassword("");
           }
         }}
         title="Delete your account?"
@@ -1012,12 +1027,32 @@ export default function SettingsTab() {
               autoComplete="off"
             />
           </div>
+          {deleteNeedsPassword && (
+            <div>
+              <label htmlFor="delete-password" className="mb-1.5 block font-noto text-xs text-muted">
+                Confirm your password
+              </label>
+              <input
+                id="delete-password"
+                type="password"
+                value={deletePassword}
+                onChange={(e) => setDeletePassword(e.target.value)}
+                placeholder="Password"
+                className="input-base"
+                autoComplete="current-password"
+              />
+              <p className="mt-1 font-noto text-xs text-muted">
+                Required so we can fully remove your login, not just your data.
+              </p>
+            </div>
+          )}
           <div className="flex justify-end gap-2">
             <button
               type="button"
               onClick={() => {
                 setDeleteModalOpen(false);
                 setDeleteConfirmText("");
+                setDeletePassword("");
               }}
               disabled={deleting}
               className="btn-ghost text-sm"
@@ -1027,7 +1062,7 @@ export default function SettingsTab() {
             <button
               type="button"
               onClick={handleConfirmDelete}
-              disabled={deleting || deleteConfirmText !== "DELETE"}
+              disabled={deleting || deleteConfirmText !== "DELETE" || (deleteNeedsPassword && !deletePassword)}
               className="inline-flex items-center gap-2 rounded-full bg-red-600 px-5 py-2.5 font-syne text-sm font-semibold text-ivory transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <AlertTriangle className="h-4 w-4" />}

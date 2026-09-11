@@ -1,6 +1,8 @@
 import { deleteUser } from "firebase/auth";
 import {
   createUserWithEmailAndPassword,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
@@ -177,9 +179,41 @@ async function deleteAllDocs(colRef: ReturnType<typeof collection>): Promise<voi
  * side, their account and data are gone either way, which is what actually matters; the orphan
  * Auth record with no matching profile is inert and harmless left behind.
  */
-export async function deleteMyAccount(uid: string): Promise<void> {
+/** Whether the signed-in user has a password on file at all — social-only accounts (Google/
+ * Apple/Twitter) can't reauthenticate with a password, so deleteMyAccount()'s pre-emptive reauth
+ * step only applies when this is true. Used by SettingsTab's delete-confirmation modal to decide
+ * whether to even show a password field. */
+export function hasPasswordProvider(): boolean {
+  return auth.currentUser?.providerData.some((p) => p.providerId === "password") ?? false;
+}
+
+export interface DeleteAccountResult {
+  /** False when the Firebase Auth credential itself couldn't be removed (still needs a real
+   * recent sign-in Firebase itself requires for this) even though every trace of the account's
+   * data is already gone — see this function's own doc comment for why that split can happen. */
+  authRemoved: boolean;
+}
+
+/**
+ * Beta feedback / error-log bug: this used to always report success even when Firebase's
+ * `deleteUser()` call failed with `auth/requires-recent-login` — the account's Firestore data was
+ * genuinely gone, but the dangling Auth credential meant that email could never sign up again
+ * ("email already in use") despite the app telling the user their account was fully deleted.
+ *
+ * The real fix is reauthenticating BEFORE destroying any data, not after: if `password` is
+ * given (SettingsTab only asks for one when hasPasswordProvider() is true), this reauthenticates
+ * first and throws immediately on a wrong password — before anything is deleted — rather than
+ * discovering the credential can't be removed only after the data already is. A social-only
+ * account (no password to offer) still falls back to the old "data gone, credential dangling"
+ * path, now reported honestly via `authRemoved` instead of masked as a full success.
+ */
+export async function deleteMyAccount(uid: string, password?: string): Promise<DeleteAccountResult> {
   const user = auth.currentUser;
   if (!user || user.uid !== uid) throw new Error("Not signed in.");
+
+  if (password && user.email) {
+    await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, password));
+  }
 
   try {
     await Promise.all(USER_SUBCOLLECTIONS.map((name) => deleteAllDocs(collection(db, "users", uid, name))));
@@ -199,11 +233,12 @@ export async function deleteMyAccount(uid: string): Promise<void> {
 
   try {
     await deleteUser(user);
+    return { authRemoved: true };
   } catch (error) {
     if ((error as AuthError).code === "auth/requires-recent-login") {
       await logError(error, { operation: "deleteMyAccount.deleteUser (non-fatal, data already removed)", uid });
       await signOut(auth);
-      return;
+      return { authRemoved: false };
     }
     await logError(error, { operation: "deleteMyAccount.deleteUser", uid });
     throw error;

@@ -149,6 +149,22 @@ export async function verifyCreator(uid: string): Promise<void> {
   );
 }
 
+/** Beta feedback: "Admin should be able to mark users as verified... and unverify them" —
+ * verifyCreator()/verifyPublisher() above had no counterpart to undo a verification (e.g. a
+ * badge granted in error, or a creator who's gone inactive/stopped meeting the bar). Clears both
+ * the flag and the type in one write, notifying the account since losing a visible badge is worth
+ * telling someone about, the same as gaining one. */
+export async function unverifyUser(uid: string): Promise<void> {
+  await updateUser(uid, { isVerified: false, verifiedType: null });
+  await createNotification(
+    uid,
+    NotificationType.MODERATION_ACTION,
+    "Verification removed",
+    "Your verified badge has been removed by an ÍléOtaku moderator.",
+    "/profile"
+  );
+}
+
 export async function makePublisher(uid: string): Promise<void> {
   await updateUser(uid, { isPublisher: true });
 }

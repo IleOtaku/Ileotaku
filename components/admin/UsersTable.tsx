@@ -24,6 +24,7 @@ import {
   revokePlatinum,
   suspendUserFor,
   unbanUser,
+  unverifyUser,
   verifyCreator,
   verifyPublisher,
 } from "@/lib/admin";
@@ -63,6 +64,7 @@ type PendingAction =
   | "verify-creator"
   | "make-publisher"
   | "verify-publisher"
+  | "unverify"
   | "suspend"
   | "ban"
   | "unban"
@@ -396,6 +398,18 @@ export default function UsersTable({ users, loading, canManageAdmins = true, onU
                     }
                   >
                     Verify Publisher
+                  </MenuItem>
+                )}
+                {u.isVerified && (
+                  <MenuItem
+                    onClick={() =>
+                      runAction(u, "unverify", () => unverifyUser(u.uid), {
+                        isVerified: false,
+                        verifiedType: null,
+                      })
+                    }
+                  >
+                    Unverify
                   </MenuItem>
                 )}
 

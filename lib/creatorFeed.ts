@@ -25,8 +25,9 @@ import { getVideoThumbnail, uploadVideo } from "./cloudinary";
 import { logError } from "./errorLogger";
 import { db } from "./firebase";
 import { getUserProfile, updateLastActive, updateUserPrefs } from "./firestore";
+import { createNotification } from "./notifications";
 import { incrementSoundUsage } from "./sounds";
-import type { CreatorPost, CreatorPostType, EditingApp, FeedComment, Sound, UserProfile } from "@/types";
+import { NotificationType, type CreatorPost, type CreatorPostType, type EditingApp, type FeedComment, type Sound, type UserProfile } from "@/types";
 
 const FEED = "creatorFeed";
 
@@ -578,6 +579,21 @@ export async function likePost(uid: string, postId: string, currentlyLiked: bool
       likes: currentlyLiked ? arrayRemove(uid) : arrayUnion(uid),
       ...(forYouScore !== undefined ? { forYouScore } : {}),
     });
+
+    // Beta feedback: "Creators of a post should receive notifications as soon as a user likes...
+    // their posts." Only on a fresh like (not an unlike), never for liking your own post, and
+    // best-effort — a missed like notification shouldn't fail the like itself.
+    if (!currentlyLiked && current && current.uid !== uid) {
+      const liker = await getUserProfile(uid).catch(() => null);
+      await createNotification(
+        current.uid,
+        NotificationType.POST_LIKE,
+        "New like",
+        `${liker?.displayName ?? "Someone"} liked your post.`,
+        `/feed/${postId}`,
+        liker?.photoURL
+      ).catch(() => {});
+    }
   } catch (error) {
     await logError(error, { operation: "creatorFeed.likePost", uid, postId });
     throw error;

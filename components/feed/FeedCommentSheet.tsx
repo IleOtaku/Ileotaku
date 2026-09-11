@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import { AnimatePresence, motion } from "framer-motion";
-import { Heart, Loader2, Send, Smile, X } from "lucide-react";
+import { BadgeCheck, Heart, Loader2, Send, Smile, Star, X } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import MentionText from "@/components/ui/MentionText";
 import { useAuth } from "@/hooks/useAuth";
@@ -23,6 +23,9 @@ const LONG_PRESS_MS = 450;
 
 export interface FeedCommentSheetProps {
   postId: string;
+  /** Beta feedback: the post's own author can delete anyone's comment on their post, not just
+   * their own — passed down so the long-press/⋯ menu can offer Delete for either case. */
+  postAuthorUid?: string;
   open: boolean;
   onClose: () => void;
 }
@@ -83,9 +86,11 @@ function CommentRow({ postId, comment, isReply, replies, onReply, onOpenMenu }: 
       >
         <Avatar uid={comment.uid} photoURL={comment.photoURL} displayName={comment.displayName} size={30} />
         <div className="min-w-0 flex-1">
-          <p className="flex items-center gap-1.5 font-syne text-xs font-semibold text-white">
+          <p className="flex items-center gap-1 font-syne text-xs font-semibold text-white">
             {comment.displayName}
-            <span className="font-noto text-[10px] font-normal text-white/40">{formatTime(comment.createdAt)}</span>
+            {comment.isVerified && <BadgeCheck className="h-3 w-3 shrink-0 text-plat" />}
+            {comment.isPlatinum && <Star className="h-3 w-3 shrink-0 fill-gold text-gold" />}
+            <span className="ml-0.5 font-noto text-[10px] font-normal text-white/40">{formatTime(comment.createdAt)}</span>
           </p>
           <p className="mt-0.5 break-words font-noto text-sm text-white/90">
             <MentionText text={comment.text} />
@@ -131,7 +136,7 @@ function CommentRow({ postId, comment, isReply, replies, onReply, onOpenMenu }: 
  * right-side panel on desktop (md+). Real-time via onSnapshot — a comment posted by anyone shows
  * up immediately for everyone with the sheet open.
  */
-export default function FeedCommentSheet({ postId, open, onClose }: FeedCommentSheetProps) {
+export default function FeedCommentSheet({ postId, postAuthorUid, open, onClose }: FeedCommentSheetProps) {
   const { user, profile } = useAuth();
   const [comments, setComments] = useState<FeedComment[]>([]);
   const [text, setText] = useState("");
@@ -166,6 +171,7 @@ export default function FeedCommentSheet({ postId, open, onClose }: FeedCommentS
         displayName: profile.displayName ?? user.displayName ?? "Reader",
         ...(profile.photoURL ? { photoURL: profile.photoURL } : {}),
         isVerified: profile.isVerified === true,
+        isPlatinum: profile.isPlatinum === true,
         text: text.trim(),
         parentId: replyTo?.id ?? null,
       });
@@ -323,7 +329,7 @@ export default function FeedCommentSheet({ postId, open, onClose }: FeedCommentS
             <>
               <div className="fixed inset-0 z-[115]" onClick={() => setMenuFor(null)} />
               <div className="fixed bottom-24 left-1/2 z-[116] w-56 -translate-x-1/2 overflow-hidden rounded-xl bg-[#232323] p-1.5 shadow-2xl">
-                {user?.uid === menuFor.uid && (
+                {(user?.uid === menuFor.uid || (!!user && user.uid === postAuthorUid)) && (
                   <button
                     type="button"
                     onClick={() => handleDelete(menuFor)}

@@ -36,6 +36,7 @@ const PUSH_PREFERENCE_KEY: Partial<Record<NotificationType, keyof NotificationCa
   [NotificationType.COINS_RECEIVED]: "tipReceived",
   [NotificationType.ANNOUNCEMENT]: "announcements",
   [NotificationType.PROFILE_VISIT]: "profileVisit",
+  [NotificationType.POST_LIKE]: "postLike",
 };
 
 /** Whether `type`'s push should actually go out for a profile carrying `prefs` — absent

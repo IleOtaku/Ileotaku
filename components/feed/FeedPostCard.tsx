@@ -25,7 +25,7 @@ import { getOptimizedImageUrl } from "@/lib/cloudinary";
 import { deletePost, incrementPostViews, incrementViewCount, likePost, trackWatchTime } from "@/lib/creatorFeed";
 import { useAuth } from "@/hooks/useAuth";
 import { useFeedAudio } from "@/lib/audioContext";
-import { formatTime } from "@/lib/utils";
+import { formatPostTimestamp } from "@/lib/utils";
 import ReportButton from "@/components/social/ReportButton";
 import type { CreatorPost, CreatorPostType } from "@/types";
 
@@ -284,7 +284,7 @@ function FeedPostCard({ post, onDeleted }: FeedPostCardProps) {
               <span className="rounded-full bg-bg3 px-2 py-0.5 text-[11px] font-semibold text-clay2">
                 {TYPE_LABEL[post.type]}
               </span>
-              <span>· {formatTime(post.createdAt)}</span>
+              <span>· {formatPostTimestamp(post.createdAt)}</span>
               {post.viewCount > 0 && (
                 <span className="flex items-center gap-0.5">
                   <Eye className="h-3 w-3" /> {post.viewCount}

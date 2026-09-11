@@ -443,7 +443,7 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
           ["lastMessage", "lastMessageAt", "lastSenderId", "unreadCounts",
            "name", "description", "photoURL", "participants", "participantNames",
-           "participantPhotos", "adminUids"]);
+           "participantPhotos", "adminUids", "hiddenFor"]);
       // The group's creator only (deleteGroup in lib/dms.ts) — a 1:1 conversation is never
       // deleted, only left implicitly by no longer being messaged.
       allow delete: if isSignedIn() && resource.data.creatorUid == request.auth.uid;
@@ -552,26 +552,33 @@ service cloud.firestore {
     }
 
     // ---------------------------- creator feed ----------------------------
-    // Posts are readable by any signed-in user (the "For You"/"Following" feed and creator
-    // profile Posts tabs); only the post's own author may create, edit, or delete it — likes
-    // are the one exception, allowed on someone else's post but restricted to touching just the
-    // `likes` field, the same pattern comments already use for their like toggle.
+    // Beta feedback bug fix: posts used to be readable only by a signed-in user, but
+    // /creator/[handle] (getPostsByCreator, its Posts tab) is a SERVER component with no client
+    // auth context at all — every load of a creator's own profile page was silently getting
+    // "Missing or insufficient permissions" back and rendering an empty Posts tab, and every
+    // signed-OUT visitor to /feed hit the same wall on getForYouFeed. Posts are public content on
+    // a public feed/profile (same reasoning `publishedSeries` below already uses), so read is now
+    // public — only creating, editing, or deleting a post stays restricted to its own author.
     match /creatorFeed/{postId} {
-      allow read: if isSignedIn();
+      allow read: if true;
       allow create: if isSignedIn()
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.forYouEligible == computedForYouEligible();
       // Beyond the post's own author (full edit rights) and an admin (moderation), narrow
       // any-signed-in-user carve-outs mirror what the client actually writes without its own
-      // uid: liking someone else's post (`likes` only — comments already use this pattern);
-      // incrementViewCount()/trackWatchTime()/trackVideoCompleted()/trackVideoReplay()/
-      // trackProfileVisit()/trackShare() bumping a post's engagement counters plus the
-      // forYouScore each recomputes in the same call; and addFeedComment()/deleteFeedComment()
-      // bumping `commentCount` (also alongside forYouScore).
+      // uid: liking someone else's post (`likes` — also touching `forYouScore` in the same call,
+      // per likePost()'s recompute-and-write-together shape below, which is why that field joins
+      // this carve-out too; a version of this rule with `forYouScore` left out of ONLY this
+      // branch is what made every non-author like fail with "Missing or insufficient
+      // permissions" — confirmed live from a beta bug report ("Can't like videos") plus 44
+      // matching error-log entries); incrementViewCount()/trackWatchTime()/trackVideoCompleted()/
+      // trackVideoReplay()/trackProfileVisit()/trackShare() bumping a post's engagement counters
+      // plus the forYouScore each recomputes in the same call; and addFeedComment()/
+      // deleteFeedComment() bumping `commentCount` (also alongside forYouScore).
       allow update: if isSignedIn()
         && (resource.data.uid == request.auth.uid
           || isAdmin()
-          || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["likes"])
+          || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["likes", "forYouScore"])
           // Sprint "Polish-2" Part 8: profileVisitsFromPost (trackProfileVisit's renamed field —
           // profileVisits kept too, since bumpEngagementCounter's Math.max(0, ...) floor on
           // savePost/unsavePost's bookmarkCount delta is the only other change to this list) and
@@ -589,10 +596,18 @@ service cloud.firestore {
       match /comments/{commentId} {
         allow read: if isSignedIn();
         allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
+        // Beta feedback: the post's own author can now also soft-delete (not edit) anyone's
+        // comment on their post — the same "moderate your own post" ask deleteFeedComment()'s
+        // FeedCommentSheet UI now exposes. Scoped to only the three soft-delete fields so this
+        // can't be used to alter a comment's content, and behind a get() on the parent post
+        // (creatorFeed is publicly readable now, but this rule still needs the caller's own uid
+        // compared against its authorId, which only get() can do from inside a rule).
         allow update: if isSignedIn()
           && (resource.data.uid == request.auth.uid
             || isAdmin()
-            || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["likes"]));
+            || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["likes"])
+            || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(["isDeleted", "deletedAt", "text"])
+                && get(/databases/$(database)/documents/creatorFeed/$(postId)).data.uid == request.auth.uid));
         allow delete: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
       }
     }

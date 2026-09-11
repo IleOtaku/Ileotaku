@@ -262,3 +262,131 @@ round-trip, Reading Stats, and the Navbar/admin verification above. `npx tsc --n
 `npm run build` were run clean (zero errors, all 18 routes, no chunk over 500KB) after every fix
 in this log. Areas outside Sprint 9e's own new surfaces (payments, admin moderation actions
 beyond Reports, mobile PWA install flow, etc.) were not re-audited this sprint.
+
+# Beta Feedback Triage — Sprint
+
+Source: `/admin` → Feedback tab (16 items), Bug Reports (2 items), Error Logs (478 raw entries,
+read directly via the Firebase Admin SDK rather than the browser — see the session notes for why).
+
+## 🔴 Critical bugs — fixed
+
+1. **Can't like posts/videos in the feed.** (Bug reports x2 + 44 matching `creatorFeed.likePost`
+   permission-denied entries in the error log.) `likePost()` writes `likes` and `forYouScore`
+   together in one `updateDoc`, but the Firestore rule's like-toggle carve-out only allowed
+   `likes` alone — every like from someone other than the post's own author was silently
+   rejected. Fixed in `firestore.rules` (added `forYouScore` to that carve-out).
+2. **A creator's own posts don't show on their profile's Posts tab.** ("This user has posted a
+   lot on feed, but it's showing he hasn't posted anything on his profile." + 56 matching
+   `creatorFeed.getPostsByCreator` permission-denied entries.) `/creator/[handle]` is a Next.js
+   Server Component with no client Auth session, but `creatorFeed`'s read rule required
+   `isSignedIn()` — every server-rendered load of that page failed the permission check outright.
+   Fixed in `firestore.rules` (creatorFeed read is now public, same reasoning `publishedSeries`
+   already uses). This same fix also stopped `getForYouFeed` failing for signed-out visitors to
+   `/feed` (9 more matching error-log entries).
+3. **Video story uploads always failed.** (5 `createStory` "Unsupported field value: undefined"
+   entries, today's date.) `lib/stories.ts` wrote `duration: undefined` literally into `addDoc()`
+   for a video segment — Firestore rejects that outright. Fixed: the field is now omitted
+   entirely for video (it was only ever meaningful for image/text segments).
+4. **"I can't view people's profiles... except message."** (Bug report, mobile.)
+   `BlockedContentGate` rendered nothing at all (`return null`) for the entire time its block
+   check was in flight — on a slow/flaky connection (confirmed via 13 matching `blocking.isBlocked`
+   "client is offline" error-log entries) that meant a completely blank profile page. Fixed:
+   content now renders immediately; the block notice only swaps in once a block is actually
+   confirmed.
+5. **Account deletion silently left a dangling login credential.** (2 `auth/requires-recent-login`
+   error-log entries.) `deleteMyAccount()` always reported success even when Firebase's
+   `deleteUser()` failed — the account's data was gone, but its email/password credential stayed
+   registered, so that email could never sign up again. Fixed: the delete-account modal now asks
+   for the current password first (for accounts that have one) and reauthenticates *before*
+   deleting anything, so the credential is actually removed in the normal case; the one remaining
+   fallback path (social-only accounts with a stale session) now reports honestly instead of
+   claiming full success.
+
+## 🟡 UI/UX issues — fixed
+
+6. **"On the navbar of all pages, for desktop. Browse is too close to the logo."** The navbar's
+   `justify-between` layout only distributed *leftover* space between the logo and the nav links,
+   which shrank to almost nothing on medium-width desktops. Fixed with a firm minimum gap
+   (`md:ml-10`) that no longer depends on how much space happens to be left over.
+7. **Feed post timestamps never became an actual date.** ("Posts should show dates when the post
+   has exceeded... 7 days ago, then start showing 14-08-2026.") Added `formatPostTimestamp()` —
+   relative ("6 hours ago") under 7 days, a plain `dd-MM-yyyy` date after that — and used it on
+   both feed surfaces (`FeedPostCard`, `TikTokFeedItem`).
+8. **Error Logs tab was 44% noise.** 212 of 478 entries were "Failed to get document because the
+   client is offline" — a benign, expected condition (mobile users losing signal for a moment),
+   not a bug, and it was burying every real signal in the list. `logError()` now drops this one
+   specific message rather than persisting it.
+
+## 🟢 Feature requests — implemented
+
+9. **Verification badges and Platinum star in comments, "everywhere."** Feed comments
+   (`FeedCommentSheet`) had neither badge rendered even though `isVerified` was already being
+   saved on each comment; series/chapter comments already had both. Added `isPlatinum` to
+   `FeedComment`, denormalized it the same way `isVerified` already was, and rendered both badges.
+   Also added them to the DM thread header (`MessagesClient`), which had neither.
+10. **Admin: unverify a user, not just verify them.** `verifyCreator`/`verifyPublisher` existed
+    with no way to undo a verification. Added `unverifyUser()` + an "Unverify" row action.
+11. **"Allow us to delete people we no longer chat [with]."** Added `hideConversationForUser()` —
+    removes a conversation from *your own* sidebar only (never the other participant's, never any
+    messages); it reappears automatically the next time anyone sends a new message into it. A
+    delete icon now sits on every conversation row.
+12. **"Creators should receive notifications as soon as a user likes... their posts."** `likePost()`
+    now sends the post's author a notification on a fresh like (never for liking your own post).
+    Added a matching `POST_LIKE` notification type, wired to the `postLike` Settings toggle that
+    already existed with nothing triggering it.
+13. **"They [creators] should be able to delete comments for all. Users that posted comments too
+    should be able to delete them."** The second half already worked (`user.uid === comment.uid`
+    could already delete their own). Added the first half: a post's own author can now also
+    soft-delete anyone's comment on their post, in both the UI (`FeedCommentSheet`'s menu) and the
+    Firestore rule (a narrow carve-out scoped to the three soft-delete fields only).
+14. **"Links should be clickable... and formatted to be shorter."** `MentionText` (used by every
+    DM, comment, and chat surface in the app) now turns a plain `http(s)://` URL into a real link,
+    opened in a new tab, with a shortened label (`example.com/some-path…` instead of the full raw
+    URL) once it's long enough to matter.
+
+## ⚪ Suggestions — noted, not built this pass
+
+- **"Group admin should be able to delete other people's messages for everyone."** Needs a
+  group-admin-aware delete path (today only a message's own sender can delete it) plus a matching
+  Firestore rule change scoped to group admins specifically — a real feature, deliberately not
+  rushed into the same pass as the fixes above.
+- **Video seek bar, tap-to-pause/play, and a creator-side "prevent downloads" toggle.** All
+  reasonable; the download-prevention toggle in particular needs a product decision (what it
+  actually blocks — right-click save, screen recording can't be stopped client-side either way)
+  before it's worth building.
+- **"Admin should be able to mark users as verified... and unverify them. Verification should also
+  automatically remove after 6 months of inactivity."** The manual verify/unverify half is done
+  (#10 above). The automatic 6-month-inactivity expiry needs a scheduled job — this project has no
+  Cloud Functions/cron deployment today, so it would need one stood up specifically for this,
+  which is a bigger lift than a beta-fixes pass.
+- **Share-to-group when sharing a post, and a download button on a shared post (creator-toggled).**
+  Both reasonable, both need real design/scope decisions (a share-to-group flow that doesn't just
+  paste a link; what "downloadable" actually produces) rather than a quick implementation.
+- **DM link previews (unfurled title/image), on top of the clickable+shortened links now shipped.**
+  Needs a URL-metadata-fetching endpoint (there's no generic link-unfurling service wired into this
+  app) — the clickable/shortened half of this ask is done (#14), the rich-preview half is not.
+- **"Allow free users to buy 1hr ads-free with coins."** A real monetization feature, but one that
+  needs a price and an exact scope decision (what "ads-free" actually suppresses, whether it stacks
+  with existing Platinum ad-suppression) that isn't mine to make unilaterally.
+- **"@zamyilton should be the only one with a golden verified symbol. He created this."** An
+  opinion about one specific account rather than a general product rule — nothing to generalize
+  into code from this one.
+
+## Also found (not from feedback) and fixed while investigating
+
+- Several other error-log clusters (a missing composite index that turned out to already be
+  deployed, a handful of `ReferenceError`s like `avatarURL`/`SOUND_FILTERS is not defined`,
+  `getCoverGradient is not a function`) were investigated and found to be **stale** — either
+  already fixed by code already in the current source, or artifacts of local `next dev` testing
+  (one entry's URL was literally `localhost:3002`) rather than the deployed production site. Left
+  as-is rather than "fixing" code that's already correct.
+- `NEXT_PUBLIC_FIREBASE_VAPID_KEY is not configured` (2 entries): this is a **Vercel environment
+  variable that isn't set**, not a code bug — the code already fails gracefully (logs and moves on,
+  doesn't crash anything). Push notifications won't actually deliver in production until that key
+  (from Firebase Console → Project Settings → Cloud Messaging → Web Push certificates) is added to
+  the Vercel project's environment variables — that's an infrastructure step outside what a code
+  change can fix.
+
+## Build status
+
+`npx tsc --noEmit`: 0 errors. `npm run build`: clean.

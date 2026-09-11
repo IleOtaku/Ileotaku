@@ -1,5 +1,5 @@
 import { type ClassValue, clsx } from "clsx";
-import { formatDistanceToNow } from "date-fns";
+import { differenceInDays, format, formatDistanceToNow } from "date-fns";
 import { twMerge } from "tailwind-merge";
 
 export function cn(...inputs: ClassValue[]) {
@@ -10,6 +10,23 @@ export function cn(...inputs: ClassValue[]) {
 export function formatTime(date: string | number | Date): string {
   try {
     return formatDistanceToNow(new Date(date), { addSuffix: true });
+  } catch {
+    return "";
+  }
+}
+
+/** Beta feedback: a feed post's timestamp should stay relative ("6 hours ago") while it's
+ * recent, but switch to a plain calendar date once a post is a week or older — "3 months ago"
+ * (formatTime's own, always-relative behavior) is vague and hard to place on a real timeline for
+ * anything that old. Scoped to this one helper rather than changing formatTime() itself, which
+ * 25+ other call sites (notifications, DMs, admin tables, ...) rely on staying purely relative. */
+export function formatPostTimestamp(date: string | number | Date): string {
+  try {
+    const d = new Date(date);
+    if (differenceInDays(Date.now(), d) >= 7) {
+      return format(d, "dd-MM-yyyy");
+    }
+    return formatDistanceToNow(d, { addSuffix: true });
   } catch {
     return "";
   }

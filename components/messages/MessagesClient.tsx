@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import {
   ArrowLeft,
+  BadgeCheck,
   Check,
   ChevronRight,
   Copy,
@@ -21,6 +22,7 @@ import {
   ShieldOff,
   Shield,
   Smile,
+  Star,
   Trash2,
   UserPlus,
   Users,
@@ -40,6 +42,7 @@ import {
   deleteGroup,
   deleteMessage,
   editMessage,
+  hideConversationForUser,
   leaveGroup,
   makeGroupAdmin,
   markDMRead,
@@ -500,6 +503,20 @@ export default function MessagesClient() {
     }
   }
 
+  // Beta feedback: "Allow us to delete people we no longer chat [with]" — hides the conversation
+  // from this user's own sidebar only (see hideConversationForUser's doc comment); the other
+  // participant's view and every message are untouched, and it reappears the next time anyone
+  // sends a new message into it.
+  async function handleHideConversation(conversationId: string) {
+    if (!user) return;
+    try {
+      await hideConversationForUser(conversationId, user.uid);
+      if (selectedId === conversationId) setSelectedId(null);
+    } catch {
+      toast.error("Couldn't remove this conversation.");
+    }
+  }
+
   async function handleDeleteGroup() {
     if (!user || !selectedGroup) return;
     try {
@@ -837,11 +854,11 @@ export default function MessagesClient() {
                   : `${typingUids.length} people are typing...`
                 : `${name} is typing...`;
               return (
+                <div key={c.id} className="group relative">
                 <button
-                  key={c.id}
                   type="button"
                   onClick={() => setSelectedId(c.id)}
-                  className={`flex w-full items-center gap-3 border-b border-bg4 px-4 py-3 text-left transition-colors hover:bg-bg3 ${
+                  className={`flex w-full items-center gap-3 border-b border-bg4 py-3 pl-4 pr-10 text-left transition-colors hover:bg-bg3 ${
                     selectedId === c.id ? "bg-clay/10" : ""
                   }`}
                 >
@@ -907,6 +924,18 @@ export default function MessagesClient() {
                     </div>
                   </div>
                 </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleHideConversation(c.id);
+                  }}
+                  aria-label="Delete conversation"
+                  className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-muted opacity-70 hover:bg-bg4 hover:text-clay2 sm:opacity-0 sm:group-hover:opacity-100"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+                </div>
               );
             })
           )}
@@ -974,10 +1003,14 @@ export default function MessagesClient() {
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <Link href={otherProfileHref ?? "#"} className="block truncate font-syne text-sm font-semibold text-text hover:underline">
-                        {otherName}
+                      <Link href={otherProfileHref ?? "#"} className="flex items-center gap-1 truncate font-syne text-sm font-semibold text-text hover:underline">
+                        <span className="truncate">{otherName}</span>
+                        {(otherProfile?.isVerified === true || otherProfile?.verified === true) && (
+                          <BadgeCheck className="h-3.5 w-3.5 shrink-0 text-plat" />
+                        )}
+                        {otherProfile?.isPlatinum && <Star className="h-3 w-3 shrink-0 fill-gold text-gold" />}
                         {otherProfile?.handle && (
-                          <span className="ml-1.5 font-noto text-xs font-normal text-muted">@{otherProfile.handle}</span>
+                          <span className="ml-1 font-noto text-xs font-normal text-muted">@{otherProfile.handle}</span>
                         )}
                       </Link>
                       {typingUids.length > 0 ? (

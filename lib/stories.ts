@@ -88,7 +88,12 @@ export async function createStory(
       mediaType,
       ...(media.textContent ? { textContent: media.textContent } : {}),
       ...(media.backgroundColor ? { backgroundColor: media.backgroundColor } : {}),
-      duration: media.kind === "image" || media.kind === "text" ? 5000 : undefined,
+      // Beta feedback bug: a video story wrote `duration: undefined` here, which addDoc()
+      // rejects outright ("Unsupported field value: undefined") — every video story upload was
+      // failing. `duration` is only meaningful for image/text segments anyway (a video plays for
+      // its own natural length — see the field's own doc comment on the Story type), so it's
+      // omitted entirely rather than written as `undefined` when the segment is a video.
+      ...(media.kind === "image" || media.kind === "text" ? { duration: 5000 } : {}),
       expiresAt: new Date(now + effectiveDuration).toISOString(),
       viewedBy: [],
       createdAt: new Date(now).toISOString(),

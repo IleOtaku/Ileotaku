@@ -33,7 +33,7 @@ import {
   trackWatchTime,
   unsavePost,
 } from "@/lib/creatorFeed";
-import { getUserProfileUrl, stringToColor } from "@/lib/utils";
+import { formatPostTimestamp, getUserProfileUrl, stringToColor } from "@/lib/utils";
 import type { CreatorPost } from "@/types";
 
 const BRAND_GRADIENTS = [
@@ -294,6 +294,7 @@ function TikTokFeedItem({ post, isSaved, onDeleted }: TikTokFeedItemProps) {
               <span className="truncate">{post.displayName}</span>
               {post.isVerified && <BadgeCheck className="h-3.5 w-3.5 shrink-0 text-plat" />}
             </Link>
+            <span className="shrink-0 font-noto text-xs text-ivory/60">· {formatPostTimestamp(post.createdAt)}</span>
             {!isOwnPost && !isFollowing && (
               <div className="shrink-0">
                 <FollowButton targetUid={post.uid} hideCount />
@@ -391,7 +392,7 @@ function TikTokFeedItem({ post, isSaved, onDeleted }: TikTokFeedItemProps) {
         </div>
       </div>
 
-      <FeedCommentSheet postId={post.id} open={commentsOpen} onClose={() => setCommentsOpen(false)} />
+      <FeedCommentSheet postId={post.id} postAuthorUid={post.uid} open={commentsOpen} onClose={() => setCommentsOpen(false)} />
       <FeedShareSheet post={post} open={shareOpen} onClose={() => setShareOpen(false)} />
       <BoostModal open={boostOpen} onClose={() => setBoostOpen(false)} postId={post.id} onBoosted={() => {}} />
     </div>

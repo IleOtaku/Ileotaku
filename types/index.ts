@@ -64,7 +64,7 @@ export interface UserProfile {
   isVerified?: boolean;
   /** Which kind of account `isVerified` badge represents — changes badge color (blue vs purple)
    * and copy wherever it's shown. Only meaningful when isVerified is true. */
-  verifiedType?: "creator" | "publisher";
+  verifiedType?: "creator" | "publisher" | null;
   /** Count of moderation strikes from actioned reports — feeds account-suspension logic. */
   strikeCount?: number;
   /** ISO date the account is suspended until, if a moderator has taken that action. */
@@ -629,6 +629,10 @@ export enum NotificationType {
   NEW_CHAPTER = "NEW_CHAPTER",
   COMMENT_REPLY = "COMMENT_REPLY",
   COMMENT_LIKE = "COMMENT_LIKE",
+  /** Someone liked one of your feed posts — see lib/creatorFeed.ts's likePost(). Distinct from
+   * COMMENT_LIKE (liking a comment, not a post); maps to NotificationCategoryPreferences'
+   * `postLike` key, which existed as a Settings toggle before this had a real trigger to gate. */
+  POST_LIKE = "POST_LIKE",
   COINS_RECEIVED = "COINS_RECEIVED",
   PLATINUM_EXPIRING = "PLATINUM_EXPIRING",
   PLATINUM_EXPIRED = "PLATINUM_EXPIRED",
@@ -749,6 +753,12 @@ export interface Conversation {
   /** The uid who created the group — the only one who can delete it outright (see
    * MessagesClient's Delete Group vs. Leave Group distinction). */
   creatorUid?: string;
+  /** Beta feedback: "Allow us to delete people we no longer chat [with]" — uids who've hidden
+   * this conversation from their OWN list via hideConversationForUser() (lib/dms.ts). Never
+   * deletes the conversation or its messages for the other participant(s); sendDM() clears this
+   * back to empty on the next new message, so the conversation naturally reappears for whoever
+   * hid it instead of staying hidden forever once there's new activity. */
+  hiddenFor?: string[];
 }
 
 /** One emoji's worth of reactions on a message — every uid who reacted with that emoji. */
@@ -897,6 +907,10 @@ export interface FeedComment {
   displayName: string;
   photoURL?: string;
   isVerified?: boolean;
+  /** Beta feedback: "verification badges and platinum star should show beside users... even in
+   * comments section" — denormalized at comment-creation time the same way isVerified already
+   * was, so FeedCommentSheet's CommentRow can render it with no per-comment profile lookup. */
+  isPlatinum?: boolean;
   text: string;
   /** Null/absent for a top-level comment; otherwise the id of the comment being replied to. */
   parentId?: string | null;

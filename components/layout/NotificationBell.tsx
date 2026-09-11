@@ -14,6 +14,7 @@ const TYPE_EMOJI: Record<NotificationType, string> = {
   [NotificationType.NEW_CHAPTER]: "📖",
   [NotificationType.COMMENT_REPLY]: "💬",
   [NotificationType.COMMENT_LIKE]: "❤️",
+  [NotificationType.POST_LIKE]: "❤️",
   [NotificationType.COINS_RECEIVED]: "🪙",
   [NotificationType.PLATINUM_EXPIRING]: "⏳",
   [NotificationType.PLATINUM_EXPIRED]: "💔",
