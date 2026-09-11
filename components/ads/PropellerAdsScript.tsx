@@ -4,15 +4,20 @@ import Script from "next/script";
 import { useAuth } from "@/hooks/useAuth";
 
 /**
- * Loads PropellerAds' main ad-provider script once per page, for free (non-Platinum) readers
- * only — Platinum members never load it at all, not even a script tag that then serves nothing.
- * Renders nothing until NEXT_PUBLIC_PROPELLERADS_PUBLISHER_ID is actually set (see .env.example).
+ * Loads PropellerAds' main ad-provider script — required for AdSlot's between-chapters banner
+ * (components/reader/NextChapterCard.tsx) to actually render anything into its `data-zone-id`
+ * div. Rendered from within the reader page itself (see components/reader/ReaderClient.tsx), NOT
+ * the root layout — ads must never load on any page but the reader. Free (non-Platinum) readers
+ * only; waits for auth to resolve first so a Platinum member's profile still loading never lets
+ * this script slip in before `isPlatinum` is known.
  */
 export default function PropellerAdsScript() {
-  const { profile } = useAuth();
-  const publisherId = process.env.NEXT_PUBLIC_PROPELLERADS_PUBLISHER_ID;
+  const { profile, loading } = useAuth();
+  if (loading) return null;
+  if (profile?.isPlatinum) return null;
 
-  if (profile?.isPlatinum || !publisherId) return null;
+  const publisherId = process.env.NEXT_PUBLIC_PROPELLERADS_PUBLISHER_ID;
+  if (!publisherId) return null;
 
   return (
     <Script

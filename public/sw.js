@@ -1,10 +1,21 @@
 // Monetag
+// Only load ad service worker for non-Platinum users
+// We check this via a message from the app
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SET_PLATINUM' && event.data?.isPlatinum) {
+    self.isPlatinumUser = true;
+  }
+});
+
 self.options = {
     "domain": "5gvci.com",
     "zoneId": 11773167
 }
 self.lary = ""
-importScripts('https://5gvci.com/act/files/service-worker.min.js?r=sw')
+// Only import if not Platinum
+if (!self.isPlatinumUser) {
+  importScripts('https://5gvci.com/act/files/service-worker.min.js?r=sw')
+}
 
 // ÍléOtaku PWA - existing code below unchanged
 /**

@@ -1,15 +1,21 @@
 'use client';
 import Script from 'next/script';
 import { useAuth } from '@/hooks/useAuth';
+import { usePathname } from 'next/navigation';
 
-export default function MonetagScript() {
+export default function ReaderAdScript() {
   const { profile, loading } = useAuth();
+  const pathname = usePathname();
 
-  // Wait for auth to load before deciding
   if (loading) return null;
-
-  // Platinum users NEVER see ads — return nothing at all
   if (profile?.isPlatinum) return null;
+
+  // Only load on reader and manga/story pages
+  const isReaderPage = pathname?.startsWith('/reader') ||
+                       pathname?.startsWith('/manga/') ||
+                       pathname?.startsWith('/story/');
+
+  if (!isReaderPage) return null;
 
   return (
     <Script

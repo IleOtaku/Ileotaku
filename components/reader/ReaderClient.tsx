@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
+import PropellerAdsScript from "@/components/ads/PropellerAdsScript";
 import Navbar from "@/components/layout/Navbar";
 import { checkAndAwardAchievements } from "@/lib/achievements";
 import { useAuth } from "@/hooks/useAuth";
@@ -360,6 +361,10 @@ export default function ReaderClient() {
 
   return (
     <div className="flex h-screen flex-col bg-bg">
+      {/* Required for AdSlot's between-chapters banner (NextChapterCard) to actually render an
+       * ad into its data-zone-id div — loaded here, not the root layout, so it never runs on any
+       * page but the reader. */}
+      <PropellerAdsScript />
       <Navbar />
       <div className="flex min-h-0 flex-1">
         <MangaList

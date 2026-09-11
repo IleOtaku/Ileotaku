@@ -15,10 +15,12 @@ export interface AdSlotProps {
  * configured, or a dev-only placeholder explaining what's missing while they aren't.
  */
 export default function AdSlot({ placement, className }: AdSlotProps) {
-  const { profile } = useAuth();
+  const { profile, loading } = useAuth();
   const adRef = useRef<HTMLDivElement>(null);
 
-  // Platinum users see nothing — component renders null entirely.
+  // Wait for auth to resolve, then Platinum users see nothing — renders null entirely, with no
+  // flash of an ad slot while a Platinum member's profile is still loading.
+  if (loading) return null;
   if (profile?.isPlatinum) return null;
 
   const publisherId = process.env.NEXT_PUBLIC_PROPELLERADS_PUBLISHER_ID;
