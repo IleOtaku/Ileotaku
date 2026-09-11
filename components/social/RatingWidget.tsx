@@ -5,13 +5,7 @@ import toast from "react-hot-toast";
 import { Loader2, Lock, Star } from "lucide-react";
 import { Skeleton } from "@/components/ui";
 import { useAuth } from "@/hooks/useAuth";
-import {
-  getHistoryCountForManga,
-  getRatings,
-  getSeriesMeta,
-  getUserRating,
-  submitRating,
-} from "@/lib/firestore";
+import { getHistoryCountForManga, subscribeToRatings, submitRating } from "@/lib/firestore";
 import type { SeriesRating } from "@/types";
 
 export interface RatingWidgetProps {
@@ -106,62 +100,57 @@ function StarInput({
 }
 
 /** Star rating + written review, with a rating-breakdown bar chart and a "read N chapters
- * first" gate. Writes to series/{seriesId}/ratings/{userId} and recomputes the series average. */
+ * first" gate. Writes to series/{seriesId}/ratings/{userId}; the average, count, distribution,
+ * and "my rating" are all derived client-side from a live onSnapshot on that same collection
+ * (Part 3's live-stats spec), so a rating from any reader shows up here in real time. */
 export default function RatingWidget({ seriesId }: RatingWidgetProps) {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [average, setAverage] = useState(0);
-  const [count, setCount] = useState(0);
-  const [distribution, setDistribution] = useState<Record<StarBucket, number>>(emptyDistribution());
-  const [myRating, setMyRating] = useState<SeriesRating | null>(null);
+  const [ratings, setRatings] = useState<SeriesRating[]>([]);
   const [readEnough, setReadEnough] = useState(false);
   const [selected, setSelected] = useState(0);
   const [review, setReview] = useState("");
   const [reviewSpoiler, setReviewSpoiler] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [draftTouched, setDraftTouched] = useState(false);
+
+  const myRating = user ? (ratings.find((r) => r.userId === user.uid) ?? null) : null;
+  const average = ratings.length > 0 ? ratings.reduce((sum, r) => sum + r.rating, 0) / ratings.length : 0;
+  const count = ratings.length;
+  const distribution = bucketRatings(ratings);
+
+  // Real-time — degrades to a zeroed, read-only-looking widget on error (e.g. rules not
+  // deployed yet) rather than leaving it stuck on the loading skeleton.
+  useEffect(() => {
+    setLoading(true);
+    const unsub = subscribeToRatings(seriesId, (live) => {
+      setRatings(live);
+      setLoading(false);
+    });
+    return unsub;
+  }, [seriesId]);
+
+  // Prefills the star input from my own live rating once (and again if I haven't started
+  // editing yet) — doesn't fight a rating the reader is actively adjusting.
+  useEffect(() => {
+    if (draftTouched) return;
+    if (myRating) {
+      setSelected(myRating.rating);
+      setReview(myRating.review ?? "");
+      setReviewSpoiler(!!myRating.isSpoiler);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myRating?.rating, myRating?.review, myRating?.isSpoiler, draftTouched]);
 
   useEffect(() => {
+    if (!user) {
+      setReadEnough(false);
+      return;
+    }
     let cancelled = false;
-    setLoading(true);
-
-    (async () => {
-      try {
-        const [meta, ratings] = await Promise.all([getSeriesMeta(seriesId), getRatings(seriesId)]);
-        if (cancelled) return;
-        setAverage(meta?.averageRating ?? 0);
-        setCount(meta?.ratingCount ?? ratings.length);
-        setDistribution(bucketRatings(ratings));
-
-        if (user) {
-          const [mine, historyCount] = await Promise.all([
-            getUserRating(seriesId, user.uid),
-            getHistoryCountForManga(user.uid, seriesId),
-          ]);
-          if (cancelled) return;
-          setMyRating(mine);
-          if (mine) {
-            setSelected(mine.rating);
-            setReview(mine.review ?? "");
-            setReviewSpoiler(!!mine.isSpoiler);
-          }
-          setReadEnough(historyCount >= READ_THRESHOLD);
-        } else {
-          setReadEnough(false);
-        }
-      } catch {
-        // Ratings couldn't be read (e.g. rules not deployed yet) — degrade to a zeroed,
-        // read-only-looking widget instead of leaving it stuck on the loading skeleton.
-        if (!cancelled) {
-          setAverage(0);
-          setCount(0);
-          setDistribution(emptyDistribution());
-          setReadEnough(false);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-
+    getHistoryCountForManga(user.uid, seriesId).then((historyCount) => {
+      if (!cancelled) setReadEnough(historyCount >= READ_THRESHOLD);
+    });
     return () => {
       cancelled = true;
     };
@@ -172,11 +161,7 @@ export default function RatingWidget({ seriesId }: RatingWidgetProps) {
     setSubmitting(true);
     try {
       await submitRating(seriesId, user.uid, selected, review, reviewSpoiler);
-      const [meta, ratings] = await Promise.all([getSeriesMeta(seriesId), getRatings(seriesId)]);
-      setAverage(meta?.averageRating ?? 0);
-      setCount(meta?.ratingCount ?? ratings.length);
-      setDistribution(bucketRatings(ratings));
-      setMyRating({ userId: user.uid, rating: selected, review, isSpoiler: reviewSpoiler, createdAt: new Date().toISOString() });
+      setDraftTouched(false);
       toast.success("Thanks for rating!");
     } catch {
       toast.error("Couldn't submit your rating. Please try again.");
@@ -231,7 +216,13 @@ export default function RatingWidget({ seriesId }: RatingWidgetProps) {
             <p className="mb-2 font-syne text-xs font-semibold text-muted">
               {myRating ? "Update your rating" : "Rate this series"}
             </p>
-            <StarInput value={selected} onChange={setSelected} />
+            <StarInput
+              value={selected}
+              onChange={(v) => {
+                setDraftTouched(true);
+                setSelected(v);
+              }}
+            />
 
             <textarea
               value={review}

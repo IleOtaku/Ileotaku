@@ -7,11 +7,13 @@ import {
   getDocs,
   increment,
   limit,
+  onSnapshot,
   orderBy,
   query,
   updateDoc,
   where,
   writeBatch,
+  type Unsubscribe,
 } from "firebase/firestore";
 import { db } from "./firebase";
 import { logError } from "./errorLogger";
@@ -238,6 +240,30 @@ export async function getPublishedSeries(workId: string): Promise<PublishedSerie
     await logError(error, { operation: "getPublishedSeries", workId });
     return null;
   }
+}
+
+/** Live version of getPublishedSeries — the manga detail page's header stats strip subscribes
+ * to this so `totalReads` (bumped by incrementSeriesReads on every chapter open) and
+ * `chapterCount`/`averageRating` all update in real time with no manual refresh. */
+export function subscribeToPublishedSeries(
+  workId: string,
+  callback: (series: PublishedSeries | null) => void
+): Unsubscribe {
+  return onSnapshot(
+    doc(db, PUBLISHED_SERIES, workId),
+    (snap) => callback(snap.exists() ? ({ id: snap.id, ...snap.data() } as PublishedSeries) : null),
+    () => callback(null)
+  );
+}
+
+/** Live chapter count for one work — the header stats strip subscribes to this so a newly
+ * published chapter shows up in "📖 N chapters" the instant the creator publishes it. */
+export function subscribeToChapterCount(workId: string, callback: (count: number) => void): Unsubscribe {
+  return onSnapshot(
+    collection(db, SERIES, workId, "chapters"),
+    (snap) => callback(snap.size),
+    () => callback(0)
+  );
 }
 
 /** /creator/[handle]'s Works tab: every published work by one author, newest first. Falls back

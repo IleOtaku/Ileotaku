@@ -25,7 +25,7 @@ import { Modal, Select, Skeleton, Toggle } from "@/components/ui";
 import { SpotifyGlyph } from "@/components/spotify/NowPlayingCard";
 import { useAuth } from "@/hooks/useAuth";
 import { deleteMyAccount, friendlyError, resetPassword } from "@/lib/auth";
-import { getBlockedUsers, unblockUser } from "@/lib/blocking";
+import { subscribeToBlockedUsers, unblockUser } from "@/lib/blocking";
 import { getHistory, getUserProfile, updateUserPrefs } from "@/lib/firestore";
 import { getMyBugReports } from "@/lib/admin";
 import {
@@ -73,6 +73,18 @@ const DEFAULT_NOTIFICATIONS: NotificationPreferences = {
   announcements: true,
 };
 
+/** blockUser() writes `blockedAt` via serverTimestamp(), so a freshly-read doc holds a real
+ * Firestore Timestamp (with a `.toDate()` method) rather than the ISO string every other
+ * "*At" field in this app uses — handle both shapes rather than assuming one. */
+function formatBlockedDate(value: unknown): string {
+  if (!value) return "recently";
+  const date =
+    typeof value === "object" && value !== null && "toDate" in value
+      ? (value as { toDate: () => Date }).toDate()
+      : new Date(value as string);
+  return Number.isNaN(date.getTime()) ? "recently" : date.toLocaleDateString();
+}
+
 /** Account / Spotify / Reading Preferences / Notifications / Account & Privacy / Danger Zone —
  * all read from and write to Firestore. */
 export default function SettingsTab() {
@@ -92,7 +104,9 @@ export default function SettingsTab() {
   // testing that filtering those out entirely made the block silently vanish from this list with
   // no way to confirm or clean it up, so a null profile renders a "Deleted user" fallback row
   // instead of being dropped.
-  const [blockedUsers, setBlockedUsers] = useState<{ uid: string; profile: UserProfile | null }[]>([]);
+  const [blockedUsers, setBlockedUsers] = useState<
+    { uid: string; profile: UserProfile | null; blockedAt?: unknown }[]
+  >([]);
   const [blockedLoading, setBlockedLoading] = useState(true);
   const [unblockingUid, setUnblockingUid] = useState<string | null>(null);
   const [taglineDraft, setTaglineDraft] = useState("");
@@ -131,23 +145,31 @@ export default function SettingsTab() {
     setReminderDraft(profile?.reminderTime ?? "");
   }, [profile?.platinumTagline, profile?.reminderTime]);
 
-  function loadBlockedUsers() {
+  // Real-time: unblocking (from this list, a profile page, or a DM header) removes the row
+  // immediately without a manual refetch. Each blocked uid's profile is fetched once per id
+  // change (not itself real-time — a blocked account's display name changing mid-session isn't
+  // worth a second listener per row).
+  useEffect(() => {
     if (!user) {
+      setBlockedUsers([]);
       setBlockedLoading(false);
       return;
     }
     setBlockedLoading(true);
-    getBlockedUsers(user.uid)
-      .then(async (uids) => {
-        const entries = await Promise.all(
-          uids.map(async (uid) => ({ uid, profile: await getUserProfile(uid) }))
-        );
+    const unsub = subscribeToBlockedUsers(user.uid, (records) => {
+      Promise.all(
+        records.map(async (r) => ({
+          uid: r.targetUid,
+          blockedAt: r.blockedAt,
+          profile: await getUserProfile(r.targetUid),
+        }))
+      ).then((entries) => {
         setBlockedUsers(entries);
-      })
-      .finally(() => setBlockedLoading(false));
-  }
-
-  useEffect(loadBlockedUsers, [user]);
+        setBlockedLoading(false);
+      });
+    });
+    return unsub;
+  }, [user]);
 
   async function handleEnablePush() {
     if (!user) return;
@@ -760,11 +782,11 @@ export default function SettingsTab() {
           <Skeleton className="h-16 w-full rounded-2xl" />
         ) : blockedUsers.length === 0 ? (
           <p className="rounded-2xl border border-bg4 bg-bg2 p-5 font-noto text-sm text-muted">
-            You haven&apos;t blocked anyone.
+            ✓ You haven&apos;t blocked anyone
           </p>
         ) : (
           <div className="flex flex-col gap-2 rounded-2xl border border-bg4 bg-bg2 p-3">
-            {blockedUsers.map(({ uid: blockedUid, profile: b }) => (
+            {blockedUsers.map(({ uid: blockedUid, profile: b, blockedAt }) => (
               <div key={blockedUid} className="flex items-center gap-3 rounded-xl p-2">
                 {b?.photoURL ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -783,6 +805,7 @@ export default function SettingsTab() {
                     {b?.displayName ?? "Deleted user"}
                   </p>
                   {b?.handle && <p className="truncate font-noto text-xs text-muted">@{b.handle}</p>}
+                  <p className="font-noto text-[11px] text-muted">Blocked {formatBlockedDate(blockedAt)}</p>
                 </div>
                 <button
                   type="button"

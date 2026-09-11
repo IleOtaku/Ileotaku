@@ -583,6 +583,9 @@ export enum NotificationType {
   GROUP_MENTION = "GROUP_MENTION",
   OWNERSHIP_TRANSFER_REQUEST = "OWNERSHIP_TRANSFER_REQUEST",
   OWNERSHIP_TRANSFER_ACCEPTED = "OWNERSHIP_TRANSFER_ACCEPTED",
+  APPEAL_APPROVED = "APPEAL_APPROVED",
+  APPEAL_DENIED = "APPEAL_DENIED",
+  RESTRICTION_LIFTED = "RESTRICTION_LIFTED",
 }
 
 /** Named `AppNotification` (not `Notification`) to avoid colliding with the DOM Notification API. */
@@ -799,6 +802,38 @@ export interface CreatorPost {
   /** Whether this post's author's role permits it to appear in the algorithmic For You feed at
    * all (independent of its score) — set at createPost() time from the author's role. */
   forYouEligible: boolean;
+
+  /* ------------------------- TikTok Feed Overhaul: extra ranking signals ------------------------- */
+
+  /** Distinct view-sessions that played past 80% of the video, via trackVideoCompleted(). */
+  completedViews?: number;
+  /** Times a video looped back to the start while still in view, via trackVideoReplay(). */
+  replayCount?: number;
+  /** Times a viewer tapped through to the author's profile from this post, via trackProfileVisit(). */
+  profileVisits?: number;
+  /** Times this post was shared (any share sheet option), via trackShare(). */
+  shareCount?: number;
+}
+
+/* ---------------------------- Feed post comments ---------------------------- */
+
+/** `creatorFeed/{postId}/comments/{commentId}` — threaded comments on a feed post, same
+ * top-level-plus-one-reply-level shape as SeriesComment (see components/social/CommentSection.tsx
+ * for the pattern this mirrors), rendered by the TikTok-style comment sheet. */
+export interface FeedComment {
+  id: string;
+  uid: string;
+  displayName: string;
+  photoURL?: string;
+  isVerified?: boolean;
+  text: string;
+  /** Null/absent for a top-level comment; otherwise the id of the comment being replied to. */
+  parentId?: string | null;
+  /** UIDs who liked this comment — count is `likes.length`. */
+  likes: string[];
+  createdAt: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
 }
 
 /* ---------------------------- Sprint 9e: blocking ---------------------------- */
@@ -944,4 +979,26 @@ export interface Report {
    * perk tags their reports "💎 Priority" in the admin review queue. Backend-only signal; never
    * shown to the reporter themselves. */
   reporterIsPlatinum?: boolean;
+}
+
+/* ---------------------------- Ban appeals ---------------------------- */
+
+export type AppealStatus = "pending" | "approved" | "denied";
+
+/** `appeals/{uid}` — a banned account's appeal, submitted from /banned. One per uid; a fresh
+ * submission overwrites the previous one rather than piling up documents. */
+export interface Appeal {
+  id: string;
+  uid: string;
+  email: string;
+  displayName: string;
+  /** What the appellant wrote, explaining why they should be reinstated. */
+  reason: string;
+  /** The original moderation reason their account was banned for, snapshotted at submission
+   * time so the admin table doesn't need a second profile lookup. */
+  banReason?: string;
+  status: AppealStatus;
+  submittedAt: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
 }

@@ -12,6 +12,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  setDoc,
   startAfter,
   updateDoc,
   where,
@@ -25,7 +26,7 @@ import { logError } from "./errorLogger";
 import { db } from "./firebase";
 import { getUserProfile, updateLastActive, updateUserPrefs } from "./firestore";
 import { incrementSoundUsage } from "./sounds";
-import type { CreatorPost, CreatorPostType, EditingApp, Sound, UserProfile } from "@/types";
+import type { CreatorPost, CreatorPostType, EditingApp, FeedComment, Sound, UserProfile } from "@/types";
 
 const FEED = "creatorFeed";
 
@@ -178,13 +179,25 @@ export async function chargeForResolution(
 
 type ScoreInput = Pick<
   CreatorPost,
-  "likes" | "commentCount" | "viewCount" | "watchTime" | "createdAt" | "boostLevel" | "boostExpiresAt"
+  | "likes"
+  | "commentCount"
+  | "viewCount"
+  | "watchTime"
+  | "createdAt"
+  | "boostLevel"
+  | "boostExpiresAt"
+  | "completedViews"
+  | "replayCount"
+  | "profileVisits"
+  | "shareCount"
 >;
 
 /**
- * Ranking score behind the For You feed. Engagement (likes weighted heaviest, then comments,
- * then raw views, then a small credit for cumulative watch time) is divided by an age-based
- * "gravity" term — the same shape as Hacker News's ranking formula — so a post needs
+ * Ranking score behind the For You feed. TikTok-style: watch-quality signals (a view that made
+ * it past 80% of the video, a replay, a share, a profile visit, a comment) are weighted far
+ * heavier than a bare view or like, since they're much stronger evidence someone actually cared
+ * about the content rather than scrolling past it. The whole engagement sum is divided by an
+ * age-based "gravity" term — the same shape as Hacker News's ranking formula — so a post needs
  * proportionally more engagement to stay near the top the older it gets, keeping the feed from
  * being dominated by a handful of old viral posts. An active boost then multiplies the whole
  * decayed score, which is intentional: boosting only *pays off* on a post that's already
@@ -193,7 +206,14 @@ type ScoreInput = Pick<
 export function calculateForYouScore(post: ScoreInput): number {
   const ageHours = Math.max(0, (Date.now() - new Date(post.createdAt).getTime()) / 3_600_000);
   const engagement =
-    post.likes.length * 3 + post.commentCount * 5 + post.viewCount * 1 + post.watchTime * 0.05;
+    post.likes.length * 3 +
+    post.commentCount * 40 +
+    post.viewCount * 1 +
+    post.watchTime * 0.05 +
+    (post.completedViews ?? 0) * 50 +
+    (post.replayCount ?? 0) * 30 +
+    (post.profileVisits ?? 0) * 20 +
+    (post.shareCount ?? 0) * 60;
   const decayed = engagement / Math.pow(ageHours + 2, 1.5);
 
   const boostActive =
@@ -518,6 +538,20 @@ export async function incrementPostViews(postId: string): Promise<void> {
   }
 }
 
+/** Fetches a single post by id — powers app/feed/[postId]'s shared-link view. Returns null both
+ * when the post doesn't exist and when the read is denied (e.g. a signed-out visitor, since
+ * creatorFeed read access requires being signed in), so the page can render one plain "not
+ * found or sign in" state for either case. */
+export async function getPost(postId: string): Promise<CreatorPost | null> {
+  try {
+    const snap = await getDoc(doc(db, FEED, postId));
+    return snap.exists() ? toPost(snap as QueryDocumentSnapshot<DocumentData>) : null;
+  } catch (error) {
+    await logError(error, { operation: "creatorFeed.getPost", postId });
+    return null;
+  }
+}
+
 /** Fetches every post by one creator, newest first — used by the creator dashboard's own Feed
  * tab and the public creator profile's Posts tab. Excludes drafts, since drafts live in a
  * separate per-user subcollection rather than this query's `creatorFeed` collection. */
@@ -610,6 +644,50 @@ export async function trackWatchTime(postId: string, seconds: number): Promise<v
   } catch {
     // Non-fatal.
   }
+}
+
+/** Generic "bump one counter field by 1 and recompute forYouScore" helper — every TikTok-style
+ * ranking signal below (completed view, replay, profile visit, share) follows the exact same
+ * read-then-write shape as incrementViewCount()/trackWatchTime() above, so this factors it out
+ * rather than repeating the same six lines four times. */
+async function bumpEngagementCounter(postId: string, field: keyof ScoreInput): Promise<void> {
+  try {
+    const ref = doc(db, FEED, postId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return;
+    const post = toPost(snap as QueryDocumentSnapshot<DocumentData>);
+    const nextValue = ((post[field] as number | undefined) ?? 0) + 1;
+    const patch = { [field]: nextValue };
+    await updateDoc(ref, { ...patch, forYouScore: calculateForYouScore({ ...post, ...patch }) });
+  } catch {
+    // Non-fatal — a missed ranking signal isn't worth surfacing an error for.
+  }
+}
+
+/** Called once per viewing session the first time a video crosses 80% played — the single
+ * strongest "this person actually watched it" signal, worth +50 to forYouScore (see
+ * calculateForYouScore). De-duping per session is the caller's responsibility (TikTokFeedItem
+ * uses a ref flag, same pattern incrementViewCount's callers already use). */
+export async function trackVideoCompleted(postId: string): Promise<void> {
+  await bumpEngagementCounter(postId, "completedViews");
+}
+
+/** Called each time a video loops back to the start while still in view — +30 to forYouScore. */
+export async function trackVideoReplay(postId: string): Promise<void> {
+  await bumpEngagementCounter(postId, "replayCount");
+}
+
+/** Called when a viewer taps through to the author's profile from this specific post — +20 to
+ * forYouScore. */
+export async function trackProfileVisit(postId: string): Promise<void> {
+  await bumpEngagementCounter(postId, "profileVisits");
+}
+
+/** Called once a share sheet option actually completes (not just opening the sheet) — +60 to
+ * forYouScore, the single heaviest signal short of a completed view, since sharing is the
+ * clearest "I want other people to see this" signal a viewer can give. */
+export async function trackShare(postId: string): Promise<void> {
+  await bumpEngagementCounter(postId, "shareCount");
 }
 
 /* ---------------------------- Boosting ---------------------------- */
@@ -765,4 +843,163 @@ export async function publishDraft(uid: string, draftId: string, input: CreatePo
   const postId = await createPost(input);
   await deleteDraft(uid, draftId);
   return postId;
+}
+
+/* ---------------------------- Feed post comments (TikTok Feed Overhaul) ---------------------------- */
+
+function feedCommentsCol(postId: string) {
+  return collection(db, FEED, postId, "comments");
+}
+
+/** Real-time listener on a post's comments, newest first — powers the comment sheet. Unlike
+ * series comments (paginated with a `take` + "Load more"), a feed post's comment sheet just
+ * shows everything at once; TikTok-scale comment counts on a single post are rare enough here
+ * that this doesn't need its own pagination yet. */
+export function subscribeToFeedComments(
+  postId: string,
+  callback: (comments: FeedComment[]) => void,
+  onError?: (error: Error) => void
+): Unsubscribe {
+  const q = query(feedCommentsCol(postId), orderBy("createdAt", "desc"));
+  return onSnapshot(
+    q,
+    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as FeedComment)),
+    onError
+  );
+}
+
+/** Posts a comment (or reply, via `parentId`) and bumps the post's `commentCount` (+ recomputes
+ * forYouScore — a comment is a strong TikTok-style engagement signal, see
+ * calculateForYouScore) in the same call. */
+export async function addFeedComment(
+  postId: string,
+  comment: Omit<FeedComment, "id" | "createdAt" | "likes">
+): Promise<void> {
+  try {
+    await addDoc(feedCommentsCol(postId), {
+      ...comment,
+      likes: [],
+      createdAt: new Date().toISOString(),
+    });
+    const ref = doc(db, FEED, postId);
+    const snap = await getDoc(ref);
+    if (snap.exists()) {
+      const post = toPost(snap as QueryDocumentSnapshot<DocumentData>);
+      const commentCount = post.commentCount + 1;
+      await updateDoc(ref, { commentCount, forYouScore: calculateForYouScore({ ...post, commentCount }) });
+    }
+    await updateLastActive(comment.uid);
+  } catch (error) {
+    await logError(error, { operation: "creatorFeed.addFeedComment", postId });
+    throw error;
+  }
+}
+
+export async function toggleFeedCommentLike(
+  postId: string,
+  commentId: string,
+  uid: string,
+  currentlyLiked: boolean
+): Promise<void> {
+  try {
+    await updateDoc(doc(feedCommentsCol(postId), commentId), {
+      likes: currentlyLiked ? arrayRemove(uid) : arrayUnion(uid),
+    });
+  } catch (error) {
+    await logError(error, { operation: "creatorFeed.toggleFeedCommentLike", postId, commentId });
+    throw error;
+  }
+}
+
+/** Soft-deletes a comment (same pattern as series comments — the doc stays so any replies under
+ * it keep a parent to render against) and decrements the post's commentCount. */
+export async function deleteFeedComment(postId: string, commentId: string): Promise<void> {
+  try {
+    await updateDoc(doc(feedCommentsCol(postId), commentId), {
+      isDeleted: true,
+      deletedAt: new Date().toISOString(),
+      text: "Comment deleted",
+    });
+    const ref = doc(db, FEED, postId);
+    const snap = await getDoc(ref);
+    if (snap.exists()) {
+      const post = toPost(snap as QueryDocumentSnapshot<DocumentData>);
+      const commentCount = Math.max(0, post.commentCount - 1);
+      await updateDoc(ref, { commentCount, forYouScore: calculateForYouScore({ ...post, commentCount }) });
+    }
+  } catch (error) {
+    await logError(error, { operation: "creatorFeed.deleteFeedComment", postId, commentId });
+    throw error;
+  }
+}
+
+/* ---------------------------- Saved posts (bookmark) ---------------------------- */
+
+function savedPostsCol(uid: string) {
+  return collection(db, "users", uid, "savedPosts");
+}
+
+export async function savePost(uid: string, post: CreatorPost): Promise<void> {
+  try {
+    await setDoc(doc(savedPostsCol(uid), post.id), {
+      postId: post.id,
+      uid: post.uid,
+      displayName: post.displayName,
+      photoURL: post.photoURL ?? null,
+      content: post.content,
+      mediaType: post.mediaType ?? "none",
+      attachments: post.attachments ?? [],
+      videoUrl: post.videoUrl ?? null,
+      videoPosterUrl: post.videoPosterUrl ?? null,
+      savedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    await logError(error, { operation: "creatorFeed.savePost", uid, postId: post.id });
+    throw error;
+  }
+}
+
+export async function unsavePost(uid: string, postId: string): Promise<void> {
+  try {
+    await deleteDoc(doc(savedPostsCol(uid), postId));
+  } catch (error) {
+    await logError(error, { operation: "creatorFeed.unsavePost", uid, postId });
+    throw error;
+  }
+}
+
+export interface SavedPostEntry {
+  postId: string;
+  uid: string;
+  displayName: string;
+  photoURL?: string;
+  content: string;
+  mediaType: CreatorPost["mediaType"];
+  attachments: string[];
+  videoUrl?: string;
+  videoPosterUrl?: string;
+  savedAt: string;
+}
+
+/** Real-time set of postIds the signed-in viewer has saved — one listener per feed session
+ * (mounted once, not per-card) so every TikTokFeedItem's bookmark button can just check
+ * membership instead of each running its own Firestore read. */
+export function subscribeToSavedPostIds(uid: string, callback: (ids: Set<string>) => void): Unsubscribe {
+  return onSnapshot(
+    savedPostsCol(uid),
+    (snap) => callback(new Set(snap.docs.map((d) => d.id))),
+    () => callback(new Set())
+  );
+}
+
+/** Every post the profile's Library tab "Saved Posts" section shows, most-recently-saved first. */
+export async function getSavedPosts(uid: string): Promise<SavedPostEntry[]> {
+  try {
+    const q = query(savedPostsCol(uid), orderBy("savedAt", "desc"));
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => d.data() as SavedPostEntry);
+  } catch (error) {
+    await logError(error, { operation: "creatorFeed.getSavedPosts", uid });
+    return [];
+  }
 }

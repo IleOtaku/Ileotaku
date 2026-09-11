@@ -31,6 +31,9 @@ const TYPE_EMOJI: Record<NotificationType, string> = {
   [NotificationType.GROUP_MENTION]: "📣",
   [NotificationType.OWNERSHIP_TRANSFER_REQUEST]: "🔄",
   [NotificationType.OWNERSHIP_TRANSFER_ACCEPTED]: "✅",
+  [NotificationType.APPEAL_APPROVED]: "🎉",
+  [NotificationType.APPEAL_DENIED]: "🚫",
+  [NotificationType.RESTRICTION_LIFTED]: "🔓",
 };
 
 type GroupLabel = "Today" | "This Week" | "Earlier";

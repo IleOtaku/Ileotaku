@@ -241,6 +241,30 @@ body {
     }
   }
 
+  /* TikTok-style double-tap like animation — bursts up from the tap point, scaling past full
+   * size before settling and fading, then is unmounted (see TikTokFeedItem's setTimeout). */
+  .like-burst {
+    animation: like-burst-pop 700ms ease-out forwards;
+  }
+  @keyframes like-burst-pop {
+    0% {
+      transform: scale(0.3);
+      opacity: 0;
+    }
+    35% {
+      transform: scale(1.15);
+      opacity: 1;
+    }
+    60% {
+      transform: scale(0.95);
+      opacity: 1;
+    }
+    100% {
+      transform: scale(1);
+      opacity: 0;
+    }
+  }
+
   /* Spotify-style three-bar equalizer, shown next to a track name while it's actively playing
    * (NowPlayingCard/SpotifyMiniPlayer, compact mode). Each bar is the same keyframe at a
    * different animation-delay/duration so they don't all bounce in lockstep. */

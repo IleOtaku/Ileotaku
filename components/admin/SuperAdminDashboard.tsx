@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { Shield } from "lucide-react";
 import { getAllUsers } from "@/lib/firestore";
-import { getFeedback } from "@/lib/admin";
+import { getFeedback, subscribeToPendingAppealCount } from "@/lib/admin";
 import { Skeleton, Tabs } from "@/components/ui";
 import type { UserProfile } from "@/types";
 
@@ -13,6 +13,7 @@ import type { UserProfile } from "@/types";
 // other seven out of the bundle until their tab is actually clicked. ssr:false is safe here:
 // this whole dashboard only ever renders for a signed-in admin, well past first paint.
 const AdminAnnouncementsTab = dynamic(() => import("./AdminAnnouncementsTab"), { ssr: false });
+const AdminAppealsTab = dynamic(() => import("./AdminAppealsTab"), { ssr: false });
 const AdminFeedbackTab = dynamic(() => import("./AdminFeedbackTab"), { ssr: false });
 const AdminFeedTab = dynamic(() => import("./AdminFeedTab"), { ssr: false });
 const AdminFinanceTab = dynamic(() => import("./AdminFinanceTab"), { ssr: false });
@@ -29,7 +30,8 @@ type SuperAdminTab =
   | "reports"
   | "announcements"
   | "finance"
-  | "feedback";
+  | "feedback"
+  | "appeals";
 
 export interface SuperAdminDashboardProps {
   adminName: string;
@@ -46,6 +48,7 @@ export default function SuperAdminDashboard({ adminName, isSuperAdmin = true }: 
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
   const [unresolvedFeedback, setUnresolvedFeedback] = useState(0);
+  const [pendingAppeals, setPendingAppeals] = useState(0);
 
   useEffect(() => {
     getAllUsers()
@@ -60,6 +63,11 @@ export default function SuperAdminDashboard({ adminName, isSuperAdmin = true }: 
       .catch(() => setUnresolvedFeedback(0));
   }, [tab]);
 
+  useEffect(() => {
+    if (!isSuperAdmin) return;
+    return subscribeToPendingAppealCount(setPendingAppeals);
+  }, [isSuperAdmin]);
+
   const TABS: { label: string; value: SuperAdminTab }[] = [
     { label: "Overview", value: "overview" },
     { label: "Users", value: "users" },
@@ -69,11 +77,18 @@ export default function SuperAdminDashboard({ adminName, isSuperAdmin = true }: 
     { label: "Announcements", value: "announcements" },
     { label: "Finance", value: "finance" },
     { label: unresolvedFeedback > 0 ? `Feedback (${unresolvedFeedback})` : "Feedback", value: "feedback" },
+    { label: pendingAppeals > 0 ? `Appeals (${pendingAppeals})` : "Appeals", value: "appeals" },
   ];
-  const visibleTabs = isSuperAdmin ? TABS : TABS.filter((t) => t.value !== "finance" && t.value !== "announcements");
+  const visibleTabs = isSuperAdmin
+    ? TABS
+    : TABS.filter((t) => t.value !== "finance" && t.value !== "announcements" && t.value !== "appeals");
 
   function handleUserUpdated(uid: string, patch: Partial<UserProfile>) {
     setUsers((prev) => prev.map((u) => (u.uid === uid ? { ...u, ...patch } : u)));
+  }
+
+  function handleUserDeleted(uid: string) {
+    setUsers((prev) => prev.filter((u) => u.uid !== uid));
   }
 
   return (
@@ -109,7 +124,13 @@ export default function SuperAdminDashboard({ adminName, isSuperAdmin = true }: 
                 ))}
               </div>
             ) : (
-              <UsersTable users={users} loading={false} canManageAdmins={isSuperAdmin} onUserUpdated={handleUserUpdated} />
+              <UsersTable
+                users={users}
+                loading={false}
+                canManageAdmins={isSuperAdmin}
+                onUserUpdated={handleUserUpdated}
+                onUserDeleted={handleUserDeleted}
+              />
             ))}
 
           {tab === "works" && <AdminWorksTab users={users} />}
@@ -123,6 +144,8 @@ export default function SuperAdminDashboard({ adminName, isSuperAdmin = true }: 
           {isSuperAdmin && tab === "finance" && <AdminFinanceTab />}
 
           {tab === "feedback" && <AdminFeedbackTab />}
+
+          {isSuperAdmin && tab === "appeals" && <AdminAppealsTab />}
         </div>
       </section>
     </div>

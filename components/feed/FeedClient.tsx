@@ -3,10 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowUp, Flame, Music, Video, X } from "lucide-react";
-import FeedPostCard from "./FeedPostCard";
+import { ArrowLeft, ArrowUp, Music, Plus, Sparkles, UsersRound } from "lucide-react";
+import TikTokFeedItem from "./TikTokFeedItem";
 import PostComposer from "./PostComposer";
-import { EmptyState, Skeleton, Tabs } from "@/components/ui";
+import FeedSoundToggle from "./FeedSoundToggle";
+import PersonCard from "@/components/search/PersonCard";
+import TrendingSoundsSection, { TrendingSoundsEmpty } from "@/components/explore/TrendingSoundsSection";
+import { Modal } from "@/components/ui";
 import { useAuth } from "@/hooks/useAuth";
 import { getBlockedUsers } from "@/lib/blocking";
 import {
@@ -14,24 +17,42 @@ import {
   getFollowingFeed,
   getForYouFeed,
   subscribeToFeed,
+  subscribeToSavedPostIds,
   type FeedPage,
 } from "@/lib/creatorFeed";
-import type { CreatorPost } from "@/types";
+import { getPopularCreators } from "@/lib/firestore";
+import { getTrendingSounds } from "@/lib/sounds";
+import type { CreatorPost, Sound, UserProfile } from "@/types";
 import type { DocumentData, QueryDocumentSnapshot } from "firebase/firestore";
 
 type FeedTab = "forYou" | "following";
-type Cursor = QueryDocumentSnapshot<DocumentData> | null;
 type FeedFilter = "all" | "hasSound" | "hasVideo" | "africanBeats" | "noSound";
+type Cursor = QueryDocumentSnapshot<DocumentData> | null;
 
 const PAGE_SIZE = 10;
 
 const FEED_FILTERS: { value: FeedFilter; label: string }[] = [
   { value: "all", label: "All" },
-  { value: "hasSound", label: "Has Sound" },
   { value: "hasVideo", label: "Video" },
+  { value: "hasSound", label: "Has Sound" },
   { value: "africanBeats", label: "African Beats" },
   { value: "noSound", label: "No Sound" },
 ];
+
+/** Pulls #hashtag-shaped tokens out of every loaded post's caption and ranks them by frequency —
+ * a lightweight, real-data-derived "Trending Tags" rail rather than a hardcoded list, since this
+ * app has no dedicated hashtag index yet. */
+function trendingTagsFrom(posts: CreatorPost[]): string[] {
+  const counts = new Map<string, number>();
+  for (const post of posts) {
+    const tags = post.content.match(/#\w+/g) ?? [];
+    for (const tag of tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([tag]) => tag);
+}
 
 export default function FeedClient() {
   const { user, profile, loading: authLoading } = useAuth();
@@ -44,19 +65,17 @@ export default function FeedClient() {
   const [hasMore, setHasMore] = useState(true);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [feedFilter, setFeedFilter] = useState<FeedFilter>("all");
-  // A specific sound clicked from Explore's Trending Sounds (?sound=<id>) overrides the chip
-  // row entirely, showing only posts using that exact sound rather than a whole category.
-  const [specificSound, setSpecificSound] = useState<{ id: string; title: string } | null>(null);
-  // Posts a live subscription has seen but not yet shown — surfaced as a "new posts" banner
-  // instead of silently reshuffling the list a reader might be mid-scroll through.
   const [pendingPosts, setPendingPosts] = useState<CreatorPost[]>([]);
-  const sentinelRef = useRef<HTMLDivElement>(null);
-  const followingIds = profile?.following ?? [];
   const [blockedUids, setBlockedUids] = useState<Set<string>>(new Set());
+  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [suggestedCreators, setSuggestedCreators] = useState<UserProfile[]>([]);
+  const [trendingSounds, setTrendingSounds] = useState<Sound[]>([]);
+  const [feedFilter, setFeedFilter] = useState<FeedFilter>("all");
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const followingIds = profile?.following ?? [];
 
-  // Feed queries have no way to exclude an arbitrary per-viewer set of authors, so blocked
-  // users' posts are filtered out client-side, same pattern as CommentSection.
   useEffect(() => {
     if (!user) {
       setBlockedUids(new Set());
@@ -66,23 +85,24 @@ export default function FeedClient() {
   }, [user]);
 
   useEffect(() => {
-    const soundId = searchParams.get("sound");
-    if (soundId) setSpecificSound({ id: soundId, title: "" });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!user) {
+      setSavedIds(new Set());
+      return;
+    }
+    return subscribeToSavedPostIds(user.uid, setSavedIds);
+  }, [user]);
+
+  useEffect(() => {
+    getPopularCreators(6).then(setSuggestedCreators).catch(() => setSuggestedCreators([]));
+    getTrendingSounds(6).then(setTrendingSounds).catch(() => setTrendingSounds([]));
   }, []);
 
-  // Boosts are time-limited — sweeping expired ones on mount keeps the For You ranking honest
-  // without needing a scheduled Cloud Function (this project has none deployed). Gated on
-  // `user` (not just `!authLoading`) since creatorFeed reads require isSignedIn(); a signed-out
-  // visitor would otherwise generate a harmless-but-noisy permission-denied log entry every time
-  // they open /feed for a sweep that only ever benefits authors of boosted posts.
   useEffect(() => {
     if (user) expireBoosts();
   }, [user]);
 
   const visiblePosts = useMemo(() => {
     const unblocked = posts.filter((p) => !blockedUids.has(p.uid));
-    if (specificSound) return unblocked.filter((p) => p.soundId === specificSound.id);
     switch (feedFilter) {
       case "hasSound":
         return unblocked.filter((p) => !!p.soundId);
@@ -95,7 +115,8 @@ export default function FeedClient() {
       default:
         return unblocked;
     }
-  }, [posts, feedFilter, specificSound, blockedUids]);
+  }, [posts, blockedUids, feedFilter]);
+  const trendingTags = useMemo(() => trendingTagsFrom(posts), [posts]);
 
   const loadFirstPage = useCallback(
     async (activeTab: FeedTab) => {
@@ -116,7 +137,6 @@ export default function FeedClient() {
         setLoading(false);
       }
     },
-    // followingIds intentionally compared by identity via profile — re-runs when the profile object changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [profile]
   );
@@ -127,10 +147,6 @@ export default function FeedClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, authLoading, loadFirstPage]);
 
-  // Real-time: watch the newest page of the overall feed and queue anything not already shown
-  // (filtered to followed creators when on the Following tab) into `pendingPosts` rather than
-  // auto-prepending it — a "New posts available" banner lets the reader pull them in on their
-  // own terms instead of the list jumping under them mid-scroll.
   useEffect(() => {
     if (authLoading) return;
     const unsub = subscribeToFeed((latest) => {
@@ -160,7 +176,7 @@ export default function FeedClient() {
       return [...pendingPosts.filter((p) => !knownIds.has(p.id)), ...current];
     });
     setPendingPosts([]);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    scrollContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   async function loadMore() {
@@ -184,13 +200,12 @@ export default function FeedClient() {
 
   useEffect(() => {
     const el = sentinelRef.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting) loadMore();
-      },
-      { rootMargin: "400px" }
-    );
+    const root = scrollContainerRef.current;
+    if (!el || !root) return;
+    const observer = new IntersectionObserver((entries) => entries[0]?.isIntersecting && loadMore(), {
+      root,
+      rootMargin: "200% 0px",
+    });
     observer.observe(el);
     return () => observer.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -200,133 +215,202 @@ export default function FeedClient() {
     setPosts((prev) => prev.filter((p) => p.id !== postId));
   }
 
-  /** The "Be the First" empty state's CTA — scrolls PostComposer into view and opens it. If it's
-   * already expanded this just focuses the textarea directly; if still collapsed, clicking its
-   * "Share an update..." button expands it, which autoFocuses the textarea on its own. */
-  function focusComposer() {
-    const composer = document.getElementById("post-composer");
-    if (!composer) return;
-    composer.scrollIntoView({ behavior: "smooth", block: "center" });
-    const textarea = composer.querySelector<HTMLTextAreaElement>("textarea");
-    if (textarea) {
-      textarea.focus();
-    } else {
-      composer.querySelector<HTMLButtonElement>("button")?.click();
-    }
-  }
-
   return (
-    <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6">
-      <div className="mb-6 flex items-center gap-3">
-        <Flame className="h-6 w-6 text-clay2" />
-        <h1 className="font-cinzel text-2xl text-text">Creator Feed</h1>
-      </div>
-
-      <Tabs
-        tabs={[
-          { label: "For You", value: "forYou" },
-          { label: "Following", value: "following" },
-        ]}
-        value={tab}
-        onChange={(v) => setTab(v as FeedTab)}
-      />
-
-      <div className="mt-6 flex flex-col gap-4">
-        {user && <PostComposer onPosted={() => loadFirstPage(tab)} />}
-
-        {pendingPosts.length > 0 && (
+    <div className="flex h-[100dvh] w-full bg-black">
+      {/* ---------------------------- Left sidebar (desktop) ---------------------------- */}
+      <aside className="hidden w-56 shrink-0 flex-col gap-6 overflow-y-auto border-r border-white/10 p-4 lg:flex">
+        <Link href="/" className="flex items-center gap-1.5 font-cinzel text-lg font-bold text-gold">
+          <ArrowLeft className="h-4 w-4" /> ÍléOtaku
+        </Link>
+        <div className="flex flex-col gap-1">
           <button
             type="button"
-            onClick={showPendingPosts}
-            className="flex items-center justify-center gap-2 self-center rounded-full border border-clay bg-clay/15 px-4 py-1.5 font-noto text-xs font-semibold text-clay2 shadow-lg"
+            onClick={() => setTab("forYou")}
+            className={`rounded-lg px-3 py-2 text-left font-syne text-sm font-semibold ${tab === "forYou" ? "bg-white/10 text-white" : "text-white/50 hover:text-white"}`}
           >
-            <ArrowUp className="h-3.5 w-3.5" />
-            {pendingPosts.length === 1 ? "1 new post" : `${pendingPosts.length} new posts`} — tap to show
+            For You
           </button>
-        )}
+          <button
+            type="button"
+            onClick={() => setTab("following")}
+            className={`rounded-lg px-3 py-2 text-left font-syne text-sm font-semibold ${tab === "following" ? "bg-white/10 text-white" : "text-white/50 hover:text-white"}`}
+          >
+            Following
+          </button>
+        </div>
 
-        {specificSound ? (
-          <div className="flex items-center justify-between gap-3 rounded-full border border-clay/40 bg-clay/10 px-4 py-2">
-            <span className="flex items-center gap-2 font-noto text-xs text-clay2">
-              <Music className="h-3.5 w-3.5" /> Showing posts using this sound
-            </span>
-            <button
-              type="button"
-              onClick={() => setSpecificSound(null)}
-              className="flex items-center gap-1 font-noto text-xs text-muted hover:text-clay2"
-            >
-              <X className="h-3.5 w-3.5" /> Clear
-            </button>
-          </div>
-        ) : (
-          <div className="flex flex-wrap gap-1.5">
+        <div>
+          <p className="mb-2 font-syne text-xs font-bold uppercase tracking-wide text-white/40">Filter</p>
+          <div className="flex flex-col gap-1">
             {FEED_FILTERS.map((f) => (
               <button
                 key={f.value}
                 type="button"
                 onClick={() => setFeedFilter(f.value)}
-                className={`flex items-center gap-1 rounded-full border px-3 py-1 font-noto text-xs transition-colors ${
-                  feedFilter === f.value
-                    ? "border-clay bg-clay/15 text-clay2"
-                    : "border-muted2 bg-bg3 text-muted hover:border-clay"
+                className={`rounded-lg px-3 py-1.5 text-left font-noto text-xs ${
+                  feedFilter === f.value ? "bg-white/10 text-white" : "text-white/40 hover:text-white/70"
                 }`}
               >
-                {f.value === "hasVideo" && <Video className="h-3 w-3" />}
                 {f.label}
               </button>
             ))}
           </div>
+        </div>
+
+        {user && (
+          <button type="button" onClick={() => setComposerOpen(true)} className="btn-primary justify-center text-sm">
+            <Plus className="h-4 w-4" /> Create
+          </button>
+        )}
+      </aside>
+
+      {/* ---------------------------- Center feed column ---------------------------- */}
+      <div className="relative flex flex-1 justify-center overflow-hidden">
+        <div className="absolute right-3 top-3 z-30 flex items-center gap-2 lg:hidden">
+          <FeedSoundToggle />
+        </div>
+        <div className="absolute right-3 top-3 z-30 hidden lg:flex">
+          <FeedSoundToggle />
+        </div>
+
+        {/* Mobile-only top tab row (desktop uses the left sidebar instead). */}
+        <div className="absolute left-1/2 top-3 z-30 flex -translate-x-1/2 gap-1 rounded-full bg-black/40 p-1 backdrop-blur lg:hidden">
+          <button
+            type="button"
+            onClick={() => setTab("forYou")}
+            className={`rounded-full px-3 py-1 font-syne text-xs font-semibold ${tab === "forYou" ? "bg-white text-black" : "text-white/70"}`}
+          >
+            For You
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("following")}
+            className={`rounded-full px-3 py-1 font-syne text-xs font-semibold ${tab === "following" ? "bg-white text-black" : "text-white/70"}`}
+          >
+            Following
+          </button>
+        </div>
+
+        {pendingPosts.length > 0 && (
+          <button
+            type="button"
+            onClick={showPendingPosts}
+            className="absolute top-12 z-30 flex items-center gap-2 self-center rounded-full border border-clay bg-clay px-4 py-1.5 font-noto text-xs font-semibold text-ivory shadow-lg"
+          >
+            <ArrowUp className="h-3.5 w-3.5" />
+            {pendingPosts.length === 1 ? "1 new post" : `${pendingPosts.length} new posts`}
+          </button>
         )}
 
-        {loading ? (
-          <div className="flex flex-col gap-4">
-            {[0, 1, 2].map((i) => (
-              <Skeleton key={i} className="h-40 w-full rounded-2xl" />
-            ))}
-          </div>
-        ) : posts.length === 0 ? (
-          tab === "following" ? (
-            <EmptyState
-              icon={<span className="text-4xl">📭</span>}
-              title="Nobody Here Yet"
-              description="Follow creators to see their posts."
-              action={
-                <Link href="/search?tab=people&filter=creators" className="btn-primary">
-                  Browse Creators
-                </Link>
-              }
-            />
+        <div
+          ref={scrollContainerRef}
+          className="h-full w-full snap-y snap-mandatory overflow-y-scroll md:my-4 md:max-w-[480px] md:rounded-2xl"
+        >
+          {loading ? (
+            <div className="flex h-full w-full items-center justify-center">
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+            </div>
+          ) : visiblePosts.length === 0 ? (
+            <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-6 text-center text-white">
+              {tab === "following" ? (
+                <>
+                  <UsersRound className="h-8 w-8 text-white/50" />
+                  <p className="font-cinzel text-lg">Nobody here yet</p>
+                  <p className="font-noto text-sm text-white/60">Follow creators to see their posts.</p>
+                  <Link href="/search?tab=people&filter=creators" className="btn-primary">
+                    Browse Creators
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-8 w-8 text-white/50" />
+                  <p className="font-cinzel text-lg">Be the first</p>
+                  <p className="font-noto text-sm text-white/60">No posts yet — create one!</p>
+                  {user && (
+                    <button type="button" onClick={() => setComposerOpen(true)} className="btn-primary">
+                      Share an Update
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
           ) : (
-            <EmptyState
-              icon={<span className="text-4xl">🔥</span>}
-              title="Be the First"
-              description="No posts yet — create one!"
-              action={
-                <button type="button" onClick={focusComposer} className="btn-primary">
-                  Share an Update
-                </button>
-              }
-            />
-          )
-        ) : visiblePosts.length === 0 ? (
-          <EmptyState
-            icon={<Music className="h-6 w-6 text-muted" />}
-            title="No posts match this filter"
-            description="Try a different sound filter, or check back once more creators post."
-          />
-        ) : (
-          <>
-            {visiblePosts.map((post) => (
-              <FeedPostCard key={post.id} post={post} onDeleted={handleDeleted} />
-            ))}
-            <div ref={sentinelRef} className="h-1" />
-            {loadingMore && <Skeleton className="h-40 w-full rounded-2xl" />}
-            {!hasMore && posts.length > 0 && (
-              <p className="py-6 text-center font-noto text-xs text-muted">You&apos;re all caught up.</p>
-            )}
-          </>
+            <>
+              {visiblePosts.map((post) => (
+                <TikTokFeedItem key={post.id} post={post} isSaved={savedIds.has(post.id)} onDeleted={handleDeleted} />
+              ))}
+              <div ref={sentinelRef} className="h-1" />
+              {loadingMore && (
+                <div className="flex h-24 items-center justify-center">
+                  <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {user && (
+          <button
+            type="button"
+            onClick={() => setComposerOpen(true)}
+            aria-label="Create post"
+            className="absolute bottom-6 right-4 z-30 flex h-12 w-12 items-center justify-center rounded-full bg-clay text-ivory shadow-2xl lg:hidden"
+          >
+            <Plus className="h-6 w-6" />
+          </button>
         )}
       </div>
+
+      {/* ---------------------------- Right sidebar (desktop) ---------------------------- */}
+      <aside className="hidden w-72 shrink-0 flex-col gap-8 overflow-y-auto border-l border-white/10 p-4 xl:flex">
+        <div>
+          <p className="mb-3 flex items-center gap-1.5 font-syne text-xs font-bold uppercase tracking-wide text-white/50">
+            <Music className="h-3.5 w-3.5" /> Trending Sounds
+          </p>
+          {trendingSounds.length === 0 ? (
+            <div className="text-white/40">
+              <TrendingSoundsEmpty />
+            </div>
+          ) : (
+            <div className="text-white [&_*]:!text-white/90">
+              <TrendingSoundsSection sounds={trendingSounds} />
+            </div>
+          )}
+        </div>
+
+        <div>
+          <p className="mb-3 flex items-center gap-1.5 font-syne text-xs font-bold uppercase tracking-wide text-white/50">
+            <UsersRound className="h-3.5 w-3.5" /> Suggested Creators
+          </p>
+          <div className="flex flex-col gap-3 text-white [&_*]:!text-white/90">
+            {suggestedCreators.slice(0, 4).map((p) => (
+              <PersonCard key={p.uid} person={p} />
+            ))}
+          </div>
+        </div>
+
+        {trendingTags.length > 0 && (
+          <div>
+            <p className="mb-3 font-syne text-xs font-bold uppercase tracking-wide text-white/50">Trending Tags</p>
+            <div className="flex flex-wrap gap-2">
+              {trendingTags.map((tag) => (
+                <span key={tag} className="rounded-full bg-white/10 px-3 py-1 font-noto text-xs text-white/80">
+                  {tag}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </aside>
+
+      <Modal open={composerOpen} onClose={() => setComposerOpen(false)} title="Create Post">
+        <PostComposer
+          onPosted={() => {
+            setComposerOpen(false);
+            loadFirstPage(tab);
+          }}
+        />
+      </Modal>
     </div>
   );
 }

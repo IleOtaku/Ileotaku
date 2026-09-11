@@ -5,9 +5,11 @@ import {
   doc,
   getDoc,
   getDocs,
+  onSnapshot,
   serverTimestamp,
   setDoc,
   updateDoc,
+  type Unsubscribe,
 } from "firebase/firestore";
 import { logError } from "./errorLogger";
 import { db } from "./firebase";
@@ -96,4 +98,17 @@ export async function getBlockedUsers(uid: string): Promise<string[]> {
     await logError(error, { operation: "blocking.getBlockedUsers", uid });
     return [];
   }
+}
+
+/** Real-time version of getBlockedUsers — used by the Settings tab's Blocked Users section so
+ * unblocking (from there or anywhere else) removes the row immediately without a manual refetch. */
+export function subscribeToBlockedUsers(
+  uid: string,
+  callback: (entries: BlockedUser[]) => void
+): Unsubscribe {
+  return onSnapshot(
+    collection(db, USERS, uid, BLOCKED),
+    (snap) => callback(snap.docs.map((d) => ({ ...(d.data() as BlockedUser), targetUid: d.id }))),
+    () => callback([])
+  );
 }

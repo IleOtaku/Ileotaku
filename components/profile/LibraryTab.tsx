@@ -1,16 +1,30 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { BookOpen } from "lucide-react";
+import { BookOpen, Bookmark } from "lucide-react";
 import DownloadsSection from "@/components/profile/DownloadsSection";
 import { EmptyState, Skeleton } from "@/components/ui";
 import { useAuth } from "@/hooks/useAuth";
 import { useMangaSummaries } from "@/hooks/useMangaSummaries";
+import { getSavedPosts, type SavedPostEntry } from "@/lib/creatorFeed";
 import { proxyImg } from "@/lib/manga-api";
 
-/** Currently Reading (real per-manga progress) plus a Bookmarked grid fetched from readingList. */
+/** Currently Reading (real per-manga progress), a Bookmarked grid fetched from readingList, and
+ * Saved Posts (feed posts bookmarked from the TikTok-style feed). */
 export default function LibraryTab() {
-  const { profile } = useAuth();
+  const { user, profile } = useAuth();
+  const [savedPosts, setSavedPosts] = useState<SavedPostEntry[] | null>(null);
+
+  useEffect(() => {
+    if (!user) {
+      setSavedPosts([]);
+      return;
+    }
+    getSavedPosts(user.uid)
+      .then(setSavedPosts)
+      .catch(() => setSavedPosts([]));
+  }, [user]);
   const readingProgress = profile?.readingProgress ?? {};
   // Most-recently-updated entry is "the one you're actively reading" — it gets the Now Reading badge.
   const currentlyReading = Object.entries(readingProgress).sort((a, b) =>
@@ -103,6 +117,53 @@ export default function LibraryTab() {
                   />
                 </div>
                 <p className="mt-2 truncate font-syne text-xs font-semibold text-text">{item.title}</p>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <h3 className="mb-4 flex items-center gap-2 font-syne text-sm font-semibold text-text">
+          <Bookmark className="h-4 w-4" /> Saved Posts
+        </h3>
+        {savedPosts === null ? (
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            {[0, 1, 2, 3].map((i) => (
+              <Skeleton key={i} className="aspect-[3/4] rounded-xl" />
+            ))}
+          </div>
+        ) : savedPosts.length === 0 ? (
+          <EmptyState
+            icon={<Bookmark className="h-6 w-6 text-muted" />}
+            title="No Saved Posts"
+            description="Bookmark a post from the feed to find it here."
+            action={
+              <Link href="/feed" className="btn-primary">
+                Go to Feed
+              </Link>
+            }
+          />
+        ) : (
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            {savedPosts.map((post) => (
+              <Link key={post.postId} href={`/feed/${post.postId}`} className="group overflow-hidden rounded-xl border border-bg4 bg-bg2">
+                <div className="aspect-[3/4] overflow-hidden bg-bg3">
+                  {post.videoPosterUrl || post.attachments[0] ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      loading="lazy"
+                      src={proxyImg(post.videoPosterUrl || post.attachments[0])}
+                      alt=""
+                      className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center p-3 text-center font-noto text-xs text-muted">
+                      {post.content.slice(0, 60)}
+                    </div>
+                  )}
+                </div>
+                <p className="truncate p-2 font-noto text-[11px] text-muted">{post.displayName}</p>
               </Link>
             ))}
           </div>

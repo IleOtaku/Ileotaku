@@ -990,12 +990,19 @@ export default function MessagesClient() {
                       )}
                       {otherUid && <SpotifyMiniPlayer uid={otherUid} />}
                     </div>
-                    {otherUid && !blockedByMe && (
+                    {otherUid && !blockingMe && (
                       <BlockButton
                         targetUid={otherUid}
                         targetLabel={otherName}
                         compact
                         onBlocked={() => setBlockedUids((s) => new Set(s).add(otherUid))}
+                        onUnblocked={() =>
+                          setBlockedUids((s) => {
+                            const next = new Set(s);
+                            next.delete(otherUid);
+                            return next;
+                          })
+                        }
                       />
                     )}
                   </>
@@ -1206,9 +1213,22 @@ export default function MessagesClient() {
               </div>
 
               {conversationBlocked ? (
-                <div className="flex shrink-0 items-center justify-center gap-2 border-t border-bg4 p-4 font-noto text-sm text-muted">
+                <div className="flex shrink-0 flex-wrap items-center justify-center gap-2 border-t border-bg4 p-4 font-noto text-sm text-muted">
                   <ShieldOff className="h-4 w-4" />
                   {blockedByMe ? "You've blocked this user." : "You can't message this person."}
+                  {blockedByMe && otherUid && (
+                    <BlockButton
+                      targetUid={otherUid}
+                      targetLabel={otherName}
+                      onUnblocked={() =>
+                        setBlockedUids((s) => {
+                          const next = new Set(s);
+                          next.delete(otherUid);
+                          return next;
+                        })
+                      }
+                    />
+                  )}
                 </div>
               ) : (
                 <div className="relative shrink-0 border-t border-bg4">

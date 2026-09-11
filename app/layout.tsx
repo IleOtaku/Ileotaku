@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Toaster } from "react-hot-toast";
 import PropellerAdsScript from "@/components/ads/PropellerAdsScript";
 import AuthProvider from "@/components/layout/AuthProvider";
+import BannedGate from "@/components/layout/BannedGate";
 import BetaFeedback from "@/components/layout/BetaFeedback";
 import ErrorBoundary from "@/components/layout/ErrorBoundary";
 import InstallPrompt from "@/components/layout/InstallPrompt";
@@ -99,7 +100,9 @@ export default function RootLayout({
             <BetaFeedback />
             <FeedAudioProvider>
               <MaintenanceGate>
-                <SiteChrome>{children}</SiteChrome>
+                <BannedGate>
+                  <SiteChrome>{children}</SiteChrome>
+                </BannedGate>
               </MaintenanceGate>
               <InstallPrompt />
               <NotificationPrompt />

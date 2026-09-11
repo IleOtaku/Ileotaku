@@ -78,7 +78,7 @@ export default async function CreatorProfilePage({ params }: CreatorProfilePageP
       : "—";
 
   return (
-    <BlockedContentGate targetUid={creator.uid}>
+    <BlockedContentGate targetUid={creator.uid} targetLabel={creator.handle ?? creator.displayName}>
     <div className="relative">
       <div
         className="relative h-48 w-full overflow-hidden bg-bg2 sm:h-64"

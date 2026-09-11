@@ -57,13 +57,24 @@ function WorkCardGrid({
   works,
   emptyText,
   accent,
+  showCta,
 }: {
   works: PublishedSeries[];
   emptyText: string;
   accent?: "plat";
+  showCta?: boolean;
 }) {
   if (works.length === 0) {
-    return <p className="rounded-2xl border border-dashed border-muted2 p-8 text-center font-noto text-sm text-muted">{emptyText}</p>;
+    return (
+      <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-muted2 p-8 text-center">
+        <p className="font-noto text-sm text-muted">{emptyText}</p>
+        {showCta && (
+          <Link href="/creator" className="btn-primary text-sm">
+            Become a Creator
+          </Link>
+        )}
+      </div>
+    );
   }
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -206,7 +217,7 @@ export default async function ExplorePage() {
       <Reveal>
         <section className="mb-16">
           <SectionHeader eyebrow="⭐ Featured Creator Works" title="Hand-picked by our editors" viewAllHref="/search" />
-          <WorkCardGrid works={featuredWorks} emptyText="No featured works yet — check back soon." />
+          <WorkCardGrid works={featuredWorks} emptyText="No featured works yet — check back soon." showCta />
         </section>
       </Reveal>
 
@@ -222,7 +233,7 @@ export default async function ExplorePage() {
       <Reveal>
         <section className="mb-16">
           <SectionHeader eyebrow="📖 Latest Prose Stories" title="Text-first tales, chapter by chapter" viewAllHref="/search?tab=works&format=prose" />
-          <WorkCardGrid works={latestProse} emptyText="No prose stories published yet — be the first creator to publish one!" accent="plat" />
+          <WorkCardGrid works={latestProse} emptyText="No prose stories published yet — be the first creator to publish one!" accent="plat" showCta />
         </section>
       </Reveal>
 

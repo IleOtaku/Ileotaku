@@ -22,11 +22,13 @@ interface FloatingCard {
   bottom?: string;
 }
 
+// Purely decorative — labeled by format, not by any specific (real or placeholder) title, since
+// this hero renders for every visitor regardless of what's actually been published yet.
 const FLOATING_CARDS: FloatingCard[] = [
-  { title: "Kobo's Ascent", color: "from-clay to-clay2", rotate: -8, top: "6%", left: "4%" },
-  { title: "Zuri & the Ember Court", color: "from-green to-green2", rotate: 6, top: "16%", right: "3%" },
-  { title: "Ọba's Shadow", color: "from-gold to-gold2", rotate: -4, bottom: "10%", left: "9%" },
-  { title: "Nairobi Nights", color: "from-plat to-plat2", rotate: 10, bottom: "5%", right: "7%" },
+  { title: "Manga", color: "from-clay to-clay2", rotate: -8, top: "6%", left: "4%" },
+  { title: "Manhwa", color: "from-green to-green2", rotate: 6, top: "16%", right: "3%" },
+  { title: "Prose", color: "from-gold to-gold2", rotate: -4, bottom: "10%", left: "9%" },
+  { title: "Original", color: "from-plat to-plat2", rotate: 10, bottom: "5%", right: "7%" },
 ];
 
 /** Landing hero: full pitch for logged-out visitors, a personalised "keep reading" prompt for members. */

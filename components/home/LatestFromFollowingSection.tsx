@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { UsersRound } from "lucide-react";
 import { proxyImg } from "@/lib/manga-api";
 import { getLatestFromFollowing } from "@/lib/publishedSeries";
 import type { PublishedSeries } from "@/types";
@@ -11,9 +12,7 @@ export interface LatestFromFollowingSectionProps {
 }
 
 /** Home feed's "Latest from Creators You Follow" — every published work (manga or prose) by an
- * author the signed-in reader follows, newest first. Hidden entirely (parent doesn't render this
- * section) once there's nothing to show, rather than rendering an empty-state card here — a
- * reader following nobody yet already sees plenty else on Home. */
+ * author the signed-in reader follows, newest first. */
 export default function LatestFromFollowingSection({ followingUids }: LatestFromFollowingSectionProps) {
   const [items, setItems] = useState<PublishedSeries[] | null>(null);
 
@@ -45,7 +44,20 @@ export default function LatestFromFollowingSection({ followingUids }: LatestFrom
     );
   }
 
-  if (items.length === 0) return null;
+  if (items.length === 0) {
+    return (
+      <div className="flex items-center gap-3 rounded-2xl border border-dashed border-muted2 px-4 py-6 font-noto text-sm text-muted">
+        <UsersRound className="h-5 w-5 shrink-0" />
+        <span>
+          Follow creators to see their latest works —{" "}
+          <Link href="/search?tab=people&filter=creators" className="text-gold hover:underline">
+            find some to follow
+          </Link>
+          .
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div className="flex gap-4 overflow-x-auto pb-2">

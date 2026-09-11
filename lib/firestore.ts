@@ -521,6 +521,16 @@ function commentsCollection(mangaId: string, chapterId?: string) {
     : collection(db, SERIES, mangaId, "comments");
 }
 
+/** Live series-wide comment count (never chapter-scoped) — the manga detail page's header
+ * stats strip subscribes to this for "💬 N comments", updating the instant anyone posts. */
+export function subscribeToCommentsCount(mangaId: string, callback: (count: number) => void): Unsubscribe {
+  return onSnapshot(
+    commentsCollection(mangaId),
+    (snap) => callback(snap.size),
+    () => callback(0)
+  );
+}
+
 /** Real-time listener on the most recent `take` comments, newest first. */
 export function subscribeToComments(
   mangaId: string,
@@ -620,6 +630,20 @@ export async function getUserRating(
 export async function getRatings(seriesId: string): Promise<SeriesRating[]> {
   const snap = await getDocs(ratingsCollection(seriesId));
   return snap.docs.map((d) => d.data() as SeriesRating);
+}
+
+/** Live listener on every rating for one series — RatingWidget subscribes to this so the
+ * average/count/distribution (all computed client-side from the raw list, per Part 3's spec)
+ * update the instant a new rating comes in, star display included, with no manual refresh. */
+export function subscribeToRatings(
+  seriesId: string,
+  callback: (ratings: SeriesRating[]) => void
+): Unsubscribe {
+  return onSnapshot(
+    ratingsCollection(seriesId),
+    (snap) => callback(snap.docs.map((d) => d.data() as SeriesRating)),
+    () => callback([])
+  );
 }
 
 /** Upserts the caller's rating (one per user, keyed by uid) and recomputes the series' average

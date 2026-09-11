@@ -12,11 +12,18 @@ import Navbar from "./Navbar";
  *                back/nav controls rather than the global navbar + footer squeezed around it
  * - /story/*   — the prose reader, same reasoning (its own sticky header + reading-theme
  *                background, which a global navbar bar would visually clash with)
+ * - /banned    — the full-page ban notice, which shouldn't offer normal site navigation away
+ *                from itself
  */
 export default function SiteChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isImmersiveRoute =
-    pathname?.startsWith("/auth") || pathname?.startsWith("/reader") || pathname?.startsWith("/story") || false;
+    pathname?.startsWith("/auth") ||
+    pathname?.startsWith("/reader") ||
+    pathname?.startsWith("/story") ||
+    pathname?.startsWith("/banned") ||
+    pathname?.startsWith("/feed") ||
+    false;
 
   if (isImmersiveRoute) {
     return <>{children}</>;

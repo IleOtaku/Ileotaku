@@ -153,6 +153,12 @@ service cloud.firestore {
         allow read: if isSignedIn();
         allow write: if isOwner(uid) || isAdmin();
       }
+
+      // Bookmarked feed posts (profile Library tab's "Saved Posts" section) — never readable by
+      // anyone but their own owner, same shape as `drafts` above.
+      match /savedPosts/{postId} {
+        allow read, write: if isOwner(uid);
+      }
     }
 
     // ---------------------------- Spotify Listen Along (Sprint 9d) ----------------------------
@@ -493,19 +499,35 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.forYouEligible == computedForYouEligible();
-      // Beyond the post's own author (full edit rights) and an admin (moderation), two narrow
+      // Beyond the post's own author (full edit rights) and an admin (moderation), narrow
       // any-signed-in-user carve-outs mirror what the client actually writes without its own
-      // uid: liking someone else's post (`likes` only — comments already use this pattern), and
-      // incrementViewCount()/trackWatchTime() bumping a post's view/watch stats plus the
-      // forYouScore that write recomputes in the same call (`viewCount`/`watchTime`/
-      // `forYouScore` only — never touched alongside anything else, by design).
+      // uid: liking someone else's post (`likes` only — comments already use this pattern);
+      // incrementViewCount()/trackWatchTime()/trackVideoCompleted()/trackVideoReplay()/
+      // trackProfileVisit()/trackShare() bumping a post's engagement counters plus the
+      // forYouScore each recomputes in the same call; and addFeedComment()/deleteFeedComment()
+      // bumping `commentCount` (also alongside forYouScore).
       allow update: if isSignedIn()
         && (resource.data.uid == request.auth.uid
           || isAdmin()
           || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["likes"])
           || request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(["viewCount", "watchTime", "forYouScore"]));
+              .hasOnly(["viewCount", "watchTime", "forYouScore", "completedViews", "replayCount",
+                "profileVisits", "shareCount", "commentCount"]));
       allow delete: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+
+      // ---------------------------- feed post comments ----------------------------
+      // Same threaded-comment shape as series comments (top-level + one level of replies via
+      // `parentId`, soft-delete, like-toggle carve-out) — see components/social/CommentSection.tsx
+      // and lib/firestore.ts's postComment()/toggleCommentLike() for the pattern this mirrors.
+      match /comments/{commentId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
+        allow update: if isSignedIn()
+          && (resource.data.uid == request.auth.uid
+            || isAdmin()
+            || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["likes"]));
+        allow delete: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      }
     }
 
     // ---------------------------- manga engagement stats (Sprint 9c) ----------------------------
@@ -572,6 +594,39 @@ service cloud.firestore {
       allow update: if isSignedIn()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["viewedBy"]);
       allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    // ---------------------------- ban appeals (Part 5) ----------------------------
+    // One doc per uid — a fresh appeal overwrites any previous one (setDoc, not addDoc), so a
+    // denied appellant can submit again later without piling up documents. The account submits
+    // its own appeal (always starting "pending" — it can't self-approve by writing any other
+    // status), and only an admin may transition it to "approved"/"denied".
+    match /appeals/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow create: if isOwner(uid)
+        && request.resource.data.uid == uid
+        && request.resource.data.status == "pending";
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ---------------------------- admin: account deletion audit log ----------------------------
+    // Written only by app/api/admin/delete-user/route.ts using the Admin SDK (which bypasses
+    // these rules entirely) — this match exists only so a client-side admin read of the log
+    // (e.g. a future "recently deleted" list) has somewhere to point; no client ever writes here.
+    match /deletedAccounts/{entryId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // ---------------------------- work bookmarks (Part 3) ----------------------------
+    // Dedicated `bookmarks/{workId}/users/{uid}` subcollection (rather than scanning `users` for
+    // readingList array-contains) so the manga detail page's live bookmark count can subscribe
+    // to one small, cheap collection instead of a project-wide query. Each doc's id is written
+    // by, and only ever removable by, the uid it's keyed under.
+    match /bookmarks/{workId}/users/{uid} {
+      allow read: if true;
+      allow write: if isOwner(uid);
     }
 
     // Deny everything else by default.

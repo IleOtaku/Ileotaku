@@ -10,7 +10,7 @@ import { createFeedback } from "@/lib/admin";
 import { logError } from "@/lib/errorLogger";
 import type { BetaFeedbackType } from "@/types";
 
-const BETA_CUTOFF = new Date("2025-11-01");
+const BETA_CUTOFF = new Date("2026-11-01");
 
 const TYPES: { value: BetaFeedbackType; label: string }[] = [
   { value: "bug", label: "🐛 Bug" },

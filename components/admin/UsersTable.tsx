@@ -14,19 +14,22 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import {
-  adminDeleteUserData,
+  adminDeleteUserAccount,
   grantPlatinum,
+  liftSuspension,
   makeCreator,
   makePublisher,
   permanentlyBanUser,
   removeAdminRole,
   revokePlatinum,
   suspendUserFor,
+  unbanUser,
   verifyCreator,
   verifyPublisher,
 } from "@/lib/admin";
 import { Modal, Skeleton } from "@/components/ui";
 import { Avatar } from "@/components/ui/Avatar";
+import { useAuth } from "@/hooks/useAuth";
 import { getUserProfileUrl } from "@/lib/utils";
 import type { UserProfile } from "@/types";
 import AddAdminRoleModal from "./AddAdminRoleModal";
@@ -45,6 +48,10 @@ export interface UsersTableProps {
    * from the dropdown and disables the "Admin" role badge from being editable at all. */
   canManageAdmins?: boolean;
   onUserUpdated: (uid: string, patch: Partial<UserProfile>) => void;
+  /** Fired after a successful server-side account deletion — the row should disappear from the
+   * table entirely (unlike onUserUpdated's in-place patch), since the account no longer exists
+   * at all, Auth credential included. */
+  onUserDeleted: (uid: string) => void;
 }
 
 const PAGE_SIZE = 20;
@@ -58,6 +65,8 @@ type PendingAction =
   | "verify-publisher"
   | "suspend"
   | "ban"
+  | "unban"
+  | "lift-suspension"
   | "remove-admin"
   | "delete-account";
 
@@ -94,7 +103,8 @@ function RoleBadges({ user }: { user: UserProfile }) {
  * actions, and 20-per-page pagination. All moderation writes go through lib/admin.ts and patch
  * the parent's user list in place via onUserUpdated rather than triggering a full refetch.
  */
-export default function UsersTable({ users, loading, canManageAdmins = true, onUserUpdated }: UsersTableProps) {
+export default function UsersTable({ users, loading, canManageAdmins = true, onUserUpdated, onUserDeleted }: UsersTableProps) {
+  const { user: currentAdmin } = useAuth();
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [openMenuUid, setOpenMenuUid] = useState<string | null>(null);
@@ -105,6 +115,7 @@ export default function UsersTable({ users, loading, canManageAdmins = true, onU
   const [permBanUser, setPermBanUser] = useState<UserProfile | null>(null);
   const [banReason, setBanReason] = useState("");
   const [deleteUserTarget, setDeleteUserTarget] = useState<UserProfile | null>(null);
+  const [deleteConfirmEmail, setDeleteConfirmEmail] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
 
   // The dropdown is rendered via a portal to <body> (see UserActionsMenu below) so it's never
@@ -183,15 +194,17 @@ export default function UsersTable({ users, loading, canManageAdmins = true, onU
   }
 
   async function handleConfirmDelete() {
-    if (!deleteUserTarget) return;
+    if (!deleteUserTarget || !currentAdmin) return;
+    if (deleteConfirmEmail.trim().toLowerCase() !== (deleteUserTarget.email ?? "").toLowerCase()) return;
     setPending({ uid: deleteUserTarget.uid, action: "delete-account" });
     try {
-      await adminDeleteUserData(deleteUserTarget.uid);
-      onUserUpdated(deleteUserTarget.uid, { displayName: "[Deleted Account]" });
-      toast.success("Account data deleted.");
+      await adminDeleteUserAccount(deleteUserTarget.uid, currentAdmin.uid);
+      onUserDeleted(deleteUserTarget.uid);
+      toast.success("Account deleted.");
       setDeleteUserTarget(null);
-    } catch {
-      toast.error("That account's data couldn't be fully deleted.");
+      setDeleteConfirmEmail("");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "That account couldn't be deleted.");
     } finally {
       setPending(null);
     }
@@ -415,6 +428,22 @@ export default function UsersTable({ users, loading, canManageAdmins = true, onU
                 )}
 
                 <div className="my-1 border-t border-bg4" />
+                {u.isBanned && (
+                  <MenuItem
+                    onClick={() => runAction(u, "unban", () => unbanUser(u.uid), { isBanned: false, suspendedUntil: undefined })}
+                  >
+                    Unban @{u.handle ?? u.displayName}
+                  </MenuItem>
+                )}
+                {!u.isBanned && u.suspendedUntil && new Date(u.suspendedUntil) > new Date() && (
+                  <MenuItem
+                    onClick={() =>
+                      runAction(u, "lift-suspension", () => liftSuspension(u.uid), { suspendedUntil: undefined })
+                    }
+                  >
+                    Lift Suspension
+                  </MenuItem>
+                )}
                 <MenuItem
                   danger
                   onClick={() => {
@@ -514,29 +543,52 @@ export default function UsersTable({ users, loading, canManageAdmins = true, onU
         </div>
       </Modal>
 
-      <Modal open={deleteUserTarget !== null} onClose={() => setDeleteUserTarget(null)} title="Delete Account">
+      <Modal
+        open={deleteUserTarget !== null}
+        onClose={() => {
+          setDeleteUserTarget(null);
+          setDeleteConfirmEmail("");
+        }}
+        title="Delete Account"
+      >
         <p className="mb-3 font-noto text-sm text-muted">
           This permanently deletes{" "}
-          <span className="font-semibold text-text">{deleteUserTarget?.displayName}</span>&apos;s profile, posts,
-          history, and other Firestore data. This cannot be undone.
+          <span className="font-semibold text-text">{deleteUserTarget?.displayName}</span>&apos;s account —
+          Firebase Auth credential, profile, posts, history, and every other piece of Firestore
+          data. This cannot be undone and they will no longer be able to sign in at all.
         </p>
-        <p className="mb-4 rounded-lg border border-yellow-900/40 bg-yellow-950/20 p-3 font-noto text-xs text-yellow-200">
-          Note: this only erases their app data — it does not revoke their login credentials
-          (a client-only limitation of this Firebase setup, no server-side Admin SDK is
-          available). Combine with a Permanent Ban if they must also be locked out from signing
-          back in.
-        </p>
-        <div className="flex justify-end gap-2">
-          <button type="button" onClick={() => setDeleteUserTarget(null)} className="btn-ghost">
+        <label htmlFor="delete-confirm-email" className="mb-1.5 block font-noto text-xs text-muted">
+          Type <span className="font-semibold text-text">{deleteUserTarget?.email}</span> to confirm
+        </label>
+        <input
+          id="delete-confirm-email"
+          value={deleteConfirmEmail}
+          onChange={(e) => setDeleteConfirmEmail(e.target.value)}
+          placeholder={deleteUserTarget?.email}
+          autoComplete="off"
+          className="input-base w-full"
+        />
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setDeleteUserTarget(null);
+              setDeleteConfirmEmail("");
+            }}
+            className="btn-ghost"
+          >
             Cancel
           </button>
           <button
             type="button"
             onClick={handleConfirmDelete}
-            disabled={pending !== null}
-            className="rounded-lg bg-red-900 px-4 py-2 font-syne text-sm font-semibold text-red-100 hover:bg-red-800 disabled:opacity-50"
+            disabled={
+              pending !== null ||
+              deleteConfirmEmail.trim().toLowerCase() !== (deleteUserTarget?.email ?? "").toLowerCase()
+            }
+            className="rounded-lg bg-red-900 px-4 py-2 font-syne text-sm font-semibold text-red-100 hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {pending?.action === "delete-account" ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete Account Data"}
+            {pending?.action === "delete-account" ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete Account"}
           </button>
         </div>
       </Modal>

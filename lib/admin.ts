@@ -11,6 +11,7 @@ import {
   collection,
   collectionGroup,
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -32,6 +33,8 @@ import {
   type AdminType,
   type Announcement,
   type AnnouncementTarget,
+  type Appeal,
+  type AppealStatus,
   type BetaFeedbackEntry,
   type BetaFeedbackType,
   type BugReport,
@@ -205,22 +208,137 @@ export async function permanentlyBanUser(
   }
 }
 
+/** Admin Users table's "Unban" action (a red/banned row) — lifts a permanent ban outright and
+ * notifies the account. Distinct from an appeal's own approveAppeal() below only in copy (this
+ * is a plain restriction-lifted notice, not "your appeal was approved"), since a ban can be
+ * lifted either through the appeal flow or directly by an admin working the Users table. */
+export async function unbanUser(uid: string): Promise<void> {
+  try {
+    await updateDoc(doc(db, USERS, uid), {
+      isBanned: false,
+      suspendedUntil: deleteField(),
+      updatedAt: new Date().toISOString(),
+    });
+    await createNotification(
+      uid,
+      NotificationType.RESTRICTION_LIFTED,
+      "Account restored",
+      "Your account restriction has been lifted.",
+      "/profile"
+    );
+  } catch (error) {
+    await logError(error, { operation: "unbanUser", uid });
+    throw error;
+  }
+}
+
+/** Admin Users table's "Lift Suspension" action (a yellow/suspended row) — clears a temporary
+ * suspension before it would have expired on its own. */
+export async function liftSuspension(uid: string): Promise<void> {
+  try {
+    await updateDoc(doc(db, USERS, uid), {
+      suspendedUntil: deleteField(),
+      updatedAt: new Date().toISOString(),
+    });
+    await createNotification(
+      uid,
+      NotificationType.RESTRICTION_LIFTED,
+      "Suspension lifted",
+      "Your account restriction has been lifted.",
+      "/profile"
+    );
+  } catch (error) {
+    await logError(error, { operation: "liftSuspension", uid });
+    throw error;
+  }
+}
+
+/* ============================== Ban appeals (Part 5) ============================== */
+
+const APPEALS = "appeals";
+
+/** Every submitted appeal, newest first — powers the Super Admin dashboard's Appeals tab. */
+export async function getAppeals(): Promise<Appeal[]> {
+  try {
+    const q = query(collection(db, APPEALS), orderBy("submittedAt", "desc"));
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Appeal);
+  } catch (error) {
+    await logError(error, { operation: "getAppeals" });
+    return [];
+  }
+}
+
+/** Real-time count of still-pending appeals, for the Appeals tab's unread badge. */
+export function subscribeToPendingAppealCount(callback: (count: number) => void): Unsubscribe {
+  const q = query(collection(db, APPEALS), where("status", "==", "pending"));
+  return onSnapshot(q, (snap) => callback(snap.size), () => callback(0));
+}
+
+async function resolveAppeal(appealId: string, uid: string, status: AppealStatus, adminUid: string): Promise<void> {
+  await updateDoc(doc(db, APPEALS, appealId), {
+    status,
+    reviewedAt: new Date().toISOString(),
+    reviewedBy: adminUid,
+  });
+  if (status === "approved") {
+    await updateDoc(doc(db, USERS, uid), {
+      isBanned: false,
+      suspendedUntil: deleteField(),
+      updatedAt: new Date().toISOString(),
+    });
+    await createNotification(
+      uid,
+      NotificationType.APPEAL_APPROVED,
+      "Appeal approved",
+      "Your appeal was approved — welcome back!",
+      "/profile"
+    );
+  } else {
+    await createNotification(
+      uid,
+      NotificationType.APPEAL_DENIED,
+      "Appeal reviewed",
+      "Your appeal was reviewed and denied.",
+      "/banned"
+    );
+  }
+}
+
+/** Approves a ban appeal: unbans the account (clearing both isBanned and any lingering
+ * suspension) and notifies them. */
+export async function approveAppeal(appealId: string, uid: string, adminUid: string): Promise<void> {
+  try {
+    await resolveAppeal(appealId, uid, "approved", adminUid);
+  } catch (error) {
+    await logError(error, { operation: "approveAppeal", appealId, uid });
+    throw error;
+  }
+}
+
+/** Denies a ban appeal: the ban stays in place, the account is notified of the outcome. */
+export async function denyAppeal(appealId: string, uid: string, adminUid: string): Promise<void> {
+  try {
+    await resolveAppeal(appealId, uid, "denied", adminUid);
+  } catch (error) {
+    await logError(error, { operation: "denyAppeal", appealId, uid });
+    throw error;
+  }
+}
+
 /**
+ * SUPERSEDED by adminDeleteUserAccount() below, which also removes the Firebase Auth account via
+ * app/api/admin/delete-user/route.ts's Admin SDK call. Kept only as the Firestore-only half that
+ * route's own cleanup logic mirrors; the admin Users table calls adminDeleteUserAccount(), not
+ * this, for its "Delete Account" action.
+ *
  * Erases an account's Firestore data — mirrors lib/auth.ts's deleteMyAccount pipeline (every
  * subcollection, their creatorFeed posts, then the profile doc itself) but for an admin acting
  * on SOMEONE ELSE's account.
  *
- * IMPORTANT LIMITATION: this does NOT delete the person's Firebase Auth account. Firebase's
- * client SDK can only ever call deleteUser() on whichever account is CURRENTLY signed into this
- * browser session — there's no client-side way to delete a different uid's Auth record; that
- * requires the Admin SDK running server-side (a Cloud Function), which this project doesn't
- * have (see lib/firebase.ts's comment on the Firebase plan having no Storage bucket either — no
- * Blaze/billing account is attached). Practically: the account's data and access to anything
- * that reads a profile doc are gone, but the bare email/password credential still exists and
- * can sign in again — landing on a freshly-recreated blank profile per lib/auth.ts's
- * signInEmail/signInSocial backfill behavior, same as any first-time signup. Surfaced in the
- * admin UI's confirmation copy rather than silently promising a full account deletion this
- * client-only setup can't actually deliver.
+ * IMPORTANT LIMITATION: this does NOT delete the person's Firebase Auth account — the client SDK
+ * can only ever call deleteUser() on whichever account is CURRENTLY signed into this browser
+ * session. That's exactly the gap adminDeleteUserAccount()'s server route closes.
  */
 export async function adminDeleteUserData(uid: string): Promise<void> {
   const USER_SUBCOLLECTIONS = [
@@ -252,6 +370,26 @@ export async function adminDeleteUserData(uid: string): Promise<void> {
     await deleteDoc(doc(db, USERS, uid));
   } catch (error) {
     await logError(error, { operation: "adminDeleteUserData", uid });
+    throw error;
+  }
+}
+
+/**
+ * Deletes a user's account entirely — Firebase Auth credential included — via
+ * app/api/admin/delete-user/route.ts's server-side Admin SDK call. This is the real fix for
+ * adminDeleteUserData()'s limitation: the person can no longer sign back in at all, not just
+ * land on a freshly-recreated blank profile.
+ */
+export async function adminDeleteUserAccount(targetUid: string, adminUid: string): Promise<void> {
+  const res = await fetch("/api/admin/delete-user", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ targetUid, adminUid }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const error = new Error(body?.error ?? "Couldn't delete this account.");
+    await logError(error, { operation: "adminDeleteUserAccount", targetUid, adminUid, status: res.status });
     throw error;
   }
 }

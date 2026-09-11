@@ -5,6 +5,7 @@ import Link from "next/link";
 import toast from "react-hot-toast";
 import { BookmarkCheck, BookmarkPlus, Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { addBookmark } from "@/lib/bookmarks";
 import { addToReadingList } from "@/lib/firestore";
 
 export interface AddToLibraryButtonProps {
@@ -23,7 +24,7 @@ export default function AddToLibraryButton({ mangaId }: AddToLibraryButtonProps)
     if (!user) return;
     setSaving(true);
     try {
-      await addToReadingList(user.uid, mangaId);
+      await Promise.all([addToReadingList(user.uid, mangaId), addBookmark(mangaId, user.uid)]);
       setAdded(true);
       toast.success("Added to your library!");
     } catch {

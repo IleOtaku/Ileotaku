@@ -49,7 +49,7 @@ export default async function PublicProfilePage({ params }: PublicProfilePagePro
     : joined.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
   return (
-    <BlockedContentGate targetUid={profile.uid}>
+    <BlockedContentGate targetUid={profile.uid} targetLabel={profile.handle ?? profile.displayName}>
     <div className="relative">
       <div
         className="relative h-40 w-full overflow-hidden bg-bg2 sm:h-48"

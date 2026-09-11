@@ -197,7 +197,7 @@ export default function MangaList({
             <div className="flex flex-col items-center gap-3 px-4 py-16 text-center">
               <Sparkles className="h-6 w-6 text-gold" />
               <p className="font-noto text-xs text-muted">
-                No works published yet — be the first creator to publish!
+                No works published yet — be the first!
               </p>
               <Link href="/creator" className="btn-primary text-xs">
                 Become a Creator

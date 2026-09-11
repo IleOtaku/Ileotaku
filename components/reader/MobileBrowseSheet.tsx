@@ -143,7 +143,7 @@ export default function MobileBrowseSheet({
             <div className="flex flex-col items-center gap-3 px-4 py-16 text-center">
               <Sparkles className="h-8 w-8 text-gold" />
               <p className="font-noto text-sm text-muted">
-                No works published yet — be the first creator to publish!
+                No works published yet — be the first!
               </p>
               <Link href="/creator" className="btn-primary text-sm">
                 Become a Creator

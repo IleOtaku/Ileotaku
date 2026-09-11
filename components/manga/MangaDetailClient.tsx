@@ -3,11 +3,12 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { notFound, useRouter } from "next/navigation";
-import { ArrowLeft, BookOpen, MessageCircle, Star, Users } from "lucide-react";
+import { ArrowLeft, Star } from "lucide-react";
 import AddToLibraryButton from "@/components/manga/AddToLibraryButton";
 import BackToSearchButton from "@/components/manga/BackToSearchButton";
 import ChapterList from "@/components/manga/ChapterList";
 import LiveChatPreview from "@/components/manga/LiveChatPreview";
+import LiveStatsStrip from "@/components/manga/LiveStatsStrip";
 import MobileCommentFab from "@/components/manga/MobileCommentFab";
 import TipCreatorButton from "@/components/monetisation/TipCreatorButton";
 import CommentSection from "@/components/social/CommentSection";
@@ -16,7 +17,38 @@ import RatingWidget from "@/components/social/RatingWidget";
 import ReportButton from "@/components/social/ReportButton";
 import { Skeleton } from "@/components/ui";
 import { Avatar } from "@/components/ui/Avatar";
+import { subscribeToCommentsCount, subscribeToRatings } from "@/lib/firestore";
 import { getMangaDetail, getMangaList, proxyImg, type MangaDetailResponse } from "@/lib/manga-api";
+
+/** Small live star-and-average row shown right under the title — the same average RatingWidget
+ * computes further down the page, subscribed independently here since this row renders well
+ * before RatingWidget mounts (RatingWidget itself does the read-threshold gate/submit UI; this
+ * one is display-only). */
+function HeaderRatingRow({ seriesId }: { seriesId: string }) {
+  const [average, setAverage] = useState(0);
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    return subscribeToRatings(seriesId, (ratings) => {
+      setCount(ratings.length);
+      setAverage(ratings.length > 0 ? ratings.reduce((sum, r) => sum + r.rating, 0) / ratings.length : 0);
+    });
+  }, [seriesId]);
+
+  return (
+    <div className="mt-3 flex items-center gap-1.5">
+      {Array.from({ length: 5 }).map((_, i) => (
+        <Star
+          key={i}
+          className={`h-4 w-4 ${i < Math.round(average) ? "fill-gold text-gold" : "fill-bg4 text-bg4"}`}
+        />
+      ))}
+      <span className="font-noto text-sm text-muted">
+        {count > 0 ? `${average.toFixed(1)} (${count.toLocaleString()})` : "No ratings yet"}
+      </span>
+    </div>
+  );
+}
 
 export interface MangaDetailClientProps {
   id: string;
@@ -36,6 +68,9 @@ export default function MangaDetailClient({ id, from }: MangaDetailClientProps) 
   const [status, setStatus] = useState<"loading" | "ready" | "not-found">("loading");
   const [detail, setDetail] = useState<MangaDetailResponse["data"] | null>(null);
   const [related, setRelated] = useState<{ id: string; title: string; image: string }[]>([]);
+  const [commentCount, setCommentCount] = useState(0);
+
+  useEffect(() => subscribeToCommentsCount(id, setCommentCount), [id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -106,10 +141,6 @@ export default function MangaDetailClient({ id, from }: MangaDetailClientProps) 
   const format = detail.format || (isManhwa ? "Manhwa" : "Manga");
   const contentRating = detail.contentRating || "Teen";
   const language = detail.language || "English";
-
-  const totalReads = chapters.reduce((sum, c) => sum + (Number(c.view) || 0), 0);
-  const bookmarkEstimate = Math.max(120, Math.round(totalReads * 0.06));
-  const commentEstimate = Math.max(18, Math.round(totalReads * 0.01));
 
   return (
     <div>
@@ -185,15 +216,7 @@ export default function MangaDetailClient({ id, from }: MangaDetailClientProps) 
               </div>
             )}
 
-            <div className="mt-3 flex items-center gap-1.5">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <Star
-                  key={i}
-                  className={`h-4 w-4 ${i < 4 ? "fill-gold text-gold" : "fill-bg4 text-bg4"}`}
-                />
-              ))}
-              <span className="font-noto text-sm text-muted">4.2</span>
-            </div>
+            <HeaderRatingRow seriesId={id} />
 
             {detail.description && (
               <details className="group mt-4 max-w-2xl">
@@ -210,17 +233,7 @@ export default function MangaDetailClient({ id, from }: MangaDetailClientProps) 
               </details>
             )}
 
-            <div className="mt-5 flex flex-wrap items-center gap-5 font-noto text-xs text-muted">
-              <span className="flex items-center gap-1.5">
-                <BookOpen className="h-4 w-4" /> {totalReads.toLocaleString()} reads
-              </span>
-              <span className="flex items-center gap-1.5">
-                <Users className="h-4 w-4" /> {bookmarkEstimate.toLocaleString()} bookmarks
-              </span>
-              <span className="flex items-center gap-1.5">
-                <MessageCircle className="h-4 w-4" /> {commentEstimate.toLocaleString()} comments
-              </span>
-            </div>
+            <LiveStatsStrip workId={id} />
 
             <div className="mt-6 flex flex-wrap items-center gap-3">
               <Link href={`/reader?id=${encodeURIComponent(id)}`} className="btn-primary">
@@ -310,7 +323,7 @@ export default function MangaDetailClient({ id, from }: MangaDetailClientProps) 
         </div>
       </div>
 
-      <MobileCommentFab commentCount={commentEstimate} />
+      <MobileCommentFab commentCount={commentCount} />
     </div>
   );
 }
