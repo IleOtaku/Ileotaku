@@ -441,6 +441,16 @@ export interface OwnershipTransferRequest {
   respondedAt?: string;
 }
 
+/** One document at `handles/{handleLower}` — a pure reservation record, nothing else. Its mere
+ * existence (and `uid`) is what makes a handle unique: lib/handles.ts's claimHandle() creates/
+ * moves this in the same Firestore transaction as the users/{uid}.handle it backs, and
+ * firestore.rules refuses any write to it that isn't either a fresh claim or its own owner. Keyed
+ * by the LOWERCASED handle so "EliteReader" and "elitereader" can't both be claimed. */
+export interface HandleReservation {
+  uid: string;
+  createdAt: string;
+}
+
 export interface HistoryEntry {
   id: string;
   mangaId: string;

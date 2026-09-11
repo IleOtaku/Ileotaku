@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
-import { Loader2 } from "lucide-react";
+import { Check, Loader2, X as XIcon } from "lucide-react";
 import { Modal, Select } from "@/components/ui";
 import { useAuth } from "@/hooks/useAuth";
 import { getUserProfile, updateUserPrefs } from "@/lib/firestore";
+import { checkHandleAvailability, claimHandle, HandleTakenError, isValidHandleFormat } from "@/lib/handles";
 import { GENRES } from "@/lib/utils";
+
+type HandleStatus = "idle" | "checking" | "available" | "taken" | "invalid";
 
 export interface EditProfileModalProps {
   open: boolean;
@@ -24,6 +27,8 @@ export default function EditProfileModal({ open, onClose }: EditProfileModalProp
   const [instagram, setInstagram] = useState("");
   const [website, setWebsite] = useState("");
   const [saving, setSaving] = useState(false);
+  const [handleStatus, setHandleStatus] = useState<HandleStatus>("idle");
+  const handleCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Resync the form to the latest profile every time the modal opens.
   useEffect(() => {
@@ -35,17 +40,63 @@ export default function EditProfileModal({ open, onClose }: EditProfileModalProp
       setTwitter(profile?.socialLinks?.twitter ?? "");
       setInstagram(profile?.socialLinks?.instagram ?? "");
       setWebsite(profile?.socialLinks?.website ?? "");
+      setHandleStatus("idle");
     }
   }, [open, profile]);
+
+  // Live availability check, debounced 500ms — a hint for the green-check/red-X indicator only;
+  // claimHandle()'s transaction (in handleSave below) is what actually enforces uniqueness.
+  useEffect(() => {
+    if (handleCheckTimer.current) clearTimeout(handleCheckTimer.current);
+    const trimmed = handle.trim().replace(/^@/, "");
+
+    if (!open || !user || trimmed.length === 0 || trimmed === (profile?.handle ?? "")) {
+      setHandleStatus("idle");
+      return;
+    }
+    if (!isValidHandleFormat(trimmed)) {
+      setHandleStatus("invalid");
+      return;
+    }
+
+    setHandleStatus("checking");
+    handleCheckTimer.current = setTimeout(() => {
+      checkHandleAvailability(trimmed, user.uid).then((result) => {
+        setHandleStatus(result.available ? "available" : result.reason === "invalid" ? "invalid" : "taken");
+      });
+    }, 500);
+
+    return () => {
+      if (handleCheckTimer.current) clearTimeout(handleCheckTimer.current);
+    };
+  }, [handle, open, user, profile?.handle]);
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     if (!user) return;
+    const trimmedHandle = handle.trim().replace(/^@/, "");
+    if (trimmedHandle.length > 0 && !isValidHandleFormat(trimmedHandle)) {
+      toast.error("Handles must be 3-20 characters: letters, numbers, and underscores only.");
+      return;
+    }
+
     setSaving(true);
     try {
+      if (trimmedHandle !== (profile?.handle ?? "") && trimmedHandle.length > 0) {
+        try {
+          await claimHandle(user.uid, trimmedHandle, profile?.handle);
+        } catch (error) {
+          if (error instanceof HandleTakenError) {
+            setHandleStatus("taken");
+            toast.error("That handle was just taken — try another.");
+            return;
+          }
+          throw error;
+        }
+      }
+
       await updateUserPrefs(user.uid, {
         displayName: displayName.trim(),
-        handle: handle.trim().replace(/^@/, ""),
         bio: bio.trim(),
         favoriteGenre,
         socialLinks: {
@@ -87,12 +138,30 @@ export default function EditProfileModal({ open, onClose }: EditProfileModalProp
               @
             </span>
             <input
-              className="input-base pl-7"
+              className="input-base pl-7 pr-9"
               value={handle}
               onChange={(e) => setHandle(e.target.value)}
               placeholder="yourhandle"
             />
+            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2">
+              {handleStatus === "checking" && <Loader2 className="h-4 w-4 animate-spin text-muted" />}
+              {handleStatus === "available" && <Check className="h-4 w-4 text-green2" />}
+              {(handleStatus === "taken" || handleStatus === "invalid") && (
+                <XIcon className="h-4 w-4 text-clay2" />
+              )}
+            </span>
           </div>
+          {handleStatus === "taken" && (
+            <p className="mt-1 font-noto text-xs text-clay2">That handle is already taken.</p>
+          )}
+          {handleStatus === "invalid" && (
+            <p className="mt-1 font-noto text-xs text-clay2">
+              3-20 characters: letters, numbers, and underscores only.
+            </p>
+          )}
+          {handleStatus === "available" && (
+            <p className="mt-1 font-noto text-xs text-green2">Handle is available!</p>
+          )}
         </div>
 
         <div>
@@ -160,7 +229,11 @@ export default function EditProfileModal({ open, onClose }: EditProfileModalProp
           </div>
         </div>
 
-        <button type="submit" disabled={saving} className="btn-primary mt-2 w-full">
+        <button
+          type="submit"
+          disabled={saving || handleStatus === "taken" || handleStatus === "invalid" || handleStatus === "checking"}
+          className="btn-primary mt-2 w-full disabled:opacity-50"
+        >
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
         </button>
       </form>

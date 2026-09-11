@@ -44,6 +44,20 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('isBanned', false) != true;
     }
 
+    // ---------------------------- handles (username reservation) ----------------------------
+    // handles/{handle} (doc id is the LOWERCASED handle — see HandleReservation's own doc
+    // comment in types/index.ts for why) is a pure reservation record, {uid, createdAt}, written
+    // in the same client transaction as the users/{uid}.handle update it backs — see
+    // lib/handles.ts's claimHandle(). A signed-in user may create a reservation that doesn't
+    // exist yet, or update/delete one they already own; they can never touch someone else's.
+    // `resource == null` is this ruleset's own idiom for "no document exists yet" (see
+    // /conversations/{conversationId}'s read rule below for the same pattern) — reading
+    // resource.data on a create, before any document exists, would otherwise throw outright.
+    match /handles/{handle} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (resource == null || resource.data.uid == request.auth.uid);
+    }
+
     // ---------------------------- users ----------------------------
     // Profiles are publicly readable — /creator/[handle] is a public page rendered by a
     // server component, which has no Firebase Auth session at all, so gating reads behind
@@ -51,7 +65,15 @@ service cloud.firestore {
     // a hard "Missing or insufficient permissions" crash. Only writes are locked to the owner.
     match /users/{uid} {
       allow read: if true;
-      allow create: if isOwner(uid);
+      // Same handle-reservation guard as `update` below applies here too — upsertUserProfile()
+      // never actually sets `handle` at creation time (a brand-new profile has none until the
+      // Edit Profile form's first save), but a crafted create() call could otherwise set one
+      // straight into the document with no reservation to back it, same loophole as bypassing
+      // `update` this way would.
+      allow create: if isOwner(uid)
+        && (request.resource.data.get('handle', null) == null
+          || (exists(/databases/$(database)/documents/handles/$(request.resource.data.handle.lower()))
+            && get(/databases/$(database)/documents/handles/$(request.resource.data.handle.lower())).data.uid == uid));
       // followCreator/unfollowCreator (lib/firestore.ts) write BOTH sides of a follow in one
       // call: arrayUnion(targetUid) onto the follower's own `following`, then arrayUnion(myUid)
       // onto the TARGET's `followers` — that second write is on someone else's document, which
@@ -65,8 +87,20 @@ service cloud.firestore {
       // edge. Scoped to only these two social-graph fields (any other field on someone else's
       // profile still needs isOwner/isAdmin), matching this file's existing precedent of
       // trusting isSignedIn() for writes made on another uid's behalf (see `transactions` below).
-      allow update: if isOwner(uid) || isAdmin() ||
-        (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followers', 'following']));
+      // Beyond who may update this doc at all (the OR set below, unchanged), a SEPARATE check
+      // guards the `handle` field specifically: its value may only actually change when a
+      // matching handles/{newHandleLower} reservation already exists and is owned by this uid —
+      // otherwise the reservation system above would be pure theater, since isOwner(uid) alone
+      // would still let a client bypass claimHandle() entirely with a raw updateDoc() straight to
+      // this document. Every update that leaves `handle` untouched (the overwhelming majority —
+      // bio edits, coin balance changes, admin moderation, the follow/unfollow carve-out) trivially
+      // satisfies the first branch below and is completely unaffected by this.
+      allow update: if (isOwner(uid) || isAdmin() ||
+        (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followers', 'following'])))
+        && (request.resource.data.get('handle', null) == resource.data.get('handle', null)
+          || (request.resource.data.get('handle', null) != null
+            && exists(/databases/$(database)/documents/handles/$(request.resource.data.handle.lower()))
+            && get(/databases/$(database)/documents/handles/$(request.resource.data.handle.lower())).data.uid == uid));
       // Sprint 9d: self-service account deletion (deleteMyAccount() in lib/auth.ts) needs the
       // owner to be able to delete their own profile document, not just an admin moderating
       // someone else's — confirmed live during testing that this was previously owner-deletion's
