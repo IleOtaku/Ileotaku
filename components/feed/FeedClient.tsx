@@ -3,12 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, ArrowUp, Music, Plus, Sparkles, UsersRound } from "lucide-react";
+import { ArrowLeft, ArrowUp, Plus, Sparkles, UsersRound } from "lucide-react";
 import TikTokFeedItem from "./TikTokFeedItem";
 import PostComposer from "./PostComposer";
 import FeedSoundToggle from "./FeedSoundToggle";
-import PersonCard from "@/components/search/PersonCard";
-import TrendingSoundsSection, { TrendingSoundsEmpty } from "@/components/explore/TrendingSoundsSection";
 import { Modal } from "@/components/ui";
 import { useAuth } from "@/hooks/useAuth";
 import { getBlockedUsers } from "@/lib/blocking";
@@ -20,9 +18,7 @@ import {
   subscribeToSavedPostIds,
   type FeedPage,
 } from "@/lib/creatorFeed";
-import { getPopularCreators } from "@/lib/firestore";
-import { getTrendingSounds } from "@/lib/sounds";
-import type { CreatorPost, Sound, UserProfile } from "@/types";
+import type { CreatorPost } from "@/types";
 import type { DocumentData, QueryDocumentSnapshot } from "firebase/firestore";
 
 type FeedTab = "forYou" | "following";
@@ -39,21 +35,6 @@ const FEED_FILTERS: { value: FeedFilter; label: string }[] = [
   { value: "noSound", label: "No Sound" },
 ];
 
-/** Pulls #hashtag-shaped tokens out of every loaded post's caption and ranks them by frequency —
- * a lightweight, real-data-derived "Trending Tags" rail rather than a hardcoded list, since this
- * app has no dedicated hashtag index yet. */
-function trendingTagsFrom(posts: CreatorPost[]): string[] {
-  const counts = new Map<string, number>();
-  for (const post of posts) {
-    const tags = post.content.match(/#\w+/g) ?? [];
-    for (const tag of tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
-  }
-  return Array.from(counts.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 8)
-    .map(([tag]) => tag);
-}
-
 export default function FeedClient() {
   const { user, profile, loading: authLoading } = useAuth();
   const searchParams = useSearchParams();
@@ -69,8 +50,6 @@ export default function FeedClient() {
   const [blockedUids, setBlockedUids] = useState<Set<string>>(new Set());
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [composerOpen, setComposerOpen] = useState(false);
-  const [suggestedCreators, setSuggestedCreators] = useState<UserProfile[]>([]);
-  const [trendingSounds, setTrendingSounds] = useState<Sound[]>([]);
   const [feedFilter, setFeedFilter] = useState<FeedFilter>("all");
   const sentinelRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -93,11 +72,6 @@ export default function FeedClient() {
   }, [user]);
 
   useEffect(() => {
-    getPopularCreators(6).then(setSuggestedCreators).catch(() => setSuggestedCreators([]));
-    getTrendingSounds(6).then(setTrendingSounds).catch(() => setTrendingSounds([]));
-  }, []);
-
-  useEffect(() => {
     if (user) expireBoosts();
   }, [user]);
 
@@ -116,7 +90,6 @@ export default function FeedClient() {
         return unblocked;
     }
   }, [posts, blockedUids, feedFilter]);
-  const trendingTags = useMemo(() => trendingTagsFrom(posts), [posts]);
 
   const loadFirstPage = useCallback(
     async (activeTab: FeedTab) => {
@@ -360,48 +333,6 @@ export default function FeedClient() {
           </button>
         )}
       </div>
-
-      {/* ---------------------------- Right sidebar (desktop) ---------------------------- */}
-      <aside className="hidden w-72 shrink-0 flex-col gap-8 overflow-y-auto border-l border-white/10 p-4 xl:flex">
-        <div>
-          <p className="mb-3 flex items-center gap-1.5 font-syne text-xs font-bold uppercase tracking-wide text-white/50">
-            <Music className="h-3.5 w-3.5" /> Trending Sounds
-          </p>
-          {trendingSounds.length === 0 ? (
-            <div className="text-white/40">
-              <TrendingSoundsEmpty />
-            </div>
-          ) : (
-            <div className="text-white [&_*]:!text-white/90">
-              <TrendingSoundsSection sounds={trendingSounds} />
-            </div>
-          )}
-        </div>
-
-        <div>
-          <p className="mb-3 flex items-center gap-1.5 font-syne text-xs font-bold uppercase tracking-wide text-white/50">
-            <UsersRound className="h-3.5 w-3.5" /> Suggested Creators
-          </p>
-          <div className="flex flex-col gap-3 text-white [&_*]:!text-white/90">
-            {suggestedCreators.slice(0, 4).map((p) => (
-              <PersonCard key={p.uid} person={p} />
-            ))}
-          </div>
-        </div>
-
-        {trendingTags.length > 0 && (
-          <div>
-            <p className="mb-3 font-syne text-xs font-bold uppercase tracking-wide text-white/50">Trending Tags</p>
-            <div className="flex flex-wrap gap-2">
-              {trendingTags.map((tag) => (
-                <span key={tag} className="rounded-full bg-white/10 px-3 py-1 font-noto text-xs text-white/80">
-                  {tag}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-      </aside>
 
       <Modal open={composerOpen} onClose={() => setComposerOpen(false)} title="Create Post">
         <PostComposer
