@@ -465,9 +465,15 @@ service cloud.firestore {
             // Edit own message text.
             (resource.data.senderId == request.auth.uid
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["text", "isEdited", "editedAt"]))
-            // Delete for everyone — own message only, content replaced with the placeholder.
-            || (resource.data.senderId == request.auth.uid
-              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["text", "isDeleted", "deletedAt"]))
+            // Delete for everyone — the message's own sender, OR (beta feedback: "Group admin
+            // should be able to delete other people's messages for everyone") a group admin
+            // deleting someone else's message in a group they administer. `adminUids` is absent
+            // entirely on a 1:1 conversation, so `.get('adminUids', [])` — never a bare
+            // `.adminUids` dot-access, which would throw on a missing field — safely evaluates to
+            // an empty array there, making this branch a no-op outside of groups.
+            || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(["text", "isDeleted", "deletedAt"])
+              && (resource.data.senderId == request.auth.uid
+                || get(/databases/$(database)/documents/conversations/$(conversationId)).data.get("adminUids", []).hasAny([request.auth.uid])))
             // Delete for me — any participant, and only their OWN view is affected.
             || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["deletedFor"])
             // React / un-react — any participant.

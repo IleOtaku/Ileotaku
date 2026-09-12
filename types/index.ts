@@ -65,6 +65,11 @@ export interface UserProfile {
   /** Which kind of account `isVerified` badge represents — changes badge color (blue vs purple)
    * and copy wherever it's shown. Only meaningful when isVerified is true. */
   verifiedType?: "creator" | "publisher" | null;
+  /** ÍléOtaku's own actual founder — a single account, set manually (never through the
+   * creator/publisher verify flow), distinct from `foundingCreator` (the early-cohort-creator
+   * badge below). Recolors the verified checkmark gold everywhere it renders — see
+   * components/ui/Badges.tsx's VerifiedBadge, the one place this is actually read. */
+  isFounder?: boolean;
   /** Count of moderation strikes from actioned reports — feeds account-suspension logic. */
   strikeCount?: number;
   /** ISO date the account is suspended until, if a moderator has taken that action. */
@@ -677,6 +682,10 @@ export interface SeriesComment {
   userPhotoURL?: string;
   isVerified?: boolean;
   isPlatinum?: boolean;
+  /** Denormalized alongside isVerified so components/ui/Badges.tsx's VerifiedBadge can pick the
+   * right tier/color here too, same as everywhere else it renders. */
+  isPublisher?: boolean;
+  isFounder?: boolean;
   text: string;
   isSpoiler?: boolean;
   /** Null/absent for a top-level comment; otherwise the id of the comment being replied to. */
@@ -822,6 +831,10 @@ export interface CreatorPost {
   isVerified?: boolean;
   isPlatinum?: boolean;
   isFoundingCreator?: boolean;
+  /** Denormalized alongside isVerified so components/ui/Badges.tsx's VerifiedBadge can pick the
+   * right tier/color on this post too, same as everywhere else it renders. */
+  isPublisher?: boolean;
+  isFounder?: boolean;
   /** Sound attached via the composer's "Add Sound" flow — all fields denormalized from the
    * chosen Sound at post time so the feed card never needs a per-post sound lookup just to
    * play/display it. Absent entirely on posts with no sound. */
@@ -911,6 +924,10 @@ export interface FeedComment {
    * comments section" — denormalized at comment-creation time the same way isVerified already
    * was, so FeedCommentSheet's CommentRow can render it with no per-comment profile lookup. */
   isPlatinum?: boolean;
+  /** Denormalized alongside isVerified so components/ui/Badges.tsx's VerifiedBadge can pick the
+   * right tier/color here too, same as everywhere else it renders. */
+  isPublisher?: boolean;
+  isFounder?: boolean;
   text: string;
   /** Null/absent for a top-level comment; otherwise the id of the comment being replied to. */
   parentId?: string | null;

@@ -3,14 +3,14 @@
 import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
 import { AnimatePresence, motion } from "framer-motion";
-import { BookImage, Check, Copy, Link2, Loader2, Send, X } from "lucide-react";
+import { BookImage, Check, Copy, Download, Link2, Loader2, Send, Users, X } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { useAuth } from "@/hooks/useAuth";
-import { sendDM, startConversation } from "@/lib/dms";
+import { getConversations, sendDM, startConversation } from "@/lib/dms";
 import { searchUsers } from "@/lib/firestore";
 import { createStory } from "@/lib/stories";
 import { trackShare } from "@/lib/creatorFeed";
-import type { CreatorPost, UserProfile } from "@/types";
+import type { Conversation, CreatorPost, UserProfile } from "@/types";
 
 export interface FeedShareSheetProps {
   post: CreatorPost;
@@ -29,16 +29,30 @@ export default function FeedShareSheet({ post, open, onClose }: FeedShareSheetPr
   const [sendingTo, setSendingTo] = useState<string | null>(null);
   const [postingStory, setPostingStory] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  // Beta feedback: "Sharing to users should also have share to group feature." A simple tab next
+  // to the people search rather than a second search box — most accounts are in only a handful
+  // of groups, so a plain list is faster to scan than typing a group name.
+  const [shareTarget, setShareTarget] = useState<"people" | "groups">("people");
+  const [groups, setGroups] = useState<Conversation[]>([]);
+  const [sendingToGroup, setSendingToGroup] = useState<string | null>(null);
 
   const shareUrl = typeof window !== "undefined" ? `${window.location.origin}/feed/${post.id}` : "";
+  const downloadUrl = post.videoUrl || post.attachments?.[0];
 
   useEffect(() => {
     if (!open) {
       setQuery("");
       setResults([]);
       setCopied(false);
+      setShareTarget("people");
+      return;
     }
-  }, [open]);
+    if (!user) return;
+    getConversations(user.uid)
+      .then((all) => setGroups(all.filter((c) => c.type === "group")))
+      .catch(() => setGroups([]));
+  }, [open, user]);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -69,6 +83,47 @@ export default function FeedShareSheet({ post, open, onClose }: FeedShareSheetPr
       toast.error("Couldn't send that.");
     } finally {
       setSendingTo(null);
+    }
+  }
+
+  async function handleShareToGroup(groupId: string) {
+    if (!user) return;
+    setSendingToGroup(groupId);
+    try {
+      await sendDM(groupId, user.uid, `Check out this post: ${shareUrl}`);
+      await trackShare(post.id);
+      toast.success("Sent!");
+      onClose();
+    } catch {
+      toast.error("Couldn't send that.");
+    } finally {
+      setSendingToGroup(null);
+    }
+  }
+
+  /** Beta feedback: "Share post: add Download button... uses browser download API for
+   * images/videos." Fetches the media as a blob rather than a plain `<a download>` — Cloudinary
+   * URLs are cross-origin, and a browser only honors the `download` attribute on a same-origin
+   * (or explicitly CORS-permissive) resource; a blob: URL is always same-origin to the page that
+   * created it, so this works regardless of what the origin server sends. */
+  async function handleDownload() {
+    if (!downloadUrl) return;
+    setDownloading(true);
+    try {
+      const res = await fetch(downloadUrl);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = `ileotaku-${post.id}${post.videoUrl ? ".mp4" : ".jpg"}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(blobUrl);
+    } catch {
+      toast.error("Couldn't download this.");
+    } finally {
+      setDownloading(false);
     }
   }
 
@@ -139,14 +194,62 @@ export default function FeedShareSheet({ post, open, onClose }: FeedShareSheetPr
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
-              <div className="relative">
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search people to send to..."
-                  className="w-full rounded-full border border-white/15 bg-white/5 px-4 py-2.5 font-noto text-sm text-white placeholder:text-white/40 focus:outline-none"
-                />
-              </div>
+              {groups.length > 0 && (
+                <div className="mb-3 flex gap-1 rounded-full bg-white/5 p-1">
+                  <button
+                    type="button"
+                    onClick={() => setShareTarget("people")}
+                    className={`flex-1 rounded-full py-1.5 font-syne text-xs font-semibold ${shareTarget === "people" ? "bg-white text-black" : "text-white/60"}`}
+                  >
+                    People
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShareTarget("groups")}
+                    className={`flex-1 rounded-full py-1.5 font-syne text-xs font-semibold ${shareTarget === "groups" ? "bg-white text-black" : "text-white/60"}`}
+                  >
+                    Groups
+                  </button>
+                </div>
+              )}
+
+              {shareTarget === "groups" ? (
+                <div className="flex flex-col gap-1">
+                  {groups.map((g) => (
+                    <button
+                      key={g.id}
+                      type="button"
+                      onClick={() => handleShareToGroup(g.id)}
+                      disabled={sendingToGroup !== null}
+                      className="flex items-center gap-3 rounded-xl px-2 py-2 text-left hover:bg-white/5 disabled:opacity-50"
+                    >
+                      {g.photoURL ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img loading="lazy" src={g.photoURL} alt="" className="h-9 w-9 rounded-full object-cover" />
+                      ) : (
+                        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white/70">
+                          <Users className="h-4 w-4" />
+                        </span>
+                      )}
+                      <span className="min-w-0 flex-1 truncate font-noto text-sm text-white">{g.name ?? "Group"}</span>
+                      {sendingToGroup === g.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin text-white/60" />
+                      ) : (
+                        <Send className="h-4 w-4 text-white/60" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <>
+                  <div className="relative">
+                    <input
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder="Search people to send to..."
+                      className="w-full rounded-full border border-white/15 bg-white/5 px-4 py-2.5 font-noto text-sm text-white placeholder:text-white/40 focus:outline-none"
+                    />
+                  </div>
 
               {query.trim() && (
                 <div className="mt-3 flex flex-col gap-1">
@@ -177,6 +280,8 @@ export default function FeedShareSheet({ post, open, onClose }: FeedShareSheetPr
                   )}
                 </div>
               )}
+                </>
+              )}
 
               <div className="mt-4 grid grid-cols-3 gap-3">
                 <button
@@ -200,6 +305,21 @@ export default function FeedShareSheet({ post, open, onClose }: FeedShareSheetPr
                   {copied ? <Check className="h-6 w-6 text-green2" /> : <Link2 className="h-6 w-6 text-white" />}
                   <span className="font-noto text-[11px] text-white/80">Copy Link</span>
                 </button>
+                {downloadUrl && (
+                  <button
+                    type="button"
+                    onClick={handleDownload}
+                    disabled={downloading}
+                    className="flex flex-col items-center gap-1.5 rounded-xl bg-white/5 p-3 text-center disabled:opacity-50"
+                  >
+                    {downloading ? (
+                      <Loader2 className="h-6 w-6 animate-spin text-white" />
+                    ) : (
+                      <Download className="h-6 w-6 text-white" />
+                    )}
+                    <span className="font-noto text-[11px] text-white/80">Download</span>
+                  </button>
+                )}
                 {typeof navigator !== "undefined" && !!navigator.share && (
                   <button
                     type="button"

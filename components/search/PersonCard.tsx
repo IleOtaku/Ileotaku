@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { BadgeCheck, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import FollowButton from "@/components/social/FollowButton";
 import MessageButton from "@/components/social/MessageButton";
 import { Avatar } from "@/components/ui/Avatar";
+import { PlatinumBadge, VerifiedBadge } from "@/components/ui/Badges";
 import { getCreatorStats } from "@/lib/firestore";
 import { truncate } from "@/lib/utils";
 import type { UserProfile } from "@/types";
@@ -34,8 +35,6 @@ export default function PersonCard({ person }: PersonCardProps) {
     };
   }, [person.isCreator, person.uid]);
 
-  const isVerified = person.isVerified === true || person.verified === true;
-
   return (
     <div className="flex flex-col gap-3 rounded-2xl border border-bg4 bg-bg2 p-5">
       <div className="flex items-start gap-3">
@@ -46,17 +45,13 @@ export default function PersonCard({ person }: PersonCardProps) {
         <div className="min-w-0 flex-1">
           <Link href={profileHref} className="flex flex-wrap items-center gap-1.5">
             <span className="font-syne text-sm font-semibold text-text">{person.displayName}</span>
-            {isVerified && (
-              <BadgeCheck
-                className={`h-4 w-4 ${person.isPublisher ? "text-purple-400" : "text-blue-400"}`}
-              />
-            )}
+            <VerifiedBadge profile={person} className="h-4 w-4" />
             {person.foundingCreator && (
               <span className="badge-plat text-[10px]">
                 <Sparkles className="h-2.5 w-2.5" /> Founding
               </span>
             )}
-            {person.isPlatinum && <span className="badge-plat text-[10px]">Platinum</span>}
+            <PlatinumBadge isPlatinum={person.isPlatinum} className="h-4 w-4" />
           </Link>
           {person.handle && <p className="font-noto text-xs text-muted">@{person.handle}</p>}
           {person.bio && (

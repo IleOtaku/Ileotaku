@@ -51,6 +51,10 @@ export interface CreatorPostBadges {
   isVerified?: boolean;
   isPlatinum?: boolean;
   isFoundingCreator?: boolean;
+  /** Denormalized alongside isVerified so components/ui/Badges.tsx's VerifiedBadge can pick the
+   * right tier/color on a feed post too, same as everywhere else it renders. */
+  isPublisher?: boolean;
+  isFounder?: boolean;
 }
 
 export interface FeedPage {
@@ -402,6 +406,8 @@ export async function createPost(input: CreatePostInput): Promise<string> {
       isVerified: badges.isVerified ?? false,
       isPlatinum: badges.isPlatinum ?? false,
       isFoundingCreator: badges.isFoundingCreator ?? false,
+      isPublisher: badges.isPublisher ?? false,
+      isFounder: badges.isFounder ?? false,
       ...(sound
         ? {
             soundId: sound.id,

@@ -4,7 +4,6 @@ import { memo, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import toast from "react-hot-toast";
 import {
-  BadgeCheck,
   Bookmark,
   Heart,
   MessageCircle,
@@ -19,6 +18,7 @@ import FeedShareSheet from "./FeedShareSheet";
 import FollowButton from "@/components/social/FollowButton";
 import ReportButton from "@/components/social/ReportButton";
 import { Avatar } from "@/components/ui/Avatar";
+import { PlatinumBadge, VerifiedBadge } from "@/components/ui/Badges";
 import MentionText from "@/components/ui/MentionText";
 import { useAuth } from "@/hooks/useAuth";
 import { useFeedAudio } from "@/lib/audioContext";
@@ -292,7 +292,8 @@ function TikTokFeedItem({ post, isSaved, onDeleted }: TikTokFeedItemProps) {
             </Link>
             <Link href={profileHref} onClick={handleVisitProfile} className="flex min-w-0 items-center gap-1 font-syne text-sm font-semibold text-ivory">
               <span className="truncate">{post.displayName}</span>
-              {post.isVerified && <BadgeCheck className="h-3.5 w-3.5 shrink-0 text-plat" />}
+              <VerifiedBadge profile={post} className="h-3.5 w-3.5" />
+              <PlatinumBadge isPlatinum={post.isPlatinum} className="h-3.5 w-3.5" />
             </Link>
             <span className="shrink-0 font-noto text-xs text-ivory/60">· {formatPostTimestamp(post.createdAt)}</span>
             {!isOwnPost && !isFollowing && (

@@ -4,7 +4,6 @@ import { memo, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import toast from "react-hot-toast";
 import {
-  BadgeCheck,
   Ellipsis,
   Eye,
   Flag,
@@ -16,11 +15,12 @@ import {
   Trash2,
 } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
+import { PlatinumBadge, VerifiedBadge } from "@/components/ui/Badges";
 import MentionText from "@/components/ui/MentionText";
 import { useAuth } from "@/hooks/useAuth";
 import { getBlockedUsers } from "@/lib/blocking";
 import { deleteComment, editComment, postComment, subscribeToComments, toggleCommentLike } from "@/lib/firestore";
-import { formatTime } from "@/lib/utils";
+import { formatPostTimestamp } from "@/lib/utils";
 import BlockUserModal from "./BlockUserModal";
 import ReportModal from "./ReportModal";
 import type { SeriesComment } from "@/types";
@@ -123,9 +123,9 @@ const CommentRow = memo(function CommentRow({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="font-syne text-sm font-semibold text-text">{comment.userName}</span>
-            {comment.isVerified && <BadgeCheck className="h-3.5 w-3.5 text-plat" />}
-            {comment.isPlatinum && <span className="badge-plat text-[10px]">Platinum</span>}
-            <span className="font-noto text-[11px] text-muted">{formatTime(comment.createdAt)}</span>
+            <VerifiedBadge profile={{ isVerified: comment.isVerified, isPublisher: comment.isPublisher, isFounder: comment.isFounder }} />
+            <PlatinumBadge isPlatinum={comment.isPlatinum} />
+            <span className="font-noto text-[11px] text-muted">{formatPostTimestamp(comment.createdAt)}</span>
             {comment.isEdited && !comment.isDeleted && (
               <span className="font-noto text-[11px] text-muted">(edited)</span>
             )}
@@ -337,6 +337,8 @@ export default function CommentSection({ mangaId, chapterId, variant = "page" }:
         ...(user.photoURL ? { userPhotoURL: user.photoURL } : {}),
         isVerified: profile?.isVerified === true,
         isPlatinum: profile?.isPlatinum === true,
+        isPublisher: profile?.isPublisher === true,
+        isFounder: profile?.isFounder === true,
         text: trimmed,
         isSpoiler,
         parentId: null,
@@ -361,6 +363,8 @@ export default function CommentSection({ mangaId, chapterId, variant = "page" }:
         ...(user.photoURL ? { userPhotoURL: user.photoURL } : {}),
         isVerified: profile?.isVerified === true,
         isPlatinum: profile?.isPlatinum === true,
+        isPublisher: profile?.isPublisher === true,
+        isFounder: profile?.isFounder === true,
         text: trimmed,
         isSpoiler: false,
         parentId,

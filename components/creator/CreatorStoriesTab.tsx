@@ -6,7 +6,7 @@ import { Loader2, Play, Plus, Trash2 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { EmptyState, Skeleton } from "@/components/ui";
 import { deleteStory, MAX_ACTIVE_STORIES, subscribeToStories } from "@/lib/stories";
-import { formatTime } from "@/lib/utils";
+import { formatPostTimestamp } from "@/lib/utils";
 import type { Story } from "@/types";
 
 const StoryCreateModal = dynamic(() => import("@/components/stories/StoryCreateModal"), { ssr: false });
@@ -96,7 +96,7 @@ export default function CreatorStoriesTab({ uid }: CreatorStoriesTabProps) {
                 </span>
               )}
               <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-2">
-                <p className="font-noto text-[10px] text-white/80">{formatTime(s.createdAt)}</p>
+                <p className="font-noto text-[10px] text-white/80">{formatPostTimestamp(s.createdAt)}</p>
               </div>
               <button
                 type="button"

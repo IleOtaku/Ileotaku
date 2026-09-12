@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { BadgeCheck, Calendar, Sparkles, Users2 } from "lucide-react";
+import { Calendar, Sparkles, Users2 } from "lucide-react";
 import BlockButton from "@/components/social/BlockButton";
 import BlockedContentGate from "@/components/social/BlockedContentGate";
 import CurrentlyReadingCard from "@/components/social/CurrentlyReadingCard";
@@ -10,7 +10,8 @@ import ProfileVisitRecorder from "@/components/social/ProfileVisitRecorder";
 import ReportButton from "@/components/social/ReportButton";
 import NowPlayingCard from "@/components/spotify/NowPlayingCard";
 import { getCoverGradient } from "@/lib/coverStyles";
-import { Avatar } from "@/components/ui/Avatar";
+import AvatarLightbox from "@/components/ui/AvatarLightbox";
+import { PlatinumBadge, VerifiedBadge } from "@/components/ui/Badges";
 import { getUserProfile } from "@/lib/firestore";
 import type { UserProfile } from "@/types";
 
@@ -41,7 +42,6 @@ export default async function PublicProfilePage({ params }: PublicProfilePagePro
     notFound();
   }
 
-  const isVerified = profile.isVerified === true || profile.verified === true;
   const followerCount = profile.followers?.length ?? 0;
   const followingCount = profile.following?.length ?? 0;
   const joined = new Date(profile.createdAt);
@@ -62,7 +62,7 @@ export default async function PublicProfilePage({ params }: PublicProfilePagePro
 
       <div className="relative z-10 mx-auto -mt-12 max-w-3xl px-4 pb-16 sm:px-6">
       <div className="flex flex-col items-center gap-4 text-center sm:flex-row sm:items-end sm:text-left">
-        <Avatar
+        <AvatarLightbox
           uid={profile.uid}
           photoURL={profile.photoURL}
           displayName={profile.displayName}
@@ -73,9 +73,8 @@ export default async function PublicProfilePage({ params }: PublicProfilePagePro
         <div className="flex-1">
           <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
             <h1 className="font-cinzel text-2xl text-text">{profile.displayName}</h1>
-            {isVerified && (
-              <BadgeCheck className={`h-5 w-5 ${profile.isPublisher ? "text-purple-400" : "text-blue-400"}`} />
-            )}
+            <VerifiedBadge profile={profile} className="h-5 w-5" />
+            <PlatinumBadge isPlatinum={profile.isPlatinum} className="h-5 w-5" />
             {profile.isPlatinum && <span className="badge-plat">Platinum</span>}
           </div>
           {profile.handle && <p className="font-noto text-sm text-muted">@{profile.handle}</p>}

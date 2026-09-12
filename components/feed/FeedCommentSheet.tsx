@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import { AnimatePresence, motion } from "framer-motion";
-import { BadgeCheck, Heart, Loader2, Send, Smile, Star, X } from "lucide-react";
+import { Heart, Loader2, Send, Smile, X } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
+import { PlatinumBadge, VerifiedBadge } from "@/components/ui/Badges";
 import MentionText from "@/components/ui/MentionText";
 import { useAuth } from "@/hooks/useAuth";
 import {
@@ -13,7 +14,7 @@ import {
   subscribeToFeedComments,
   toggleFeedCommentLike,
 } from "@/lib/creatorFeed";
-import { formatTime } from "@/lib/utils";
+import { formatPostTimestamp } from "@/lib/utils";
 import type { FeedComment } from "@/types";
 
 const QUICK_EMOJIS = ["❤️", "🔥", "😂", "😍", "👏", "😢", "😮", "🙏", "💯", "🎉", "😊", "👀"];
@@ -88,9 +89,9 @@ function CommentRow({ postId, comment, isReply, replies, onReply, onOpenMenu }: 
         <div className="min-w-0 flex-1">
           <p className="flex items-center gap-1 font-syne text-xs font-semibold text-white">
             {comment.displayName}
-            {comment.isVerified && <BadgeCheck className="h-3 w-3 shrink-0 text-plat" />}
-            {comment.isPlatinum && <Star className="h-3 w-3 shrink-0 fill-gold text-gold" />}
-            <span className="ml-0.5 font-noto text-[10px] font-normal text-white/40">{formatTime(comment.createdAt)}</span>
+            <VerifiedBadge profile={comment} className="h-3 w-3" />
+            <PlatinumBadge isPlatinum={comment.isPlatinum} className="h-3 w-3" />
+            <span className="ml-0.5 font-noto text-[10px] font-normal text-white/40">{formatPostTimestamp(comment.createdAt)}</span>
           </p>
           <p className="mt-0.5 break-words font-noto text-sm text-white/90">
             <MentionText text={comment.text} />
@@ -172,6 +173,8 @@ export default function FeedCommentSheet({ postId, postAuthorUid, open, onClose 
         ...(profile.photoURL ? { photoURL: profile.photoURL } : {}),
         isVerified: profile.isVerified === true,
         isPlatinum: profile.isPlatinum === true,
+        isPublisher: profile.isPublisher === true,
+        isFounder: profile.isFounder === true,
         text: text.trim(),
         parentId: replyTo?.id ?? null,
       });

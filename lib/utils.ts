@@ -15,16 +15,17 @@ export function formatTime(date: string | number | Date): string {
   }
 }
 
-/** Beta feedback: a feed post's timestamp should stay relative ("6 hours ago") while it's
- * recent, but switch to a plain calendar date once a post is a week or older — "3 months ago"
- * (formatTime's own, always-relative behavior) is vague and hard to place on a real timeline for
- * anything that old. Scoped to this one helper rather than changing formatTime() itself, which
- * 25+ other call sites (notifications, DMs, admin tables, ...) rely on staying purely relative. */
+/** Beta feedback: a post/comment/DM/notification/story timestamp should stay relative ("6 hours
+ * ago", "2 days ago") while it's recent, but switch to a plain calendar date ("14 Aug 2026") once
+ * it's a week or older — "3 months ago" (formatTime's own, always-relative behavior) is vague and
+ * hard to place on a real timeline for anything that old. Scoped to this one helper, applied only
+ * at the specific call sites the spec named, rather than changing formatTime() itself, which
+ * other call sites (admin tables, "member since", ...) rely on staying purely relative. */
 export function formatPostTimestamp(date: string | number | Date): string {
   try {
     const d = new Date(date);
     if (differenceInDays(Date.now(), d) >= 7) {
-      return format(d, "dd-MM-yyyy");
+      return format(d, "d MMM yyyy");
     }
     return formatDistanceToNow(d, { addSuffix: true });
   } catch {

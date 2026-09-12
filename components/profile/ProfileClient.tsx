@@ -5,7 +5,8 @@ import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import { updateProfile } from "firebase/auth";
-import { Camera, Crown, LogOut, Palette, Pencil } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+import { Camera, Crown, LogOut, Palette, Pencil, X } from "lucide-react";
 import { getCoverGradient } from "@/lib/coverStyles";
 import ReadingStatsCard from "@/components/profile/ReadingStatsCard";
 import ProfileSidebar from "@/components/profile/ProfileSidebar";
@@ -13,6 +14,7 @@ import ProfileVisitorsSection from "@/components/profile/ProfileVisitorsSection"
 import FollowListModal from "@/components/social/FollowListModal";
 import NowPlayingCard from "@/components/spotify/NowPlayingCard";
 import { Skeleton, Tabs } from "@/components/ui";
+import { PlatinumBadge, VerifiedBadge } from "@/components/ui/Badges";
 
 // Sprint 10 perf audit: this page's own First Load JS pulled in all five tab bodies plus both
 // modals even though only one tab (and no modal) is ever visible on first paint — dynamically
@@ -58,6 +60,7 @@ export default function ProfileClient() {
   const [editOpen, setEditOpen] = useState(false);
   const [coverPickerOpen, setCoverPickerOpen] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarViewerOpen, setAvatarViewerOpen] = useState(false);
   const [followersOpen, setFollowersOpen] = useState(false);
   const [followingOpen, setFollowingOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -210,13 +213,20 @@ export default function ProfileClient() {
         <div className="flex items-end gap-4">
           <div className="relative h-24 w-24 shrink-0">
             {avatarURL ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-            loading="lazy"
-                src={getOptimizedImageUrl(avatarURL, 96)}
-                alt={displayName}
-                className="h-24 w-24 rounded-full border-4 border-bg object-cover"
-              />
+              <button
+                type="button"
+                onClick={() => setAvatarViewerOpen(true)}
+                aria-label="View full-size photo"
+                className="block h-24 w-24 rounded-full"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  loading="lazy"
+                  src={getOptimizedImageUrl(avatarURL, 96)}
+                  alt={displayName}
+                  className="h-24 w-24 rounded-full border-4 border-bg object-cover"
+                />
+              </button>
             ) : (
               <div
                 className="flex h-24 w-24 items-center justify-center rounded-full border-4 border-bg font-cinzel text-2xl font-bold text-ivory"
@@ -246,6 +256,8 @@ export default function ProfileClient() {
           <div className="pb-1">
             <div className="flex items-center gap-2">
               <h1 className="font-cinzel text-xl text-text sm:text-2xl">{displayName}</h1>
+              <VerifiedBadge profile={profile} className="h-5 w-5" />
+              <PlatinumBadge isPlatinum={isPlatinum} className="h-5 w-5" />
               {isPlatinum ? (
                 <span className="badge-plat">Platinum</span>
               ) : (
@@ -317,6 +329,36 @@ export default function ProfileClient() {
 
         <ProfileSidebar profile={profile} />
       </div>
+
+      <AnimatePresence>
+        {avatarViewerOpen && avatarURL && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/95"
+            onClick={() => setAvatarViewerOpen(false)}
+          >
+            <button
+              type="button"
+              onClick={() => setAvatarViewerOpen(false)}
+              aria-label="Close"
+              className="absolute right-4 top-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={avatarURL}
+              alt={displayName}
+              className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain"
+              style={{ touchAction: "pinch-zoom" }}
+              onClick={(e) => e.stopPropagation()}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <EditProfileModal open={editOpen} onClose={() => setEditOpen(false)} />
       <CoverStylePicker open={coverPickerOpen} onClose={() => setCoverPickerOpen(false)} />

@@ -7,7 +7,7 @@ import { isThisWeek, isToday } from "date-fns";
 import { Bell } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { markAllAsRead, markAsRead, subscribeToNotifications } from "@/lib/notifications";
-import { formatTime } from "@/lib/utils";
+import { formatPostTimestamp } from "@/lib/utils";
 import { NotificationType, type AppNotification } from "@/types";
 
 const TYPE_EMOJI: Record<NotificationType, string> = {
@@ -81,7 +81,7 @@ const NotificationItem = memo(function NotificationItem({ notification: n, onCli
       <span className="min-w-0 flex-1">
         <span className="block font-syne text-sm font-semibold text-text">{n.title}</span>
         <span className="block truncate font-noto text-xs text-muted">{n.body}</span>
-        <span className="block font-noto text-[10px] text-muted/70">{formatTime(n.createdAt)}</span>
+        <span className="block font-noto text-[10px] text-muted/70">{formatPostTimestamp(n.createdAt)}</span>
       </span>
     </button>
   );

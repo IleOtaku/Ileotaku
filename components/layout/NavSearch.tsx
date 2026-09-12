@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BadgeCheck, Search } from "lucide-react";
+import { Search } from "lucide-react";
+import { PlatinumBadge, VerifiedBadge } from "@/components/ui/Badges";
 import { Avatar } from "@/components/ui/Avatar";
 import { useSearchPreview } from "@/hooks/useSearchPreview";
 import { proxyImg } from "@/lib/manga-api";
@@ -108,11 +109,8 @@ export default function NavSearch() {
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-1 font-noto text-xs text-text">
                       <span className="truncate">{p.displayName}</span>
-                      {(p.isVerified || p.verified) && (
-                        <BadgeCheck
-                          className={`h-3 w-3 shrink-0 ${p.isPublisher ? "text-purple-400" : "text-blue-400"}`}
-                        />
-                      )}
+                      <VerifiedBadge profile={p} className="h-3 w-3" />
+                      <PlatinumBadge isPlatinum={p.isPlatinum} className="h-3 w-3" />
                     </span>
                     {p.handle && <span className="block truncate font-noto text-[10px] text-muted">@{p.handle}</span>}
                   </span>

@@ -8,7 +8,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { sendDM, startConversation } from "@/lib/dms";
 import { getUserProfile } from "@/lib/firestore";
 import { deleteStory, subscribeToStoryViews, viewStory } from "@/lib/stories";
-import { formatTime } from "@/lib/utils";
+import { formatPostTimestamp } from "@/lib/utils";
 import type { Story, UserProfile } from "@/types";
 
 export interface StoryViewerProps {
@@ -302,7 +302,7 @@ export default function StoryViewer({ uids, startUid, storiesByUid, onClose, onA
           <Avatar uid={story.uid} photoURL={story.photoURL} displayName={story.displayName} size={32} />
           <div className="min-w-0 flex-1">
             <p className="truncate font-syne text-sm font-semibold text-white">{story.displayName}</p>
-            <p className="font-noto text-[11px] text-white/70">{formatTime(story.createdAt)}</p>
+            <p className="font-noto text-[11px] text-white/70">{formatPostTimestamp(story.createdAt)}</p>
           </div>
           {isOwn && (
             <button type="button" onClick={handleDeleteStory} aria-label="Delete story" className="text-white/80 hover:text-white">

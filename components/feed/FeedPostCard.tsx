@@ -4,7 +4,6 @@ import { memo, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import toast from "react-hot-toast";
 import {
-  BadgeCheck,
   BookOpen,
   Eye,
   Heart,
@@ -21,6 +20,7 @@ import {
 import BoostModal from "./BoostModal";
 import EditingAppBadge from "./EditingAppBadge";
 import { Avatar } from "@/components/ui/Avatar";
+import { PlatinumBadge, VerifiedBadge } from "@/components/ui/Badges";
 import { getOptimizedImageUrl } from "@/lib/cloudinary";
 import { deletePost, incrementPostViews, incrementViewCount, likePost, trackWatchTime } from "@/lib/creatorFeed";
 import { useAuth } from "@/hooks/useAuth";
@@ -272,13 +272,13 @@ function FeedPostCard({ post, onDeleted }: FeedPostCardProps) {
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="font-syne text-sm font-semibold text-text">{post.displayName}</span>
-              {post.isVerified && <BadgeCheck className="h-4 w-4 shrink-0 text-plat" aria-label="Verified" />}
+              <VerifiedBadge profile={post} className="h-4 w-4" />
               {post.isFoundingCreator && (
                 <span className="badge-plat">
                   <Sparkles className="h-3 w-3" /> Founding
                 </span>
               )}
-              {post.isPlatinum && <span className="badge-plat">Platinum</span>}
+              <PlatinumBadge isPlatinum={post.isPlatinum} className="h-4 w-4" />
             </div>
             <div className="mt-0.5 flex flex-wrap items-center gap-1.5 font-noto text-xs text-muted">
               <span className="rounded-full bg-bg3 px-2 py-0.5 text-[11px] font-semibold text-clay2">

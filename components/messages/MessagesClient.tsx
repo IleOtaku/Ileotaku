@@ -6,7 +6,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import {
   ArrowLeft,
-  BadgeCheck,
   Check,
   ChevronRight,
   Copy,
@@ -22,7 +21,6 @@ import {
   ShieldOff,
   Shield,
   Smile,
-  Star,
   Trash2,
   UserPlus,
   Users,
@@ -31,6 +29,7 @@ import {
 import BlockButton from "@/components/social/BlockButton";
 import { Modal, Skeleton } from "@/components/ui";
 import { Avatar } from "@/components/ui/Avatar";
+import { PlatinumBadge, VerifiedBadge } from "@/components/ui/Badges";
 import MentionText from "@/components/ui/MentionText";
 import { useAuth } from "@/hooks/useAuth";
 import { getBlockedUsers, isBlockedBy } from "@/lib/blocking";
@@ -61,7 +60,7 @@ import { getNowPlayingOnce } from "@/lib/nowPlaying";
 import { subscribeToUserStatus, type OnlineStatus } from "@/lib/onlineStatus";
 import { subscribeToStories } from "@/lib/stories";
 import SpotifyMiniPlayer from "@/components/spotify/SpotifyMiniPlayer";
-import { formatTime, initials, stringToColor, truncate } from "@/lib/utils";
+import { formatPostTimestamp, formatTime, initials, stringToColor, truncate } from "@/lib/utils";
 import type { Conversation, DMMessage, MessageReplyTo, UserProfile } from "@/types";
 
 const MAX_TEXTAREA_HEIGHT = 112; // ~4 lines at this input's font/line-height + padding
@@ -899,7 +898,7 @@ export default function MessagesClient() {
                     <div className="flex items-center justify-between gap-2">
                       <span className="truncate font-syne text-sm font-semibold text-text">{name}</span>
                       <span className="shrink-0 font-noto text-[10px] text-muted">
-                        {formatTime(c.lastMessageAt)}
+                        {formatPostTimestamp(c.lastMessageAt)}
                       </span>
                     </div>
                     <div className="flex items-center justify-between gap-2">
@@ -1005,10 +1004,8 @@ export default function MessagesClient() {
                     <div className="min-w-0 flex-1">
                       <Link href={otherProfileHref ?? "#"} className="flex items-center gap-1 truncate font-syne text-sm font-semibold text-text hover:underline">
                         <span className="truncate">{otherName}</span>
-                        {(otherProfile?.isVerified === true || otherProfile?.verified === true) && (
-                          <BadgeCheck className="h-3.5 w-3.5 shrink-0 text-plat" />
-                        )}
-                        {otherProfile?.isPlatinum && <Star className="h-3 w-3 shrink-0 fill-gold text-gold" />}
+                        <VerifiedBadge profile={otherProfile} className="h-3.5 w-3.5" />
+                        <PlatinumBadge isPlatinum={otherProfile?.isPlatinum} className="h-3.5 w-3.5" />
                         {otherProfile?.handle && (
                           <span className="ml-1 font-noto text-xs font-normal text-muted">@{otherProfile.handle}</span>
                         )}
@@ -1124,7 +1121,7 @@ export default function MessagesClient() {
                               <>
                                 <MentionText text={m.text} />
                                 <span className="mt-1 flex items-center gap-1 text-[10px]">
-                                  <span className={isOwn ? "text-ivory/70" : "text-muted"}>{formatTime(m.createdAt)}</span>
+                                  <span className={isOwn ? "text-ivory/70" : "text-muted"}>{formatPostTimestamp(m.createdAt)}</span>
                                   {m.isEdited && <span className={isOwn ? "text-ivory/70" : "text-muted"}>(edited)</span>}
                                 </span>
                               </>
@@ -1199,22 +1196,22 @@ export default function MessagesClient() {
                                 <Copy className="h-4 w-4" /> Copy
                               </button>
                               {isOwn && (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={() => startEdit(m)}
-                                    className="flex items-center gap-2 rounded-lg px-3 py-2 text-left font-noto text-sm text-text hover:bg-bg4"
-                                  >
-                                    <Pencil className="h-4 w-4" /> Edit
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDelete(m.id, true)}
-                                    className="flex items-center gap-2 rounded-lg px-3 py-2 text-left font-noto text-sm text-clay2 hover:bg-bg4"
-                                  >
-                                    <Trash2 className="h-4 w-4" /> Delete for everyone
-                                  </button>
-                                </>
+                                <button
+                                  type="button"
+                                  onClick={() => startEdit(m)}
+                                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-left font-noto text-sm text-text hover:bg-bg4"
+                                >
+                                  <Pencil className="h-4 w-4" /> Edit
+                                </button>
+                              )}
+                              {(isOwn || isGroupAdmin) && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDelete(m.id, true)}
+                                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-left font-noto text-sm text-clay2 hover:bg-bg4"
+                                >
+                                  <Trash2 className="h-4 w-4" /> Delete for everyone
+                                </button>
                               )}
                               <button
                                 type="button"

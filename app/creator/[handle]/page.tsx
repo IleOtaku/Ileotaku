@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { BadgeCheck, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { getCoverGradient } from "@/lib/coverStyles";
-import { Avatar } from "@/components/ui/Avatar";
+import AvatarLightbox from "@/components/ui/AvatarLightbox";
+import { PlatinumBadge, VerifiedBadge } from "@/components/ui/Badges";
 import { getUserByHandle } from "@/lib/firestore";
 import { getPostsByCreator } from "@/lib/creatorFeed";
 import { getPublishedSeriesByAuthor } from "@/lib/publishedSeries";
@@ -92,7 +93,7 @@ export default async function CreatorProfilePage({ params }: CreatorProfilePageP
       <div className="mx-auto max-w-5xl px-4 pb-16 sm:px-6">
         <div className="relative z-10 -mt-14 flex flex-col items-start gap-4 sm:-mt-16 sm:flex-row sm:items-end sm:justify-between">
           <div className="flex items-end gap-4">
-            <Avatar
+            <AvatarLightbox
               uid={creator.uid}
               photoURL={creator.photoURL}
               displayName={creator.displayName}
@@ -103,7 +104,8 @@ export default async function CreatorProfilePage({ params }: CreatorProfilePageP
             <div className="pb-2">
               <div className="flex items-center gap-2">
                 <h1 className="font-cinzel text-2xl text-text">{creator.displayName}</h1>
-                {creator.verified && <BadgeCheck className="h-5 w-5 text-plat" />}
+                <VerifiedBadge profile={creator} className="h-5 w-5" />
+                <PlatinumBadge isPlatinum={creator.isPlatinum} className="h-5 w-5" />
               </div>
               {creator.handle && <p className="font-noto text-sm text-muted">@{creator.handle}</p>}
               {creator.isPlatinum && creator.platinumTagline && (
