@@ -11,6 +11,7 @@ import { formatTime } from "@/lib/utils";
 import { Skeleton } from "@/components/ui";
 import { Avatar } from "@/components/ui/Avatar";
 import MentionText from "@/components/ui/MentionText";
+import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import type { ChatMessage } from "@/types";
 
 export type ReaderSidebarTab = "details" | "chapters" | "chat";
@@ -265,6 +266,10 @@ export function ChatTab({ mangaId, mangaTitle }: { mangaId: string | null; manga
         senderName: profile?.displayName ?? user.displayName ?? "Reader",
         senderPhotoURL: user.photoURL ?? "",
         senderIsPlatinum: profile?.isPlatinum === true,
+        senderIsFounder: profile?.isFounder === true,
+        senderIsAdmin: profile?.isAdmin === true,
+        senderIsVerified: profile?.isVerified === true,
+        senderVerifiedType: profile?.verifiedType ?? null,
         text: draft.trim(),
       });
       setDraft("");
@@ -333,6 +338,15 @@ export function ChatTab({ mangaId, mangaTitle }: { mangaId: string | null; manga
                       <span className="truncate font-syne text-xs font-semibold text-text">
                         {m.senderName}
                       </span>
+                      <VerificationBadge
+                        user={{
+                          isFounder: m.senderIsFounder,
+                          isAdmin: m.senderIsAdmin,
+                          isVerified: m.senderIsVerified,
+                          verifiedType: m.senderVerifiedType,
+                        }}
+                        size={12}
+                      />
                       {m.senderIsPlatinum && <span className="text-plat">✦</span>}
                       <span className="font-noto text-[10px] text-muted">
                         {formatTime(m.createdAt)}

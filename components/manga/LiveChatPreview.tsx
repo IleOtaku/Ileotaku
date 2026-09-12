@@ -6,6 +6,7 @@ import { MessagesSquare, Users } from "lucide-react";
 import { Skeleton } from "@/components/ui";
 import { Avatar } from "@/components/ui/Avatar";
 import MentionText from "@/components/ui/MentionText";
+import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import { useAuth } from "@/hooks/useAuth";
 import { getRecentChatMessages } from "@/lib/firestore";
 import { formatTime } from "@/lib/utils";
@@ -108,6 +109,15 @@ export default function LiveChatPreview({ mangaId }: LiveChatPreviewProps) {
                     <span className="truncate font-syne text-xs font-semibold text-text">
                       {m.senderName}
                     </span>
+                    <VerificationBadge
+                      user={{
+                        isFounder: m.senderIsFounder,
+                        isAdmin: m.senderIsAdmin,
+                        isVerified: m.senderIsVerified,
+                        verifiedType: m.senderVerifiedType,
+                      }}
+                      size={11}
+                    />
                     {m.senderIsPlatinum && <span className="text-plat">✦</span>}
                     <span className="font-noto text-[10px] text-muted">{formatTime(m.createdAt)}</span>
                   </div>

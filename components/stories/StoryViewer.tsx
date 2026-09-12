@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import { Eye, Send, Trash2, Volume2, VolumeX, X } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
+import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import { useAuth } from "@/hooks/useAuth";
 import { sendDM, startConversation } from "@/lib/dms";
 import { getUserProfile } from "@/lib/firestore";
@@ -322,7 +323,10 @@ export default function StoryViewer({ uids, startUid, storiesByUid, onClose, onA
         <div className="absolute inset-x-0 top-6 z-10 flex items-center gap-2 px-3">
           <Avatar uid={story.uid} photoURL={story.photoURL} displayName={story.displayName} size={32} />
           <div className="min-w-0 flex-1">
-            <p className="truncate font-syne text-sm font-semibold text-white">{story.displayName}</p>
+            <p className="flex items-center gap-1 truncate font-syne text-sm font-semibold text-white">
+              <span className="truncate">{story.displayName}</span>
+              <VerificationBadge user={story} size={13} />
+            </p>
             <p className="font-noto text-[11px] text-white/70">{formatPostTimestamp(story.createdAt)}</p>
           </div>
           {isOwn && (

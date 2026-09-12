@@ -11,7 +11,8 @@ import ReportButton from "@/components/social/ReportButton";
 import NowPlayingCard from "@/components/spotify/NowPlayingCard";
 import { getCoverGradient } from "@/lib/coverStyles";
 import AvatarLightbox from "@/components/ui/AvatarLightbox";
-import { PlatinumBadge, VerifiedBadge } from "@/components/ui/Badges";
+import { PlatinumBadge } from "@/components/ui/Badges";
+import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import { getUserProfile } from "@/lib/firestore";
 import type { UserProfile } from "@/types";
 
@@ -73,7 +74,7 @@ export default async function PublicProfilePage({ params }: PublicProfilePagePro
         <div className="flex-1">
           <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
             <h1 className="font-cinzel text-2xl text-text">{profile.displayName}</h1>
-            <VerifiedBadge profile={profile} className="h-5 w-5" />
+            <VerificationBadge user={profile} size={20} />
             <PlatinumBadge isPlatinum={profile.isPlatinum} className="h-5 w-5" />
             {profile.isPlatinum && <span className="badge-plat">Platinum</span>}
           </div>

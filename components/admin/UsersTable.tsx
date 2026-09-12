@@ -30,6 +30,7 @@ import {
 } from "@/lib/admin";
 import { Modal, Skeleton } from "@/components/ui";
 import { Avatar } from "@/components/ui/Avatar";
+import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import { useAuth } from "@/hooks/useAuth";
 import { getUserProfileUrl } from "@/lib/utils";
 import type { UserProfile } from "@/types";
@@ -274,7 +275,10 @@ export default function UsersTable({ users, loading, canManageAdmins = true, onU
                 <tr key={u.uid} className={`border-b border-bg4 last:border-0 ${rowTint}`}>
                   <td className="flex items-center gap-2.5 p-3">
                     <Avatar uid={u.uid} photoURL={u.photoURL} displayName={u.displayName} size={32} />
-                    <span className="font-noto text-sm text-text">{u.displayName}</span>
+                    <span className="flex items-center gap-1 font-noto text-sm text-text">
+                      {u.displayName}
+                      <VerificationBadge user={u} size={14} />
+                    </span>
                   </td>
                   <td className="p-3 font-noto text-xs text-muted">{u.email}</td>
                   <td className="p-3">

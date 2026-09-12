@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { Search, X } from "lucide-react";
-import { PlatinumBadge, VerifiedBadge } from "@/components/ui/Badges";
+import { PlatinumBadge } from "@/components/ui/Badges";
+import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import { Avatar } from "@/components/ui/Avatar";
 import { useSearchPreview } from "@/hooks/useSearchPreview";
 import { proxyImg } from "@/lib/manga-api";
@@ -155,7 +156,7 @@ export default function MobileNavSearch({ open, onOpen, onClose }: MobileNavSear
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-1 font-noto text-sm text-text">
                             <span className="truncate">{p.displayName}</span>
-                            <VerifiedBadge profile={p} className="h-3 w-3" />
+                            <VerificationBadge user={p} size={12} />
                             <PlatinumBadge isPlatinum={p.isPlatinum} className="h-3 w-3" />
                           </span>
                           {p.handle && (

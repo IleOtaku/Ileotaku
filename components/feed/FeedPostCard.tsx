@@ -20,7 +20,8 @@ import {
 import BoostModal from "./BoostModal";
 import EditingAppBadge from "./EditingAppBadge";
 import { Avatar } from "@/components/ui/Avatar";
-import { PlatinumBadge, VerifiedBadge } from "@/components/ui/Badges";
+import { PlatinumBadge } from "@/components/ui/Badges";
+import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import { getOptimizedImageUrl } from "@/lib/cloudinary";
 import { deletePost, incrementPostViews, incrementViewCount, likePost, trackWatchTime } from "@/lib/creatorFeed";
 import { useAuth } from "@/hooks/useAuth";
@@ -272,7 +273,7 @@ function FeedPostCard({ post, onDeleted }: FeedPostCardProps) {
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="font-syne text-sm font-semibold text-text">{post.displayName}</span>
-              <VerifiedBadge profile={post} className="h-4 w-4" />
+              <VerificationBadge user={post} size={16} />
               {post.isFoundingCreator && (
                 <span className="badge-plat">
                   <Sparkles className="h-3 w-3" /> Founding

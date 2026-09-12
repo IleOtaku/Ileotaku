@@ -6,7 +6,8 @@ import { Sparkles } from "lucide-react";
 import FollowButton from "@/components/social/FollowButton";
 import MessageButton from "@/components/social/MessageButton";
 import { Avatar } from "@/components/ui/Avatar";
-import { PlatinumBadge, VerifiedBadge } from "@/components/ui/Badges";
+import { PlatinumBadge } from "@/components/ui/Badges";
+import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import { getCreatorStats } from "@/lib/firestore";
 import { truncate } from "@/lib/utils";
 import type { UserProfile } from "@/types";
@@ -45,7 +46,7 @@ export default function PersonCard({ person }: PersonCardProps) {
         <div className="min-w-0 flex-1">
           <Link href={profileHref} className="flex flex-wrap items-center gap-1.5">
             <span className="font-syne text-sm font-semibold text-text">{person.displayName}</span>
-            <VerifiedBadge profile={person} className="h-4 w-4" />
+            <VerificationBadge user={person} size={16} />
             {person.foundingCreator && (
               <span className="badge-plat text-[10px]">
                 <Sparkles className="h-2.5 w-2.5" /> Founding

@@ -29,7 +29,8 @@ import {
 import BlockButton from "@/components/social/BlockButton";
 import { Modal, Skeleton } from "@/components/ui";
 import { Avatar } from "@/components/ui/Avatar";
-import { PlatinumBadge, VerifiedBadge } from "@/components/ui/Badges";
+import { PlatinumBadge } from "@/components/ui/Badges";
+import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import LinkPreviewCard from "@/components/ui/LinkPreviewCard";
 import MentionText, { extractFirstUrl } from "@/components/ui/MentionText";
 import { useAuth } from "@/hooks/useAuth";
@@ -108,6 +109,11 @@ export default function MessagesClient() {
   const [sidebarQuery, setSidebarQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [otherProfile, setOtherProfile] = useState<UserProfile | null>(null);
+  // 5-tier verification overhaul: the sidebar conversation list only denormalizes
+  // participantNames/Photos (strings) onto each Conversation — same gap propagateProfileChange
+  // already leaves for display-name/photo staleness there, so this follows the same precedent
+  // (an on-demand, additive-only cache) rather than a new denormalize-and-propagate write path.
+  const [otherParticipantProfiles, setOtherParticipantProfiles] = useState<Map<string, UserProfile>>(new Map());
   const [messages, setMessages] = useState<DMMessage[]>([]);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -186,6 +192,11 @@ export default function MessagesClient() {
   const [addingMembers, setAddingMembers] = useState(false);
   const [memberActionUid, setMemberActionUid] = useState<string | null>(null);
   const [groupInfoBusy, setGroupInfoBusy] = useState(false);
+  // 5-tier verification overhaul: the group roster only denormalizes participantNames/Photos
+  // (strings) onto the Conversation doc, not verification data — fetched on demand instead of a
+  // full schema/write-path change, since a group's member list is small and only loaded while its
+  // own info panel is actually open.
+  const [participantProfiles, setParticipantProfiles] = useState<Map<string, UserProfile>>(new Map());
   const [editingGroupName, setEditingGroupName] = useState(false);
   const [groupNameDraft, setGroupNameDraft] = useState("");
   const groupPhotoInputRef = useRef<HTMLInputElement>(null);
@@ -216,6 +227,38 @@ export default function MessagesClient() {
     });
     return unsub;
   }, [user]);
+
+  // 5-tier verification overhaul: fetches (and caches, additively — never refetches a uid it
+  // already has) the badge-relevant fields for every DM's other participant, so the sidebar list
+  // can show a verification badge next to each name.
+  useEffect(() => {
+    if (!user) return;
+    const otherUids = Array.from(
+      new Set(
+        conversations
+          .filter((c) => c.type !== "group")
+          .map((c) => c.participants.find((id) => id !== user.uid))
+          .filter((id): id is string => !!id)
+      )
+    );
+    const missing = otherUids.filter((uid) => !otherParticipantProfiles.has(uid));
+    if (missing.length === 0) return;
+    let cancelled = false;
+    Promise.all(missing.map((uid) => getUserProfile(uid).then((p) => [uid, p] as const))).then((results) => {
+      if (cancelled) return;
+      setOtherParticipantProfiles((prev) => {
+        const next = new Map(prev);
+        results.forEach(([uid, p]) => {
+          if (p) next.set(uid, p);
+        });
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversations, user]);
 
   // Closes the group info panel (and its own add-members sub-flow) whenever the open
   // conversation changes, so switching threads never leaves a stale panel open on the new one.
@@ -465,6 +508,28 @@ export default function MessagesClient() {
 
   const selectedGroup = conversations.find((c) => c.id === selectedId && c.type === "group");
   const isGroupAdmin = selectedGroup && user ? (selectedGroup.adminUids ?? []).includes(user.uid) : false;
+  const groupParticipantsKey = selectedGroup?.participants.join(",") ?? "";
+
+  // 5-tier verification overhaul: fetches full profiles for the group roster's badges — see
+  // participantProfiles' own doc comment above for why this is on-demand rather than denormalized.
+  useEffect(() => {
+    if (!groupInfoOpen || !groupParticipantsKey) {
+      setParticipantProfiles(new Map());
+      return;
+    }
+    let cancelled = false;
+    Promise.all(groupParticipantsKey.split(",").map((uid) => getUserProfile(uid))).then((profiles) => {
+      if (cancelled) return;
+      const map = new Map<string, UserProfile>();
+      profiles.forEach((p, i) => {
+        if (p) map.set(groupParticipantsKey.split(",")[i], p);
+      });
+      setParticipantProfiles(map);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [groupInfoOpen, groupParticipantsKey]);
 
   async function handleAddMembersToOpenGroup() {
     if (!user || !selectedGroup || groupMemberUids.size === 0) return;
@@ -925,7 +990,10 @@ export default function MessagesClient() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="truncate font-syne text-sm font-semibold text-text">{name}</span>
+                      <span className="flex min-w-0 items-center gap-1">
+                        <span className="truncate font-syne text-sm font-semibold text-text">{name}</span>
+                        {!isGroup && <VerificationBadge user={otherParticipantProfiles.get(other)} size={12} />}
+                      </span>
                       <span className="shrink-0 font-noto text-[10px] text-muted">
                         {formatPostTimestamp(c.lastMessageAt)}
                       </span>
@@ -1033,7 +1101,7 @@ export default function MessagesClient() {
                     <div className="min-w-0 flex-1">
                       <Link href={otherProfileHref ?? "#"} className="flex items-center gap-1 truncate font-syne text-sm font-semibold text-text hover:underline">
                         <span className="truncate">{otherName}</span>
-                        <VerifiedBadge profile={otherProfile} className="h-3.5 w-3.5" />
+                        <VerificationBadge user={otherProfile} size={14} />
                         <PlatinumBadge isPlatinum={otherProfile?.isPlatinum} className="h-3.5 w-3.5" />
                         {otherProfile?.handle && (
                           <span className="ml-1 font-noto text-xs font-normal text-muted">@{otherProfile.handle}</span>
@@ -1722,8 +1790,9 @@ export default function MessagesClient() {
                           <span className="absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full border-2 border-bg2 bg-gold" />
                         )}
                       </div>
-                      <span className="min-w-0 flex-1 truncate font-noto text-sm text-text">
-                        {uid === user.uid ? "You" : name}
+                      <span className="flex min-w-0 flex-1 items-center gap-1 truncate font-noto text-sm text-text">
+                        <span className="truncate">{uid === user.uid ? "You" : name}</span>
+                        <VerificationBadge user={participantProfiles.get(uid)} size={13} />
                       </span>
                       {isMemberAdmin && <span className="font-noto text-[10px] font-semibold text-gold">Admin</span>}
                       {isGroupAdmin && uid !== user.uid && (

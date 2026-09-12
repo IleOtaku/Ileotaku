@@ -15,7 +15,8 @@ import {
   Trash2,
 } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
-import { PlatinumBadge, VerifiedBadge } from "@/components/ui/Badges";
+import { PlatinumBadge } from "@/components/ui/Badges";
+import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import MentionText from "@/components/ui/MentionText";
 import { useAuth } from "@/hooks/useAuth";
 import { getBlockedUsers } from "@/lib/blocking";
@@ -123,7 +124,7 @@ const CommentRow = memo(function CommentRow({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="font-syne text-sm font-semibold text-text">{comment.userName}</span>
-            <VerifiedBadge profile={{ isVerified: comment.isVerified, isPublisher: comment.isPublisher, isFounder: comment.isFounder }} />
+            <VerificationBadge user={comment} />
             <PlatinumBadge isPlatinum={comment.isPlatinum} />
             <span className="font-noto text-[11px] text-muted">{formatPostTimestamp(comment.createdAt)}</span>
             {comment.isEdited && !comment.isDeleted && (
@@ -339,6 +340,8 @@ export default function CommentSection({ mangaId, chapterId, variant = "page" }:
         isPlatinum: profile?.isPlatinum === true,
         isPublisher: profile?.isPublisher === true,
         isFounder: profile?.isFounder === true,
+        verifiedType: profile?.verifiedType ?? null,
+        isAdmin: profile?.isAdmin === true,
         text: trimmed,
         isSpoiler,
         parentId: null,
@@ -365,6 +368,8 @@ export default function CommentSection({ mangaId, chapterId, variant = "page" }:
         isPlatinum: profile?.isPlatinum === true,
         isPublisher: profile?.isPublisher === true,
         isFounder: profile?.isFounder === true,
+        verifiedType: profile?.verifiedType ?? null,
+        isAdmin: profile?.isAdmin === true,
         text: trimmed,
         isSpoiler: false,
         parentId,

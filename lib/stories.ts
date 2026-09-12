@@ -57,7 +57,10 @@ export interface StoryMedia {
  * anyone else always gets the default 24h regardless of what's passed in. */
 export async function createStory(
   uid: string,
-  profile: Pick<UserProfile, "displayName" | "photoURL" | "isPlatinum">,
+  profile: Pick<
+    UserProfile,
+    "displayName" | "photoURL" | "isPlatinum" | "isFounder" | "isAdmin" | "isVerified" | "verifiedType"
+  >,
   media: StoryMedia,
   durationMs?: number
 ): Promise<string> {
@@ -86,6 +89,12 @@ export async function createStory(
       uid,
       displayName: profile.displayName,
       ...(profile.photoURL ? { photoURL: profile.photoURL } : {}),
+      // 5-tier verification overhaul: denormalized so StoriesBar/StoryViewer can badge the
+      // author without a per-story profile lookup.
+      isFounder: profile.isFounder ?? false,
+      isAdmin: profile.isAdmin ?? false,
+      isVerified: profile.isVerified ?? false,
+      verifiedType: profile.verifiedType ?? null,
       mediaUrl,
       mediaType,
       ...(media.textContent ? { textContent: media.textContent } : {}),

@@ -14,7 +14,8 @@ import ProfileVisitorsSection from "@/components/profile/ProfileVisitorsSection"
 import FollowListModal from "@/components/social/FollowListModal";
 import NowPlayingCard from "@/components/spotify/NowPlayingCard";
 import { Skeleton, Tabs } from "@/components/ui";
-import { PlatinumBadge, VerifiedBadge } from "@/components/ui/Badges";
+import { PlatinumBadge } from "@/components/ui/Badges";
+import { VerificationBadge } from "@/components/ui/VerificationBadge";
 
 // Sprint 10 perf audit: this page's own First Load JS pulled in all five tab bodies plus both
 // modals even though only one tab (and no modal) is ever visible on first paint — dynamically
@@ -256,7 +257,7 @@ export default function ProfileClient() {
           <div className="pb-1">
             <div className="flex items-center gap-2">
               <h1 className="font-cinzel text-xl text-text sm:text-2xl">{displayName}</h1>
-              <VerifiedBadge profile={profile} className="h-5 w-5" />
+              <VerificationBadge user={profile} size={20} />
               <PlatinumBadge isPlatinum={isPlatinum} className="h-5 w-5" />
               {isPlatinum ? (
                 <span className="badge-plat">Platinum</span>

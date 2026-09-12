@@ -5,7 +5,8 @@ import toast from "react-hot-toast";
 import { AnimatePresence, motion } from "framer-motion";
 import { Heart, Loader2, Send, Smile, X } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
-import { PlatinumBadge, VerifiedBadge } from "@/components/ui/Badges";
+import { PlatinumBadge } from "@/components/ui/Badges";
+import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import MentionText from "@/components/ui/MentionText";
 import { useAuth } from "@/hooks/useAuth";
 import {
@@ -89,7 +90,7 @@ function CommentRow({ postId, comment, isReply, replies, onReply, onOpenMenu }: 
         <div className="min-w-0 flex-1">
           <p className="flex items-center gap-1 font-syne text-xs font-semibold text-white">
             {comment.displayName}
-            <VerifiedBadge profile={comment} className="h-3 w-3" />
+            <VerificationBadge user={comment} size={12} />
             <PlatinumBadge isPlatinum={comment.isPlatinum} className="h-3 w-3" />
             <span className="ml-0.5 font-noto text-[10px] font-normal text-white/40">{formatPostTimestamp(comment.createdAt)}</span>
           </p>
@@ -175,6 +176,8 @@ export default function FeedCommentSheet({ postId, postAuthorUid, open, onClose 
         isPlatinum: profile.isPlatinum === true,
         isPublisher: profile.isPublisher === true,
         isFounder: profile.isFounder === true,
+        verifiedType: profile.verifiedType ?? null,
+        isAdmin: profile.isAdmin === true,
         text: text.trim(),
         parentId: replyTo?.id ?? null,
       });

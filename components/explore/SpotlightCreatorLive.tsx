@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Globe2 } from "lucide-react";
 import FollowButton from "@/components/social/FollowButton";
 import { Avatar } from "@/components/ui/Avatar";
+import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import { getCreatorStats, getPopularCreators } from "@/lib/firestore";
 import type { UserProfile } from "@/types";
 
@@ -60,6 +61,7 @@ export default function SpotlightCreatorLive() {
       <div>
         <p className="flex items-center gap-2 font-syne text-base font-semibold text-text">
           {creator.displayName}
+          <VerificationBadge user={creator} size={16} />
           {creator.handle && (
             <span className="rounded-full bg-clay/15 px-2 py-0.5 font-noto text-[10px] font-semibold text-clay2">
               <Globe2 className="mr-1 inline h-3 w-3" /> @{creator.handle}

@@ -68,7 +68,7 @@ export interface UserProfile {
   /** ÍléOtaku's own actual founder — a single account, set manually (never through the
    * creator/publisher verify flow), distinct from `foundingCreator` (the early-cohort-creator
    * badge below). Recolors the verified checkmark gold everywhere it renders — see
-   * components/ui/Badges.tsx's VerifiedBadge, the one place this is actually read. */
+   * components/ui/VerificationBadge.tsx, the one place this is actually read. */
   isFounder?: boolean;
   /** Beta feedback: "Allow free users to buy 1hr ads free with coins." ISO timestamp — while
    * `now < adsFreeUntil`, every ad component (see lib/ads.ts's isAdsFree) treats this account
@@ -280,6 +280,11 @@ export interface ChatMessage {
   senderPhotoURL?: string;
   /** Denormalized onto the message at send-time so the chat UI can show the ✦ badge without a lookup. */
   senderIsPlatinum?: boolean;
+  /** 5-tier verification overhaul: denormalized the same way, for getVerificationBadge. */
+  senderIsFounder?: boolean;
+  senderIsAdmin?: boolean;
+  senderIsVerified?: boolean;
+  senderVerifiedType?: "creator" | "publisher" | null;
   text: string;
   createdAt: string;
   isEdited?: boolean;
@@ -611,6 +616,31 @@ export interface BetaFeedbackEntry {
   resolved: boolean;
 }
 
+/* ---------------------------- Verification applications ---------------------------- */
+
+export type VerificationCategory = "Content Creator" | "Writer" | "Artist" | "Musician" | "Brand" | "Other";
+export type VerificationApplicationStatus = "pending" | "approved" | "rejected";
+
+/** One per uid (the document id IS the applicant's uid — see lib/verification.ts) — a Platinum
+ * member's request for a verified badge, triaged from the admin dashboard's Verification
+ * Applications tab (approveApplication/rejectApplication). */
+export interface VerificationApplication {
+  uid: string;
+  displayName: string;
+  handle?: string;
+  photoURL?: string;
+  reason: string;
+  links: string[];
+  category: VerificationCategory;
+  status: VerificationApplicationStatus;
+  /** Set only once, the reason shown alongside a "rejected" status. */
+  rejectionReason?: string;
+  submittedAt: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  isPlatinum: true;
+}
+
 /* ---------------------------- Admin: maintenance mode ---------------------------- */
 
 export type MaintenanceSystem = "reader" | "auth" | "payments" | "notifications" | "all";
@@ -691,10 +721,16 @@ export interface SeriesComment {
   userPhotoURL?: string;
   isVerified?: boolean;
   isPlatinum?: boolean;
-  /** Denormalized alongside isVerified so components/ui/Badges.tsx's VerifiedBadge can pick the
+  /** Denormalized alongside isVerified so components/ui/VerificationBadge.tsx can pick the
    * right tier/color here too, same as everywhere else it renders. */
   isPublisher?: boolean;
   isFounder?: boolean;
+  /** 5-tier verification overhaul: denormalized so getVerificationBadge (lib/verification.ts) can
+   * pick the right tier here too. `verifiedType` is authoritative going forward (set by an admin
+   * via approveApplication); `isPublisher` above is kept only as a fallback for comments written
+   * before this field existed — see getVerificationBadge's own fallback logic. */
+  verifiedType?: "creator" | "publisher" | null;
+  isAdmin?: boolean;
   text: string;
   isSpoiler?: boolean;
   /** Null/absent for a top-level comment; otherwise the id of the comment being replied to. */
@@ -732,6 +768,12 @@ export interface Story {
   uid: string;
   displayName: string;
   photoURL?: string;
+  /** 5-tier verification overhaul: denormalized at story-creation time so StoriesBar's circle
+   * username and StoryViewer's header can render getVerificationBadge without a per-story lookup. */
+  isFounder?: boolean;
+  isAdmin?: boolean;
+  isVerified?: boolean;
+  verifiedType?: "creator" | "publisher" | null;
   mediaUrl: string;
   mediaType: "image" | "video" | "text";
   textContent?: string;
@@ -845,10 +887,14 @@ export interface CreatorPost {
   isVerified?: boolean;
   isPlatinum?: boolean;
   isFoundingCreator?: boolean;
-  /** Denormalized alongside isVerified so components/ui/Badges.tsx's VerifiedBadge can pick the
+  /** Denormalized alongside isVerified so components/ui/VerificationBadge.tsx can pick the
    * right tier/color on this post too, same as everywhere else it renders. */
   isPublisher?: boolean;
   isFounder?: boolean;
+  /** 5-tier verification overhaul: see the identical field on SeriesComment above for why
+   * `verifiedType` (authoritative) sits alongside the legacy `isPublisher` fallback. */
+  verifiedType?: "creator" | "publisher" | null;
+  isAdmin?: boolean;
   /** Beta feedback: "Creators should be able to stop people from downloading their videos, pics,
    * or posts by toggling it in profile settings." Denormalized from the author's profile at post
    * time (same convention as isVerified/isPlatinum above) — FeedShareSheet hides its Download
@@ -943,10 +989,14 @@ export interface FeedComment {
    * comments section" — denormalized at comment-creation time the same way isVerified already
    * was, so FeedCommentSheet's CommentRow can render it with no per-comment profile lookup. */
   isPlatinum?: boolean;
-  /** Denormalized alongside isVerified so components/ui/Badges.tsx's VerifiedBadge can pick the
+  /** Denormalized alongside isVerified so components/ui/VerificationBadge.tsx can pick the
    * right tier/color here too, same as everywhere else it renders. */
   isPublisher?: boolean;
   isFounder?: boolean;
+  /** 5-tier verification overhaul: see the identical field on SeriesComment above for why
+   * `verifiedType` (authoritative) sits alongside the legacy `isPublisher` fallback. */
+  verifiedType?: "creator" | "publisher" | null;
+  isAdmin?: boolean;
   text: string;
   /** Null/absent for a top-level comment; otherwise the id of the comment being replied to. */
   parentId?: string | null;

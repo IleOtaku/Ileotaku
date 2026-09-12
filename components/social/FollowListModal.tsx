@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Modal, Skeleton } from "@/components/ui";
 import { Avatar } from "@/components/ui/Avatar";
+import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import { getFollowers, getFollowing } from "@/lib/social";
 import type { UserProfile } from "@/types";
 import FollowButton from "./FollowButton";
@@ -59,8 +60,9 @@ export default function FollowListModal({ open, onClose, title, uid, mode }: Fol
                 className="flex min-w-0 flex-1 items-center gap-3"
               >
                 <Avatar uid={u.uid} photoURL={u.photoURL} displayName={u.displayName} size={40} />
-                <span className="min-w-0 truncate font-syne text-sm font-semibold text-text">
-                  {u.displayName}
+                <span className="flex min-w-0 items-center gap-1 truncate font-syne text-sm font-semibold text-text">
+                  <span className="truncate">{u.displayName}</span>
+                  <VerificationBadge user={u} size={14} />
                 </span>
               </Link>
               <FollowButton

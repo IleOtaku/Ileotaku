@@ -537,6 +537,20 @@ service cloud.firestore {
       allow create: if true;
     }
 
+    // ---------------------------- verification applications ----------------------------
+    // 5-tier verification overhaul (Part 4): one document per applicant, keyed by their own uid
+    // (submitVerificationApplication uses setDoc, so a reapply after rejection just overwrites
+    // the previous doc rather than piling up one per attempt). Only a Platinum member may create
+    // their own application — checked server-side here, not just client-side in
+    // SettingsTab.tsx, so a crafted client call can't bypass the Platinum requirement.
+    match /verificationApplications/{uid} {
+      allow create: if isSignedIn() && request.auth.uid == uid
+        && get(/databases/$(database)/documents/users/$(uid)).data.isPlatinum == true;
+      allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
     // ---------------------------- admin: announcements ----------------------------
     // The announcement record itself (compose history) is admin-only; actual delivery to
     // users happens through their own notifications subcollection, which already has its own

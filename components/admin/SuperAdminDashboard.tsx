@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { Shield } from "lucide-react";
 import { getAllUsers } from "@/lib/firestore";
 import { getFeedback, subscribeToPendingAppealCount } from "@/lib/admin";
+import { getAllApplications } from "@/lib/verification";
 import { Skeleton, Tabs } from "@/components/ui";
 import type { UserProfile } from "@/types";
 
@@ -20,6 +21,7 @@ const AdminFinanceTab = dynamic(() => import("./AdminFinanceTab"), { ssr: false 
 const AdminOverviewTab = dynamic(() => import("./AdminOverviewTab"), { ssr: false });
 const AdminReportsTab = dynamic(() => import("./AdminReportsTab"), { ssr: false });
 const AdminWorksTab = dynamic(() => import("./AdminWorksTab"), { ssr: false });
+const AdminVerificationTab = dynamic(() => import("./AdminVerificationTab"), { ssr: false });
 const UsersTable = dynamic(() => import("./UsersTable"), { ssr: false });
 
 type SuperAdminTab =
@@ -31,7 +33,8 @@ type SuperAdminTab =
   | "announcements"
   | "finance"
   | "feedback"
-  | "appeals";
+  | "appeals"
+  | "verification";
 
 export interface SuperAdminDashboardProps {
   adminName: string;
@@ -49,6 +52,7 @@ export default function SuperAdminDashboard({ adminName, isSuperAdmin = true }: 
   const [usersLoading, setUsersLoading] = useState(true);
   const [unresolvedFeedback, setUnresolvedFeedback] = useState(0);
   const [pendingAppeals, setPendingAppeals] = useState(0);
+  const [pendingApplications, setPendingApplications] = useState(0);
 
   useEffect(() => {
     getAllUsers()
@@ -68,6 +72,12 @@ export default function SuperAdminDashboard({ adminName, isSuperAdmin = true }: 
     return subscribeToPendingAppealCount(setPendingAppeals);
   }, [isSuperAdmin]);
 
+  useEffect(() => {
+    getAllApplications()
+      .then((apps) => setPendingApplications(apps.filter((a) => a.status === "pending").length))
+      .catch(() => setPendingApplications(0));
+  }, [tab]);
+
   const TABS: { label: string; value: SuperAdminTab }[] = [
     { label: "Overview", value: "overview" },
     { label: "Users", value: "users" },
@@ -78,10 +88,16 @@ export default function SuperAdminDashboard({ adminName, isSuperAdmin = true }: 
     { label: "Finance", value: "finance" },
     { label: unresolvedFeedback > 0 ? `Feedback (${unresolvedFeedback})` : "Feedback", value: "feedback" },
     { label: pendingAppeals > 0 ? `Appeals (${pendingAppeals})` : "Appeals", value: "appeals" },
+    {
+      label: pendingApplications > 0 ? `Verification (${pendingApplications})` : "Verification",
+      value: "verification",
+    },
   ];
   const visibleTabs = isSuperAdmin
     ? TABS
-    : TABS.filter((t) => t.value !== "finance" && t.value !== "announcements" && t.value !== "appeals");
+    : TABS.filter(
+        (t) => t.value !== "finance" && t.value !== "announcements" && t.value !== "appeals" && t.value !== "verification"
+      );
 
   function handleUserUpdated(uid: string, patch: Partial<UserProfile>) {
     setUsers((prev) => prev.map((u) => (u.uid === uid ? { ...u, ...patch } : u)));
@@ -146,6 +162,8 @@ export default function SuperAdminDashboard({ adminName, isSuperAdmin = true }: 
           {tab === "feedback" && <AdminFeedbackTab />}
 
           {isSuperAdmin && tab === "appeals" && <AdminAppealsTab />}
+
+          {isSuperAdmin && tab === "verification" && <AdminVerificationTab />}
         </div>
       </section>
     </div>

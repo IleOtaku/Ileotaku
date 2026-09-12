@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Star } from "lucide-react";
-import { VerifiedBadge } from "@/components/ui/Badges";
+import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import { proxyImg } from "@/lib/manga-api";
 import type { SearchResultItem } from "./types";
 
@@ -35,7 +35,7 @@ export default function ResultCard({ item, view }: ResultCardProps) {
           <h3 className="truncate font-syne text-sm font-semibold text-text">{item.title}</h3>
           <p className="flex items-center gap-1 font-noto text-xs text-muted">
             by {item.author}
-            <VerifiedBadge profile={{ isVerified: item.authorVerified }} className="h-3 w-3" />
+            <VerificationBadge user={{ isVerified: item.authorVerified }} size={12} />
           </p>
           {item.genres.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
@@ -84,7 +84,7 @@ export default function ResultCard({ item, view }: ResultCardProps) {
         <p className="truncate font-syne text-xs font-semibold text-text">{item.title}</p>
         <p className="flex items-center gap-1 truncate font-noto text-[11px] text-muted">
           {item.author}
-          <VerifiedBadge profile={{ isVerified: item.authorVerified }} className="h-3 w-3" />
+          <VerificationBadge user={{ isVerified: item.authorVerified }} size={12} />
         </p>
         <div className="mt-auto flex items-center justify-between font-noto text-[11px] text-muted">
           <span className="flex items-center gap-1">

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Play, Plus } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
+import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import { useAuth } from "@/hooks/useAuth";
 import { MAX_ACTIVE_STORIES, subscribeToStories } from "@/lib/stories";
 import type { Story } from "@/types";
@@ -104,7 +105,10 @@ export default function StoriesBar() {
                 </span>
               )}
             </span>
-            <span className="max-w-[64px] truncate font-noto text-[11px] text-muted">{latest?.displayName ?? "Reader"}</span>
+            <span className="flex max-w-[64px] items-center gap-0.5 font-noto text-[11px] text-muted">
+              <span className="truncate">{latest?.displayName ?? "Reader"}</span>
+              <VerificationBadge user={latest} size={10} />
+            </span>
           </button>
         );
       })}

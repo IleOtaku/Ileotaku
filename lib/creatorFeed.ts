@@ -51,10 +51,14 @@ export interface CreatorPostBadges {
   isVerified?: boolean;
   isPlatinum?: boolean;
   isFoundingCreator?: boolean;
-  /** Denormalized alongside isVerified so components/ui/Badges.tsx's VerifiedBadge can pick the
+  /** Denormalized alongside isVerified so components/ui/VerificationBadge.tsx can pick the
    * right tier/color on a feed post too, same as everywhere else it renders. */
   isPublisher?: boolean;
   isFounder?: boolean;
+  /** 5-tier verification overhaul: verifiedType is authoritative going forward; isAdmin denormalized
+   * alongside it so getVerificationBadge can render the admin tier on a post too. */
+  verifiedType?: "creator" | "publisher" | null;
+  isAdmin?: boolean;
   /** Beta feedback: creator-side "disable downloads" toggle, denormalized at post time so
    * FeedShareSheet can hide its Download button without a per-post profile lookup. */
   disableDownloads?: boolean;
@@ -411,6 +415,8 @@ export async function createPost(input: CreatePostInput): Promise<string> {
       isFoundingCreator: badges.isFoundingCreator ?? false,
       isPublisher: badges.isPublisher ?? false,
       isFounder: badges.isFounder ?? false,
+      verifiedType: badges.verifiedType ?? null,
+      isAdmin: badges.isAdmin ?? false,
       disableDownloads: badges.disableDownloads ?? false,
       ...(sound
         ? {

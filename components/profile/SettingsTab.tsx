@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { Modal, Select, Skeleton, Toggle } from "@/components/ui";
 import { SpotifyGlyph } from "@/components/spotify/NowPlayingCard";
+import VerificationApplicationSection from "./VerificationApplicationSection";
 import { useAuth } from "@/hooks/useAuth";
 import { deleteMyAccount, friendlyError, hasPasswordProvider, resetPassword } from "@/lib/auth";
 import { subscribeToBlockedUsers, unblockUser } from "@/lib/blocking";
@@ -449,6 +450,8 @@ export default function SettingsTab() {
           </button>
         </div>
       </section>
+
+      <VerificationApplicationSection />
 
       <section>
         <h3 className="mb-4 flex items-center gap-2 font-syne text-sm font-semibold text-text">

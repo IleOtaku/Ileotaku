@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { Sparkles } from "lucide-react";
 import { getCoverGradient } from "@/lib/coverStyles";
 import AvatarLightbox from "@/components/ui/AvatarLightbox";
-import { PlatinumBadge, VerifiedBadge } from "@/components/ui/Badges";
+import { PlatinumBadge } from "@/components/ui/Badges";
+import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import { getUserByHandle } from "@/lib/firestore";
 import { getPostsByCreator } from "@/lib/creatorFeed";
 import { getPublishedSeriesByAuthor } from "@/lib/publishedSeries";
@@ -104,7 +105,7 @@ export default async function CreatorProfilePage({ params }: CreatorProfilePageP
             <div className="pb-2">
               <div className="flex items-center gap-2">
                 <h1 className="font-cinzel text-2xl text-text">{creator.displayName}</h1>
-                <VerifiedBadge profile={creator} className="h-5 w-5" />
+                <VerificationBadge user={creator} size={20} />
                 <PlatinumBadge isPlatinum={creator.isPlatinum} className="h-5 w-5" />
               </div>
               {creator.handle && <p className="font-noto text-sm text-muted">@{creator.handle}</p>}
