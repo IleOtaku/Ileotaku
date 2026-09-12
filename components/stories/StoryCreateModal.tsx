@@ -31,6 +31,7 @@ export default function StoryCreateModal({ open, onClose }: StoryCreateModalProp
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [fileKind, setFileKind] = useState<"image" | "video">("image");
   const [textContent, setTextContent] = useState("");
+  const [caption, setCaption] = useState("");
   const [backgroundColor, setBackgroundColor] = useState(BG_COLORS[0]);
   const [durationMs, setDurationMs] = useState(PLATINUM_STORY_DURATIONS[4].ms); // 24h default
   const [submitting, setSubmitting] = useState(false);
@@ -52,6 +53,7 @@ export default function StoryCreateModal({ open, onClose }: StoryCreateModalProp
     setFile(null);
     setPreviewUrl(null);
     setTextContent("");
+    setCaption("");
   }
 
   function handleClose() {
@@ -105,13 +107,14 @@ export default function StoryCreateModal({ open, onClose }: StoryCreateModalProp
       const media: StoryMedia =
         mode === "text"
           ? { kind: "text", textContent: textContent.trim(), backgroundColor }
-          : { kind: fileKind, file: file ?? undefined };
+          : { kind: fileKind, file: file ?? undefined, caption: caption.trim() };
       await createStory(user.uid, profile, media, durationMs);
       toast.success("Story shared!");
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       setFile(null);
       setPreviewUrl(null);
       setTextContent("");
+      setCaption("");
       setMode("add-another");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't share your story. Please try again.");
@@ -233,14 +236,26 @@ export default function StoryCreateModal({ open, onClose }: StoryCreateModalProp
         )}
 
         {mode === "preview" && previewUrl && (
-          <div className="flex aspect-[9/16] w-full max-w-xs items-center justify-center overflow-hidden rounded-2xl bg-black">
-            {fileKind === "video" ? (
-              <video src={previewUrl} controls className="h-full w-full object-contain" />
-            ) : (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={previewUrl} alt="" className="h-full w-full object-contain" />
-            )}
-          </div>
+          <>
+            <div className="flex aspect-[9/16] w-full max-w-xs items-center justify-center overflow-hidden rounded-2xl bg-black">
+              {fileKind === "video" ? (
+                <video src={previewUrl} controls className="h-full w-full object-contain" />
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={previewUrl} alt="" className="h-full w-full object-contain" />
+              )}
+            </div>
+            {/* Beta feedback: "Allow users add stories with captions, exactly like WhatsApp." */}
+            <div className="w-full max-w-xs">
+              <input
+                value={caption}
+                onChange={(e) => setCaption(e.target.value.slice(0, 200))}
+                placeholder="Add a caption..."
+                className="input-base w-full text-sm"
+              />
+              {caption && <p className="mt-1 font-noto text-[11px] text-muted">{caption.length}/200</p>}
+            </div>
+          </>
         )}
 
         {profile?.isPlatinum && (mode === "text" || mode === "preview") && (

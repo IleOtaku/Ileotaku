@@ -2,6 +2,7 @@
 
 import Script from "next/script";
 import { useAuth } from "@/hooks/useAuth";
+import { isAdsFree } from "@/lib/ads";
 
 /**
  * Loads PropellerAds' main ad-provider script — required for AdSlot's between-chapters banner
@@ -14,7 +15,7 @@ import { useAuth } from "@/hooks/useAuth";
 export default function PropellerAdsScript() {
   const { profile, loading } = useAuth();
   if (loading) return null;
-  if (profile?.isPlatinum) return null;
+  if (isAdsFree(profile)) return null;
 
   const publisherId = process.env.NEXT_PUBLIC_PROPELLERADS_PUBLISHER_ID;
   if (!publisherId) return null;

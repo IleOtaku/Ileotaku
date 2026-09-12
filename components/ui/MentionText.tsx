@@ -8,6 +8,13 @@ import { getUserProfileUrl } from "@/lib/utils";
 // Captures @mentions and http(s) URLs in one pass so a single text.split() interleaves both
 // kinds of tokens with the plain-text runs between them, in original order.
 const TOKEN_PATTERN = /(@\w+|https?:\/\/[^\s]+)/g;
+const FIRST_URL_PATTERN = /https?:\/\/[^\s]+/;
+
+/** Beta feedback: "...show the preview." The first http(s) URL in `text`, if any — used to decide
+ * whether to render a LinkPreviewCard below a message/comment. */
+export function extractFirstUrl(text: string): string | null {
+  return text.match(FIRST_URL_PATTERN)?.[0] ?? null;
+}
 
 /** Beta feedback: "Links should be ... formatted to be shorter" — a real URL-shortening service
  * is out of scope here, but a long raw URL dominating a DM bubble is its own readability problem

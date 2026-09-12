@@ -1,5 +1,6 @@
 'use client';
 import { useAuth } from '@/hooks/useAuth';
+import { isAdsFree } from '@/lib/ads';
 
 /**
  * Beta feedback / ads overhaul: this used to load Monetag's "Multitag" script (zone 278904,
@@ -15,7 +16,7 @@ export default function MonetagScript() {
   const { profile, loading } = useAuth();
 
   if (loading) return null;
-  if (profile?.isPlatinum) return null;
+  if (isAdsFree(profile)) return null;
 
   return (
     <script

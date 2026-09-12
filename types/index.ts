@@ -70,6 +70,10 @@ export interface UserProfile {
    * badge below). Recolors the verified checkmark gold everywhere it renders — see
    * components/ui/Badges.tsx's VerifiedBadge, the one place this is actually read. */
   isFounder?: boolean;
+  /** Beta feedback: "Allow free users to buy 1hr ads free with coins." ISO timestamp — while
+   * `now < adsFreeUntil`, every ad component (see lib/ads.ts's isAdsFree) treats this account
+   * like a Platinum one for ad-gating purposes only; nothing else about the account changes. */
+  adsFreeUntil?: string;
   /** Beta feedback: "Creators should also be able to stop people from downloading their videos,
    * pics, or posts by toggling it in profile settings." Only meaningful for isCreator accounts —
    * when true, FeedShareSheet hides the Download button on this creator's own feed posts. */
@@ -487,7 +491,8 @@ export type TransactionCategory =
   | "roulette"
   | "streak"
   | "boost"
-  | "resolution";
+  | "resolution"
+  | "ads_free";
 
 export interface CoinTransaction {
   id: string;
@@ -731,6 +736,11 @@ export interface Story {
   mediaType: "image" | "video" | "text";
   textContent?: string;
   backgroundColor?: string;
+  /** Beta feedback: "Allow users add stories with captions, exactly like WhatsApp." Only
+   * meaningful for image/video stories — a text story's own textContent already serves this
+   * purpose. Rendered as a bottom overlay in StoryViewer, truncated with a "Read more" that
+   * pauses the story while expanded (same replyFocusedRef-style pause-guard as the reply input). */
+  caption?: string;
   /** Milliseconds this segment stays on screen in the viewer — only meaningful for image/text
    * (video plays for its own natural length instead). Defaults to 5000 for those two. */
   duration?: number;

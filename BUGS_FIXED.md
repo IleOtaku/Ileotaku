@@ -489,3 +489,55 @@ bigger suggestions).
   contradicts that design and isn't something a single user's preference should override.
   Noted here rather than built; marked resolved (reviewed and dispositioned) rather than left
   open.
+
+## Commit 4 — remaining suggestions
+
+- **"Allow users add stories with captions, exactly like WhatsApp. When read more is tapped, it
+  pauses the story."** Added `Story.caption` (image/video stories only — a text story's own
+  `textContent` already serves this purpose), a caption input in `StoryCreateModal.tsx`'s preview
+  step, and a bottom-overlay caption in `StoryViewer.tsx` with a `line-clamp-2` + "Read more"
+  toggle that pauses/resumes the story exactly the way the reply input's own focus already does
+  (same ref-based pause-guard pattern, `captionExpandedRef`).
+- **"Allow free users to buy 1hr ads free with coins."** Added `UserProfile.adsFreeUntil` and
+  `lib/ads.ts`'s `isAdsFree()` — true for a real Platinum account OR a free account inside a
+  purchased window — which every ad component (`MonetagScript`, `PropellerAdsScript`,
+  `ReaderAdScript`, `AdSlot`, `NextChapterCard`) now checks instead of `isPlatinum` directly, so
+  the purchase actually suppresses ads everywhere Platinum's own status already does. Buying more
+  time while a window is already running extends it rather than restarting it. Added the purchase
+  card (30 coins/hour) to `/pricing`'s coin section.
+- **"The post section on user's profile should just be small cards and not the entire post...
+  like tiktok's... Tapping one would open the post with a back arrow button top left and
+  scrolling takes you to the next post."** Rebuilt the Posts tab on the public creator profile
+  (`CreatorProfileTabs.tsx`, the only place this applied — `/profile/[uid]` doesn't show a Posts
+  tab at all) as a 3-column grid of small preview cards (`PostGridCard.tsx` — thumbnail, video
+  badge, like count). Tapping one opens `CreatorPostsViewer.tsx`: the exact same TikTok-style
+  `TikTokFeedItem` `/feed` itself renders (likes/comments/share/save, video controls, badges, all
+  of it for free) in its own snap-scroll stack, scoped to just this creator's posts and jumped to
+  the tapped card, with a back-arrow button top-left.
+- **"Links should be clickable, show the preview and should be formatted to be shorter"** (the
+  clickable+shortened half was already built in the previous sprint, via `MentionText.tsx`'s
+  `shortenUrlLabel`). Added the "show the preview" half: a new `/api/link-preview` route that
+  fetches the target page's own HTML and extracts its Open Graph tags (no third-party unfurl
+  service or API key — this was buildable without new infrastructure, unlike the item below) with
+  a basic SSRF guard (http/https only, rejects obviously-internal hostnames), and
+  `LinkPreviewCard.tsx`, wired into DM message bubbles in `MessagesClient.tsx` (the page this
+  feedback was reported from).
+- **"Admin should be able to mark users as verified... and unverify them"** — already built and
+  confirmed working (see the second commit of the previous sprint's investigation). **"Verification
+  should also automatically remove after 6 months of ... being inactive"** — **not built, noted
+  here as infra-blocked.** This needs a recurring scheduled job (a cron trigger) checking every
+  verified account's `lastActiveAt` on some regular cadence and unverifying the stale ones — there
+  is no cron/scheduled-task infrastructure running on this project today. The repo does have a
+  `functions/` directory, but it's explicitly documented there as legacy/superseded (its one
+  function is redundant with a Next.js API route the app actually uses) and deploying a *new*
+  Cloud Function requires confirming the Firebase project is on the Blaze plan, which isn't
+  something I can verify or change myself. A Vercel Cron Job calling a new authenticated API route
+  is the more natural fit for this app's actual architecture, but committing to a specific
+  schedule/plan tier without being able to confirm Vercel Cron is available and enabled on this
+  project's plan risks shipping something that silently never runs. Flagging for a follow-up
+  session with that confirmed rather than guessing.
+
+## Build status (this pass)
+
+`npx tsc --noEmit`: 0 errors. `npm run build`: clean, all 26 routes (27 including the new
+`/api/link-preview` route).

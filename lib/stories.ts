@@ -48,6 +48,8 @@ export interface StoryMedia {
   file?: File;
   textContent?: string;
   backgroundColor?: string;
+  /** Beta feedback: WhatsApp-style captions on image/video stories. */
+  caption?: string;
 }
 
 /** Uploads `media` (if any — a text story has none) to Cloudinary under stories/{uid}/{filename}
@@ -88,6 +90,7 @@ export async function createStory(
       mediaType,
       ...(media.textContent ? { textContent: media.textContent } : {}),
       ...(media.backgroundColor ? { backgroundColor: media.backgroundColor } : {}),
+      ...(media.caption?.trim() ? { caption: media.caption.trim().slice(0, 200) } : {}),
       // Beta feedback bug: a video story wrote `duration: undefined` here, which addDoc()
       // rejects outright ("Unsupported field value: undefined") — every video story upload was
       // failing. `duration` is only meaningful for image/text segments anyway (a video plays for

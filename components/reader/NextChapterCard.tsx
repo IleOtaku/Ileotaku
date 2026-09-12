@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { ArrowRight, X } from "lucide-react";
 import AdSlot from "@/components/ads/AdSlot";
 import { useAuth } from "@/hooks/useAuth";
+import { isAdsFree } from "@/lib/ads";
 
 export interface NextChapterCardProps {
   onNext: () => void;
@@ -17,7 +18,9 @@ export interface NextChapterCardProps {
  */
 export default function NextChapterCard({ onNext }: NextChapterCardProps) {
   const { profile } = useAuth();
-  const isPlatinum = profile?.isPlatinum === true;
+  // Beta feedback: "Allow free users to buy 1hr ads free with coins" — during a purchased
+  // ads-free window this card should behave exactly like it does for a real Platinum reader.
+  const isPlatinum = isAdsFree(profile);
   const [secondsLeft, setSecondsLeft] = useState(isPlatinum ? 0 : 5);
 
   useEffect(() => {

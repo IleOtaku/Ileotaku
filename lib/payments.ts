@@ -418,3 +418,41 @@ export async function purchaseChapterWithCoins(
     return { success: false, message: "Couldn't unlock this chapter. Please try again." };
   }
 }
+
+/* ---------------------------- Coins-for-ad-free-time ---------------------------- */
+
+/** Beta feedback: "Allow free users to buy 1hr ads free with coins." Extends any existing
+ * ads-free window rather than always restarting it from now — buying another hour while one is
+ * already running should stack, not waste the remainder. See lib/ads.ts's isAdsFree, which every
+ * ad component checks instead of `isPlatinum` directly so this actually suppresses ads. */
+export const ADS_FREE_HOUR_PRICE = 30;
+
+export async function purchaseAdsFreeHour(user: User): Promise<PaymentResult> {
+  const profile = await getUserProfile(user.uid);
+  if (!profile || (profile.coins ?? 0) < ADS_FREE_HOUR_PRICE) {
+    return { success: false, message: "Not enough coins — you need 30." };
+  }
+  if (profile.isPlatinum) {
+    return { success: false, message: "You're Platinum — you already never see ads." };
+  }
+
+  const now = Date.now();
+  const currentUntil = profile.adsFreeUntil ? new Date(profile.adsFreeUntil).getTime() : 0;
+  const newUntil = new Date(Math.max(now, currentUntil) + 60 * 60 * 1000).toISOString();
+  const newBalance = profile.coins - ADS_FREE_HOUR_PRICE;
+
+  try {
+    await updateUserPrefs(user.uid, { coins: newBalance, adsFreeUntil: newUntil });
+    await addTransaction(user.uid, {
+      type: "spend",
+      amount: -ADS_FREE_HOUR_PRICE,
+      balanceAfter: newBalance,
+      description: "Bought 1 hour ad-free",
+      category: "ads_free",
+    });
+    return { success: true };
+  } catch (error) {
+    await logError(error, { operation: "purchaseAdsFreeHour", uid: user.uid });
+    return { success: false, message: "Couldn't complete that purchase. Please try again." };
+  }
+}

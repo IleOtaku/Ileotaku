@@ -30,7 +30,8 @@ import BlockButton from "@/components/social/BlockButton";
 import { Modal, Skeleton } from "@/components/ui";
 import { Avatar } from "@/components/ui/Avatar";
 import { PlatinumBadge, VerifiedBadge } from "@/components/ui/Badges";
-import MentionText from "@/components/ui/MentionText";
+import LinkPreviewCard from "@/components/ui/LinkPreviewCard";
+import MentionText, { extractFirstUrl } from "@/components/ui/MentionText";
 import { useAuth } from "@/hooks/useAuth";
 import { getBlockedUsers, isBlockedBy } from "@/lib/blocking";
 import { uploadImage } from "@/lib/cloudinary";
@@ -1176,6 +1177,12 @@ export default function MessagesClient() {
                             ) : (
                               <>
                                 <MentionText text={m.text} />
+                                {/* Beta feedback: "Links should be clickable, show the preview
+                                    and should be formatted to be shorter." Clickable+shortened is
+                                    MentionText's own job above; this is the preview itself. */}
+                                {extractFirstUrl(m.text) && (
+                                  <LinkPreviewCard url={extractFirstUrl(m.text)!} className="mt-1.5" />
+                                )}
                                 <span className="mt-1 flex items-center gap-1 text-[10px]">
                                   <span className={isOwn ? "text-ivory/70" : "text-muted"}>{formatPostTimestamp(m.createdAt)}</span>
                                   {m.isEdited && <span className={isOwn ? "text-ivory/70" : "text-muted"}>(edited)</span>}

@@ -3,16 +3,41 @@
 import { useState } from "react";
 import Link from "next/link";
 import toast from "react-hot-toast";
-import { Coins, Loader2 } from "lucide-react";
+import { Coins, Loader2, ShieldOff } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { isAdsFree } from "@/lib/ads";
 import { getUserProfile } from "@/lib/firestore";
-import { COIN_PACKS, purchaseCoins, type CoinPack } from "@/lib/payments";
+import { ADS_FREE_HOUR_PRICE, COIN_PACKS, purchaseAdsFreeHour, purchaseCoins, type CoinPack } from "@/lib/payments";
 import { formatDualPrice } from "@/lib/utils";
 
 /** Coin bundle grid, wired to real Paystack checkout via purchaseCoins. */
 export default function CoinPackages() {
   const { user, profile } = useAuth();
   const [purchasingId, setPurchasingId] = useState<string | null>(null);
+  const [buyingAdsFree, setBuyingAdsFree] = useState(false);
+
+  // Beta feedback: "Allow free users to buy 1hr ads free with coins."
+  async function handleBuyAdsFree() {
+    if (!user) {
+      toast.error("Sign in to buy coins.");
+      return;
+    }
+    setBuyingAdsFree(true);
+    try {
+      const result = await purchaseAdsFreeHour(user);
+      if (result.success) {
+        toast.success("1 hour of ad-free browsing unlocked!");
+        const fresh = await getUserProfile(user.uid);
+        useAuth.getState().setProfile(fresh);
+      } else {
+        toast.error(result.message ?? "Couldn't complete this purchase.");
+      }
+    } catch {
+      toast.error("Something went wrong. Please try again.");
+    } finally {
+      setBuyingAdsFree(false);
+    }
+  }
 
   async function handleBuy(pack: CoinPack) {
     if (!user) {
@@ -101,6 +126,31 @@ export default function CoinPackages() {
             </div>
           ))}
         </div>
+
+        {user && !isAdsFree(profile) && (
+          <div className="mx-auto mt-6 flex max-w-md flex-col items-center gap-3 rounded-2xl border border-bg4 bg-bg2 p-5 text-center sm:flex-row sm:text-left">
+            <ShieldOff className="h-8 w-8 shrink-0 text-gold" />
+            <div className="flex-1">
+              <p className="font-syne text-sm font-semibold text-text">1 Hour Ad-Free</p>
+              <p className="font-noto text-xs text-muted">
+                Browse and read with zero ads for the next hour — {ADS_FREE_HOUR_PRICE} coins.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleBuyAdsFree}
+              disabled={buyingAdsFree}
+              className="btn-ghost shrink-0"
+            >
+              {buyingAdsFree ? <Loader2 className="h-4 w-4 animate-spin" /> : `Buy (${ADS_FREE_HOUR_PRICE})`}
+            </button>
+          </div>
+        )}
+        {user && profile?.adsFreeUntil && isAdsFree(profile) && !profile.isPlatinum && (
+          <p className="mt-3 text-center font-noto text-xs text-gold2">
+            Ad-free until {new Date(profile.adsFreeUntil).toLocaleTimeString()}
+          </p>
+        )}
       </div>
     </section>
   );

@@ -46,6 +46,11 @@ export default function StoryViewer({ uids, startUid, storiesByUid, onClose, onA
   const [viewerProfiles, setViewerProfiles] = useState<Map<string, UserProfile>>(new Map());
   const touchStartY = useRef<number | null>(null);
   const replyFocusedRef = useRef(false);
+  // Beta feedback: "When read more is tapped, it pauses the story." Same pause-guard pattern as
+  // replyFocusedRef above — a ref (read outside React's render cycle, in the touch handlers) plus
+  // the state that actually drives the "Read more"/"Read less" toggle and full-vs-truncated text.
+  const [captionExpanded, setCaptionExpanded] = useState(false);
+  const captionExpandedRef = useRef(false);
   const rafRef = useRef<number | null>(null);
   const lastTickRef = useRef<number>(0);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -67,11 +72,15 @@ export default function StoryViewer({ uids, startUid, storiesByUid, onClose, onA
     setSegmentIndex(0);
     setElapsed(0);
     setVideoProgress(0);
+    setCaptionExpanded(false);
+    captionExpandedRef.current = false;
   }, [personIndex]);
 
   useEffect(() => {
     setElapsed(0);
     setVideoProgress(0);
+    setCaptionExpanded(false);
+    captionExpandedRef.current = false;
   }, [segmentIndex]);
 
   // Hover/hold-to-pause must actually pause video playback too, not just freeze a JS timer —
@@ -157,8 +166,20 @@ export default function StoryViewer({ uids, startUid, storiesByUid, onClose, onA
    * is now a no-op for as long as the reply input is genuinely focused, so nothing but the input's
    * own onBlur can bring the story back. */
   function resume() {
-    if (replyFocusedRef.current) return;
+    if (replyFocusedRef.current || captionExpandedRef.current) return;
     setPaused(false);
+  }
+
+  /** Beta feedback: "When read more is tapped, it pauses the story." Toggling the caption also
+   * needs stopPropagation on its own click — it sits inside the tap-to-advance media div, and
+   * without that every "Read more" tap would also register as a next/prev segment tap. */
+  function toggleCaption(e: React.MouseEvent) {
+    e.stopPropagation();
+    const next = !captionExpandedRef.current;
+    captionExpandedRef.current = next;
+    setCaptionExpanded(next);
+    if (next) pause();
+    else resume();
   }
 
   useEffect(() => {
@@ -352,6 +373,24 @@ export default function StoryViewer({ uids, startUid, storiesByUid, onClose, onA
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={story.mediaUrl} alt="" className="h-full w-full object-contain" />
+          )}
+
+          {/* Beta feedback: "Allow users add stories with captions, exactly like WhatsApp." */}
+          {story.mediaType !== "text" && story.caption && (
+            <div className="absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/70 to-transparent p-4 pt-10">
+              <p className={`font-noto text-sm text-white ${captionExpanded ? "" : "line-clamp-2"}`}>
+                {story.caption}
+              </p>
+              {story.caption.length > 80 && (
+                <button
+                  type="button"
+                  onClick={toggleCaption}
+                  className="mt-1 font-noto text-xs font-semibold text-white/70 hover:text-white"
+                >
+                  {captionExpanded ? "Read less" : "Read more"}
+                </button>
+              )}
+            </div>
           )}
         </div>
 

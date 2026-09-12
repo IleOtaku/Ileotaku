@@ -2,6 +2,7 @@
 
 import { useRef } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import { isAdsFree } from "@/lib/ads";
 
 export interface AdSlotProps {
   placement: "between-chapters" | "profile-sidebar";
@@ -21,7 +22,7 @@ export default function AdSlot({ placement, className }: AdSlotProps) {
   // Wait for auth to resolve, then Platinum users see nothing — renders null entirely, with no
   // flash of an ad slot while a Platinum member's profile is still loading.
   if (loading) return null;
-  if (profile?.isPlatinum) return null;
+  if (isAdsFree(profile)) return null;
 
   const publisherId = process.env.NEXT_PUBLIC_PROPELLERADS_PUBLISHER_ID;
   const zoneId =

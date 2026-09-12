@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { AtSign, Calendar, Eye, Globe, MapPin, Sparkles, Users2 } from "lucide-react";
-import FeedPostCard from "@/components/feed/FeedPostCard";
+import CreatorPostsViewer from "@/components/creator/CreatorPostsViewer";
+import PostGridCard from "@/components/creator/PostGridCard";
 import PublishedWorkCard from "@/components/creator/PublishedWorkCard";
 import { EmptyState, Tabs } from "@/components/ui";
 import type { CreatorPost, PublishedSeries, UserProfile } from "@/types";
@@ -28,6 +29,9 @@ export default function CreatorProfileTabs({
   joined,
 }: CreatorProfileTabsProps) {
   const [tab, setTab] = useState<ProfileTab>("posts");
+  // Beta feedback: "The post section on user's profile should just be small cards... Tapping one
+  // would open the post with a back arrow button top left."
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   // `works` is already the creator's PUBLISHED catalog (queried from publishedSeries — pending
   // and rejected creatorWorks never reach this component at all), so no status filter is needed
   // here the way the old creatorWorks-backed version required.
@@ -54,9 +58,9 @@ export default function CreatorProfileTabs({
               description={`${creator.displayName} hasn't shared an update yet — check back soon.`}
             />
           ) : (
-            <div className="mx-auto flex max-w-2xl flex-col gap-4">
-              {posts.map((post) => (
-                <FeedPostCard key={post.id} post={post} />
+            <div className="mx-auto grid max-w-2xl grid-cols-3 gap-1.5 sm:gap-2">
+              {posts.map((post, i) => (
+                <PostGridCard key={post.id} post={post} onClick={() => setViewerIndex(i)} />
               ))}
             </div>
           ))}
@@ -144,6 +148,10 @@ export default function CreatorProfileTabs({
           </div>
         )}
       </div>
+
+      {viewerIndex !== null && (
+        <CreatorPostsViewer posts={posts} startIndex={viewerIndex} onClose={() => setViewerIndex(null)} />
+      )}
     </div>
   );
 }

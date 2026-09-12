@@ -1,6 +1,7 @@
 'use client';
 import { useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
+import { isAdsFree } from '@/lib/ads';
 import { usePathname } from 'next/navigation';
 
 /**
@@ -42,7 +43,7 @@ export default function ReaderAdScript() {
   }, [isReaderPage]);
 
   if (loading) return null;
-  if (profile?.isPlatinum) return null;
+  if (isAdsFree(profile)) return null;
   if (!isReaderPage) return null;
 
   return (
