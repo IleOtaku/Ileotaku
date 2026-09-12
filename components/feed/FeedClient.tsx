@@ -54,6 +54,16 @@ export default function FeedClient() {
   const sentinelRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const followingIds = profile?.following ?? [];
+  // Beta feedback bug: "Page reloads after each comment sent." Root cause — addFeedComment (and
+  // sendDM, chapter reads, etc.) calls updateLastActive() on every action, which writes
+  // lastActiveAt to the viewer's OWN user doc. loadFirstPage below was keyed on the whole
+  // `profile` object (to react to the follow list changing for the "Following" tab), so that
+  // unrelated write produced a new `profile` reference, which gave loadFirstPage a new identity,
+  // which re-ran the effect below and wiped+refetched the entire feed from scratch after every
+  // single comment. Depending on this joined, value-compared string instead of `profile` itself
+  // means the callback's identity — and the refetch — now only changes when the follow list
+  // actually does.
+  const followingKey = followingIds.join(",");
 
   useEffect(() => {
     if (!user) {
@@ -111,7 +121,7 @@ export default function FeedClient() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [profile]
+    [user?.uid, followingKey]
   );
 
   useEffect(() => {
@@ -141,7 +151,7 @@ export default function FeedClient() {
     }, PAGE_SIZE);
     return unsub;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, authLoading, profile, blockedUids]);
+  }, [tab, authLoading, followingKey, blockedUids]);
 
   function showPendingPosts() {
     setPosts((current) => {

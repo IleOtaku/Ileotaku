@@ -69,6 +69,7 @@ const TYPING_CLEAR_DELAY_MS = 2000;
 /** Long-press duration (mobile) before the message context menu opens. */
 const LONG_PRESS_MS = 450;
 const REACTION_EMOJIS = ["❤️", "🔥", "😂", "😮", "😢", "👏"];
+const QUICK_EMOJIS = ["❤️", "🔥", "😂", "😍", "👏", "😢", "😮", "🙏", "💯", "🎉", "😊", "👀"];
 
 /** "Online" / "Last seen 3 minutes ago" / "Last seen a while ago" for the thread header. */
 function statusLabel(status: OnlineStatus | null): string {
@@ -108,6 +109,10 @@ export default function MessagesClient() {
   const [messages, setMessages] = useState<DMMessage[]>([]);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  // Beta feedback bug: "The emoji button doesn't work" — it rendered with no onClick at all,
+  // just a "coming soon" tooltip. Same QUICK_EMOJIS-grid pattern FeedCommentSheet's own (already
+  // working) emoji button uses.
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const handledWithParam = useRef(false);
@@ -1297,15 +1302,41 @@ export default function MessagesClient() {
                       </button>
                     </div>
                   )}
+                {emojiOpen && (
+                  <div className="flex flex-wrap gap-2 border-t border-bg4 bg-bg2 p-3">
+                    {QUICK_EMOJIS.map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        onClick={() => {
+                          setText((t) => t + emoji);
+                          // Match handleTextareaInput's auto-grow so the textarea doesn't stay a
+                          // stale height after an emoji-only insert (which skips that handler,
+                          // since it's triggered by a button click, not a real input event).
+                          requestAnimationFrame(() => {
+                            const el = textareaRef.current;
+                            if (!el) return;
+                            el.style.height = "auto";
+                            el.style.height = `${Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT)}px`;
+                            el.focus();
+                          });
+                        }}
+                        className="text-xl"
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div
                   className="flex items-end gap-2 p-3"
                   style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
                 >
                   <button
                     type="button"
+                    onClick={() => setEmojiOpen((o) => !o)}
                     className="btn-ghost shrink-0 px-2.5"
                     aria-label="Add emoji"
-                    title="Emoji picker coming soon"
                   >
                     <Smile className="h-4 w-4" />
                   </button>
