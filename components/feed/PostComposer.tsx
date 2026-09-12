@@ -156,6 +156,7 @@ export default function PostComposer({ onPosted }: PostComposerProps) {
       isFoundingCreator: profile!.foundingCreator,
       isPublisher: profile!.isPublisher,
       isFounder: profile!.isFounder,
+      disableDownloads: profile!.disableDownloads,
     };
   }
 

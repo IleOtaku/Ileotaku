@@ -217,6 +217,19 @@ export default function SettingsTab() {
     }
   }
 
+  /** Beta feedback: "Creators should be able to stop people from downloading their videos, pics,
+   * or posts by toggling it in profile settings." Only meaningful (and shown) for creators —
+   * denormalized onto each new post at write time, see PostComposer's buildBadges(). */
+  async function handleDisableDownloads(value: boolean) {
+    if (!user || !profile?.isCreator) return;
+    try {
+      await updateUserPrefs(user.uid, { disableDownloads: value });
+      await refreshProfile();
+    } catch {
+      toast.error("Couldn't save your setting.");
+    }
+  }
+
   async function updateNotifPref(key: keyof NotificationCategoryPreferences, value: boolean) {
     if (!user) return;
     try {
@@ -663,6 +676,25 @@ export default function SettingsTab() {
           )}
         </div>
       </section>
+
+      {profile?.isCreator && (
+        <section>
+          <h3 className="mb-4 flex items-center gap-2 font-syne text-sm font-semibold text-text">
+            <Palette className="h-4 w-4 text-gold" /> Creator Settings
+          </h3>
+          <div className="flex flex-col gap-4 rounded-2xl border border-bg4 bg-bg2 p-5">
+            <Toggle
+              checked={profile?.disableDownloads === true}
+              onChange={handleDisableDownloads}
+              label="Prevent downloads of your posts"
+            />
+            <p className="font-noto text-[11px] text-muted">
+              Hides the Download button in the share sheet for everyone but you, on every post you
+              share to the feed from now on.
+            </p>
+          </div>
+        </section>
+      )}
 
       <section>
         <h3 className="mb-4 font-syne text-sm font-semibold text-text">Notifications</h3>

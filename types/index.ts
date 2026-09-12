@@ -70,6 +70,10 @@ export interface UserProfile {
    * badge below). Recolors the verified checkmark gold everywhere it renders — see
    * components/ui/Badges.tsx's VerifiedBadge, the one place this is actually read. */
   isFounder?: boolean;
+  /** Beta feedback: "Creators should also be able to stop people from downloading their videos,
+   * pics, or posts by toggling it in profile settings." Only meaningful for isCreator accounts —
+   * when true, FeedShareSheet hides the Download button on this creator's own feed posts. */
+  disableDownloads?: boolean;
   /** Count of moderation strikes from actioned reports — feeds account-suspension logic. */
   strikeCount?: number;
   /** ISO date the account is suspended until, if a moderator has taken that action. */
@@ -835,6 +839,11 @@ export interface CreatorPost {
    * right tier/color on this post too, same as everywhere else it renders. */
   isPublisher?: boolean;
   isFounder?: boolean;
+  /** Beta feedback: "Creators should be able to stop people from downloading their videos, pics,
+   * or posts by toggling it in profile settings." Denormalized from the author's profile at post
+   * time (same convention as isVerified/isPlatinum above) — FeedShareSheet hides its Download
+   * button when this is true. */
+  disableDownloads?: boolean;
   /** Sound attached via the composer's "Add Sound" flow — all fields denormalized from the
    * chosen Sound at post time so the feed card never needs a per-post sound lookup just to
    * play/display it. Absent entirely on posts with no sound. */

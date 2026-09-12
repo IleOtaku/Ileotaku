@@ -37,6 +37,7 @@ import { uploadImage } from "@/lib/cloudinary";
 import {
   addMembersToGroup,
   addReaction,
+  clearConversationForUser,
   createGroup,
   deleteGroup,
   deleteMessage,
@@ -177,6 +178,10 @@ export default function MessagesClient() {
   // Group info slide-in panel (open group name/photo in the thread header) and its own
   // sub-states: adding members reuses the same search UI as compose.
   const [groupInfoOpen, setGroupInfoOpen] = useState(false);
+  // Beta feedback: "...and also a clear conversation button" — a small menu on the open thread's
+  // own header, distinct from the sidebar row's hide/delete-conversation icon.
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [addingMembers, setAddingMembers] = useState(false);
   const [memberActionUid, setMemberActionUid] = useState<string | null>(null);
   const [groupInfoBusy, setGroupInfoBusy] = useState(false);
@@ -219,6 +224,7 @@ export default function MessagesClient() {
     setMemberActionUid(null);
     setGroupMemberUids(new Set());
     setGroupMemberProfiles(new Map());
+    setHeaderMenuOpen(false);
   }, [selectedId]);
 
   // ?with=[uid] — from a creator page's Message button. Idempotent: startConversation resolves
@@ -518,6 +524,23 @@ export default function MessagesClient() {
       if (selectedId === conversationId) setSelectedId(null);
     } catch {
       toast.error("Couldn't remove this conversation.");
+    }
+  }
+
+  // Beta feedback: "...and also a clear conversation button." Empties the thread's history for
+  // this user only — see clearConversationForUser's own doc comment for how it differs from
+  // hideConversationForUser above.
+  async function handleClearConversation() {
+    if (!user || !selectedId) return;
+    setClearing(true);
+    try {
+      await clearConversationForUser(selectedId, user.uid);
+      setHeaderMenuOpen(false);
+      toast.success("Conversation cleared.");
+    } catch {
+      toast.error("Couldn't clear this conversation.");
+    } finally {
+      setClearing(false);
     }
   }
 
@@ -1042,6 +1065,34 @@ export default function MessagesClient() {
                     )}
                   </>
                 )}
+
+                <div className="relative shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setHeaderMenuOpen((o) => !o)}
+                    aria-label="Conversation options"
+                    className="flex h-8 w-8 items-center justify-center rounded-full text-muted hover:bg-bg4 hover:text-text"
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </button>
+                  {headerMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setHeaderMenuOpen(false)} />
+                      <div className="glass absolute right-0 top-full z-20 mt-1 w-48 overflow-hidden rounded-xl p-1.5">
+                        {/* Beta feedback: "...and also a clear conversation button." */}
+                        <button
+                          type="button"
+                          onClick={handleClearConversation}
+                          disabled={clearing}
+                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-noto text-sm text-clay2 hover:bg-bg4 disabled:opacity-50"
+                        >
+                          {clearing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                          Clear conversation
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
 
               <div ref={messagesContainerRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">

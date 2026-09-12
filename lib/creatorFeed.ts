@@ -55,6 +55,9 @@ export interface CreatorPostBadges {
    * right tier/color on a feed post too, same as everywhere else it renders. */
   isPublisher?: boolean;
   isFounder?: boolean;
+  /** Beta feedback: creator-side "disable downloads" toggle, denormalized at post time so
+   * FeedShareSheet can hide its Download button without a per-post profile lookup. */
+  disableDownloads?: boolean;
 }
 
 export interface FeedPage {
@@ -408,6 +411,7 @@ export async function createPost(input: CreatePostInput): Promise<string> {
       isFoundingCreator: badges.isFoundingCreator ?? false,
       isPublisher: badges.isPublisher ?? false,
       isFounder: badges.isFounder ?? false,
+      disableDownloads: badges.disableDownloads ?? false,
       ...(sound
         ? {
             soundId: sound.id,

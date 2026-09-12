@@ -420,3 +420,72 @@ that didn't get a dedicated look.
 ## Build status
 
 `npx tsc --noEmit`: 0 errors. `npm run build`: clean.
+
+# Second Beta Feedback Pass — Remaining 18 Items
+
+A follow-up triage of everything still `resolved: false` in `betaFeedback` after the sprint
+above, worked through as four sequential commits (bugs, then UI/UX, then quick suggestions, then
+bigger suggestions).
+
+## Commit 1 — remaining bugs
+
+- **"Page reloads after each comment sent."** Genuinely reproduced this time (the two earlier
+  investigation passes, in the sprint above and in a prior session, both failed to find it via
+  static code review alone). Root cause: `FeedClient.tsx`'s `loadFirstPage` and its live
+  `subscribeToFeed` effect were both keyed on the whole `profile` object, so the "Following" tab
+  could refetch when the user's follow list changed. But `addFeedComment` (and `sendDM`, chapter
+  reads, etc.) call `updateLastActive(uid)` on every action, which writes `lastActiveAt` to the
+  *commenter's own* user doc — giving `profile` a new object reference and silently wiping and
+  refetching the entire feed from scratch after every single comment (confirmed live via a
+  `MutationObserver`: the whole post, including its `<video>`, was torn down and remounted the
+  instant the comment write completed). Fixed by keying those two effects on a value-compared
+  `followingKey` string instead of the `profile` object itself.
+- **"The emoji button doesn't work"** (DM composer). The `Smile` button had no `onClick` at all,
+  just a "coming soon" tooltip. Wired it to the same `QUICK_EMOJIS` grid pattern already working
+  in `FeedCommentSheet.tsx`.
+- Five items were already fixed by code from the previous sprint but never marked resolved:
+  story-pause-while-replying, mobile feed back button, profile-change propagation, group-admin
+  message delete, and download+share-to-group. Verified each is actually present in the live
+  codebase via grep before marking resolved — none were re-built.
+
+## Commit 2 — UI/UX
+
+- **"Navbar should be a dropdown menu on mobile and tablet configurations."** `Navbar.tsx`'s
+  compact layout switched on at `md` (768px), but `NavSearch` was already gated to `lg` (1024px)
+  — tablets fell into a broken middle ground: the full cramped desktop nav, with no search bar at
+  all. Moved every breakpoint in `Navbar.tsx` and `MobileNavSearch.tsx` from `md` to `lg`, and
+  restyled the hamburger panel from a full-width slide-down band into an actual anchored dropdown
+  under the hamburger button.
+- **"Everywhere that emoji where used instead of icons should be changed to icons."** Swept
+  structural (non-user-generated) emoji to lucide icons: `NotificationBell`'s 25-entry
+  notification-type map, `BetaFeedback`'s type selector and floating button, `AdminFeedbackTab`'s
+  type badges, and `SettingsTab`'s six notification-category headers. Left alone: toast copy,
+  emoji reaction pickers, placeholder example text, and the reader-theme `<select>`'s 💎 markers
+  (a native `<option>` can't render an icon).
+
+## Commit 3 — quick suggestions (under 30 minutes each)
+
+- **"Creators should be able to stop people from downloading their videos, pics, or posts by
+  toggling it in profile settings"** (the other half of a suggestion whose tap-to-pause/seek half
+  was already built in the previous sprint). Added `UserProfile.disableDownloads`, a Creator
+  Settings toggle in `SettingsTab.tsx`, denormalized the flag onto each new `CreatorPost` at write
+  time (same convention as `isVerified`/`isPlatinum`), and gated `FeedShareSheet`'s Download
+  button on it (the post's own author can still always download their own work).
+- **"...and also a clear conversation button"** (the other half of a suggestion whose
+  delete-conversation-from-list half was already built). Added `clearConversationForUser()` —
+  batch-marks every message in a thread `deletedFor: arrayUnion(uid)` for the caller only, the
+  same per-user mechanism single-message "delete for me" already uses — wired to a new small menu
+  on the open thread's header. No firestore.rules change needed: the existing "delete for me"
+  carve-out already allows any participant to touch only the `deletedFor` field.
+- **"Add a plus icon floating in our home screen so we can add stories with it too."** Added a
+  floating "+" button on the signed-in home view (`HomeClient.tsx`) that opens the same
+  `StoryCreateModal` the existing "Your Story" circle does — that circle's own tiny "+" badge is
+  easy to miss, so this is a second, more discoverable entry point. Placed bottom-**left** rather
+  than bottom-right, since `BetaFeedback`'s floating pill already occupies that exact bottom-right
+  spot.
+- **"@zamyilton should be the only one with a golden verified symbol. He created this."** Not
+  implemented. The gold checkmark is the platform's Founder-tier badge (`isFounder`), already also
+  worn by the actual `admin@ileotaku.com` account — restricting it to one specific creator
+  contradicts that design and isn't something a single user's preference should override.
+  Noted here rather than built; marked resolved (reviewed and dispositioned) rather than left
+  open.

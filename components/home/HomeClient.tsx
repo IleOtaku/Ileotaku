@@ -1,7 +1,8 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
+import { Plus } from "lucide-react";
 import CreatorSection from "@/components/landing/CreatorSection";
 import CtaBanner from "@/components/landing/CtaBanner";
 import Hero from "@/components/landing/Hero";
@@ -13,6 +14,7 @@ import { SectionEyebrow, Skeleton } from "@/components/ui";
 import CoinRoulette from "@/components/monetisation/CoinRoulette";
 import FriendActivity from "@/components/social/FriendActivity";
 import StoriesBar from "@/components/stories/StoriesBar";
+import StoryCreateModal from "@/components/stories/StoryCreateModal";
 import { useAuth } from "@/hooks/useAuth";
 import { proxyImg } from "@/lib/manga-api";
 import { timeOfDayGreeting } from "@/lib/utils";
@@ -57,6 +59,9 @@ function HomeSkeleton() {
 /** Home page: full landing pitch when signed out, a personalised feed when signed in. */
 export default function HomeClient({ trendingSlot, africanOriginals }: HomeClientProps) {
   const { user, profile, loading } = useAuth();
+  // Beta feedback: "Add a plus icon floating in our home screen so we can add stories with it
+  // too." Declared here, above the early returns below, since hooks can't be called conditionally.
+  const [createStoryOpen, setCreateStoryOpen] = useState(false);
 
   // Never flash the wrong state — hold a skeleton until Firebase auth has resolved.
   if (loading) {
@@ -84,8 +89,21 @@ export default function HomeClient({ trendingSlot, africanOriginals }: HomeClien
   const isPlatinum = profile?.isPlatinum === true;
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6">
+    <div className="relative mx-auto max-w-7xl px-4 py-12 sm:px-6">
       <StoriesBar />
+
+      {/* bottom-LEFT, not right — BetaFeedback's floating pill already occupies bottom-right at
+          these same offsets (and is itself draggable on mobile), so this sits on the opposite
+          side to avoid ever overlapping it. */}
+      <button
+        type="button"
+        onClick={() => setCreateStoryOpen(true)}
+        aria-label="Add a story"
+        className="fixed bottom-20 left-4 z-30 flex h-12 w-12 items-center justify-center rounded-full bg-clay text-ivory shadow-lg transition-transform hover:scale-105 sm:bottom-6 sm:left-6"
+      >
+        <Plus className="h-5 w-5" />
+      </button>
+      <StoryCreateModal open={createStoryOpen} onClose={() => setCreateStoryOpen(false)} />
 
       <Reveal>
         <h1 className="mt-8 font-cinzel text-3xl text-text">

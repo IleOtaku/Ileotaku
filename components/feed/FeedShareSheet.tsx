@@ -38,7 +38,11 @@ export default function FeedShareSheet({ post, open, onClose }: FeedShareSheetPr
   const [sendingToGroup, setSendingToGroup] = useState<string | null>(null);
 
   const shareUrl = typeof window !== "undefined" ? `${window.location.origin}/feed/${post.id}` : "";
-  const downloadUrl = post.videoUrl || post.attachments?.[0];
+  // Beta feedback: "Creators should be able to stop people from downloading their videos, pics,
+  // or posts by toggling it in profile settings." The author's own downloads are never blocked —
+  // this only hides the button for other viewers.
+  const downloadsAllowed = !post.disableDownloads || post.uid === user?.uid;
+  const downloadUrl = downloadsAllowed ? post.videoUrl || post.attachments?.[0] : undefined;
 
   useEffect(() => {
     if (!open) {

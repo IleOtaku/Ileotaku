@@ -6,6 +6,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit,
   onSnapshot,
   orderBy,
   query,
@@ -13,6 +14,7 @@ import {
   setDoc,
   updateDoc,
   where,
+  writeBatch,
   type Unsubscribe,
 } from "firebase/firestore";
 import { logError } from "./errorLogger";
@@ -499,6 +501,27 @@ export async function hideConversationForUser(conversationId: string, uid: strin
 
 export async function markDMRead(conversationId: string, uid: string): Promise<void> {
   await updateDoc(doc(db, CONVERSATIONS, conversationId), { [`unreadCounts.${uid}`]: 0 });
+}
+
+/** Beta feedback: "...and also a clear conversation button." Distinct from
+ * hideConversationForUser above — this empties the thread's history for `uid` (via the same
+ * per-user `deletedFor` mechanism deleteMessage's "delete for me" already uses on a single
+ * message) rather than just hiding the conversation row itself; the other participant(s)' view,
+ * and the messages themselves, are untouched. Batched at Firestore's 500-write cap, same pattern
+ * as propagateProfileChange. */
+export async function clearConversationForUser(conversationId: string, uid: string): Promise<void> {
+  try {
+    const snap = await getDocs(
+      query(collection(db, CONVERSATIONS, conversationId, "messages"), limit(500))
+    );
+    if (snap.empty) return;
+    const batch = writeBatch(db);
+    snap.docs.forEach((d) => batch.update(d.ref, { deletedFor: arrayUnion(uid) }));
+    await batch.commit();
+  } catch (error) {
+    await logError(error, { operation: "clearConversationForUser", conversationId, uid });
+    throw error;
+  }
 }
 
 /** Real-time listener for a user's total unread DM count, for the Navbar badge. */
