@@ -1,23 +1,27 @@
 'use client';
-import Script from 'next/script';
 import { useAuth } from '@/hooks/useAuth';
 
+/**
+ * Beta feedback / ads overhaul: this used to load Monetag's "Multitag" script (zone 278904,
+ * quge5.com) — a single tag that can serve push-notification permission prompts, popunders, and
+ * full-screen redirect ads, none of which this app wants anywhere. Replaced with Monetag's
+ * In-Page Push zone (11773153, nap5k.com) — a banner-style ad format only, no popunders, no push
+ * permission requests, no redirects, no full-screen takeovers. Not currently mounted anywhere in
+ * the app (superseded by ReaderAdScript.tsx, the reader-scoped version of this exact snippet) —
+ * kept in sync with it anyway so this file is never a forgotten copy of the old, unsafe script if
+ * something ever re-adopts it.
+ */
 export default function MonetagScript() {
   const { profile, loading } = useAuth();
 
-  // Wait for auth to load before deciding
   if (loading) return null;
-
-  // Platinum users NEVER see ads — return nothing at all
   if (profile?.isPlatinum) return null;
 
   return (
-    <Script
-      src="https://quge5.com/88/tag.min.js"
-      data-zone="278904"
-      async
-      data-cfasync="false"
-      strategy="afterInteractive"
+    <script
+      dangerouslySetInnerHTML={{
+        __html: `(function(s){s.dataset.zone='11773153',s.src='https://nap5k.com/tag.min.js'})([document.documentElement, document.body].filter(Boolean).pop().appendChild(document.createElement('script')))`,
+      }}
     />
   );
 }

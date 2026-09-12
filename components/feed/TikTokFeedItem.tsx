@@ -8,6 +8,8 @@ import {
   Heart,
   MessageCircle,
   MoreHorizontal,
+  Pause,
+  Play,
   Share2,
   Sparkles,
   Trash2,
@@ -49,6 +51,15 @@ function brandGradientFor(seed: string): string {
   return BRAND_GRADIENTS[hash % BRAND_GRADIENTS.length];
 }
 
+/** "0:23" / "1:04" — the seek bar's drag label, deliberately not using formatPostTimestamp
+ * (that's calendar time, this is playback position within the clip). */
+function formatClock(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+
 export interface TikTokFeedItemProps {
   post: CreatorPost;
   isSaved: boolean;
@@ -77,10 +88,21 @@ function TikTokFeedItem({ post, isSaved, onDeleted }: TikTokFeedItemProps) {
   const [likeBurst, setLikeBurst] = useState<{ x: number; y: number; key: number } | null>(null);
   const [inView, setInView] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // Beta feedback: TikTok-style video controls — tap anywhere to pause/play, a draggable seek
+  // bar that appears on tap and fades after 2s idle.
+  const [manuallyPaused, setManuallyPaused] = useState(false);
+  const [showPauseIcon, setShowPauseIcon] = useState(false);
+  const [seekBarVisible, setSeekBarVisible] = useState(false);
+  const [seekProgress, setSeekProgress] = useState(0);
+  const [seekTimeLabel, setSeekTimeLabel] = useState("0:00 / 0:00");
+  const [scrubbing, setScrubbing] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const seekBarRef = useRef<HTMLDivElement>(null);
   const lastTapRef = useRef(0);
+  const singleTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const seekBarHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const viewCountedRef = useRef(false);
   const completedRef = useRef(false);
   const watchTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -127,7 +149,7 @@ function TikTokFeedItem({ post, isSaved, onDeleted }: TikTokFeedItemProps) {
   useEffect(() => {
     const videoEl = videoRef.current;
     if (!videoEl) return;
-    if (isPlayingVideo && inView) {
+    if (isPlayingVideo && inView && !manuallyPaused) {
       videoEl.play().catch(() => {});
       watchTimer.current = setInterval(() => trackWatchTime(post.id, 5), 5000);
     } else {
@@ -143,7 +165,14 @@ function TikTokFeedItem({ post, isSaved, onDeleted }: TikTokFeedItemProps) {
         watchTimer.current = null;
       }
     };
-  }, [isPlayingVideo, inView, post.id]);
+  }, [isPlayingVideo, inView, manuallyPaused, post.id]);
+
+  // A manual pause only holds while this slide stays in view — scrolling away and back resets
+  // it, matching TikTok/Instagram's own behavior, so a post doesn't stay silently paused forever
+  // just because it was tapped once several scrolls ago.
+  useEffect(() => {
+    if (!inView) setManuallyPaused(false);
+  }, [inView]);
 
   useEffect(() => {
     const videoEl = videoRef.current;
@@ -156,6 +185,13 @@ function TikTokFeedItem({ post, isSaved, onDeleted }: TikTokFeedItemProps) {
     if (!completedRef.current && v.currentTime / v.duration >= 0.8) {
       completedRef.current = true;
       trackVideoCompleted(post.id);
+    }
+    // Keeps the seek bar's fill advancing during ordinary playback, not just while actively
+    // dragging it — skipped while the viewer is mid-drag so their own finger position isn't
+    // fought over by the video's own natural playback progress.
+    if (seekBarVisible && !scrubbing) {
+      setSeekProgress((v.currentTime / v.duration) * 100);
+      setSeekTimeLabel(`${formatClock(v.currentTime)} / ${formatClock(v.duration)}`);
     }
   }
 
@@ -178,10 +214,45 @@ function TikTokFeedItem({ post, isSaved, onDeleted }: TikTokFeedItemProps) {
     }
   }
 
+  /** Flashes the pause/play glyph for a moment, same "brief acknowledgement" pattern
+   * StoryViewer's own pause indicator uses. */
+  function flashPauseIcon() {
+    setShowPauseIcon(true);
+    setTimeout(() => setShowPauseIcon(false), 500);
+  }
+
+  /** Shows the seek bar (with the current position/duration label) and restarts its 2-second
+   * auto-hide countdown — called on every tap and on every drag movement, so it never disappears
+   * mid-interaction. */
+  function revealSeekBar() {
+    setSeekBarVisible(true);
+    updateSeekLabel();
+    if (seekBarHideTimer.current) clearTimeout(seekBarHideTimer.current);
+    seekBarHideTimer.current = setTimeout(() => setSeekBarVisible(false), 2000);
+  }
+
+  function updateSeekLabel() {
+    const v = videoRef.current;
+    if (!v || !Number.isFinite(v.duration)) return;
+    setSeekProgress(v.duration > 0 ? (v.currentTime / v.duration) * 100 : 0);
+    setSeekTimeLabel(`${formatClock(v.currentTime)} / ${formatClock(v.duration)}`);
+  }
+
+  function handleTogglePlayPause() {
+    if (!isVideo) return;
+    setManuallyPaused((p) => !p);
+    flashPauseIcon();
+    if (isVideo) revealSeekBar();
+  }
+
   function handleContainerClick(e: React.MouseEvent<HTMLDivElement>) {
     const now = Date.now();
     if (now - lastTapRef.current < 300) {
       lastTapRef.current = 0;
+      if (singleTapTimerRef.current) {
+        clearTimeout(singleTapTimerRef.current);
+        singleTapTimerRef.current = null;
+      }
       const rect = e.currentTarget.getBoundingClientRect();
       burstKeyRef.current += 1;
       setLikeBurst({ x: e.clientX - rect.left, y: e.clientY - rect.top, key: burstKeyRef.current });
@@ -189,7 +260,26 @@ function TikTokFeedItem({ post, isSaved, onDeleted }: TikTokFeedItemProps) {
       if (!liked) handleLike();
     } else {
       lastTapRef.current = now;
+      // Delayed just past the double-tap window, so a genuine double-tap (handled above, next
+      // time this fires) can still cancel this single-tap action before it runs.
+      if (singleTapTimerRef.current) clearTimeout(singleTapTimerRef.current);
+      singleTapTimerRef.current = setTimeout(() => {
+        handleTogglePlayPause();
+        singleTapTimerRef.current = null;
+      }, 300);
     }
+  }
+
+  function handleSeek(e: React.MouseEvent | React.TouchEvent) {
+    const bar = seekBarRef.current;
+    const v = videoRef.current;
+    if (!bar || !v || !Number.isFinite(v.duration)) return;
+    const rect = bar.getBoundingClientRect();
+    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+    const position = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    v.currentTime = position * v.duration;
+    setSeekProgress(position * 100);
+    setSeekTimeLabel(`${formatClock(v.currentTime)} / ${formatClock(v.duration)}`);
   }
 
   async function handleToggleSave() {
@@ -251,7 +341,66 @@ function TikTokFeedItem({ post, isSaved, onDeleted }: TikTokFeedItemProps) {
           onTimeUpdate={handleTimeUpdate}
           onEnded={handleVideoLooped}
         />
-      ) : isImage ? (
+      ) : null}
+
+      {isVideo && (
+        <>
+          {/* Tap-to-pause/play glyph — flashes briefly, same pattern as StoryViewer's own pause
+              indicator, rather than staying on screen for the whole paused duration. */}
+          <div
+            className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center transition-opacity duration-200"
+            style={{ opacity: showPauseIcon ? 1 : 0 }}
+          >
+            <span className="flex h-16 w-16 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-sm">
+              {manuallyPaused ? <Play className="ml-1 h-7 w-7 fill-white" /> : <Pause className="h-7 w-7 fill-white" />}
+            </span>
+          </div>
+
+          {/* Seek bar — thin, clay-colored, appears on tap and fades after 2s idle. */}
+          <div
+            className="absolute inset-x-0 bottom-0 z-20 px-3 pb-1 transition-opacity duration-300"
+            style={{ opacity: seekBarVisible ? 1 : 0, pointerEvents: seekBarVisible ? "auto" : "none" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {scrubbing && (
+              <p className="mb-1 text-center font-noto text-[11px] text-white">{seekTimeLabel}</p>
+            )}
+            <div
+              ref={seekBarRef}
+              className="relative h-2 w-full cursor-pointer touch-none"
+              onMouseDown={(e) => {
+                setScrubbing(true);
+                handleSeek(e);
+              }}
+              onMouseMove={(e) => {
+                if (e.buttons === 1) {
+                  handleSeek(e);
+                  revealSeekBar();
+                }
+              }}
+              onMouseUp={() => setScrubbing(false)}
+              onMouseLeave={() => setScrubbing(false)}
+              onTouchStart={(e) => {
+                setScrubbing(true);
+                handleSeek(e);
+              }}
+              onTouchMove={(e) => {
+                handleSeek(e);
+                revealSeekBar();
+              }}
+              onTouchEnd={() => setScrubbing(false)}
+            >
+              <div className="absolute inset-x-0 top-1/2 h-[2px] -translate-y-1/2 rounded-full bg-white/30" />
+              <div
+                className="absolute top-1/2 h-[2px] -translate-y-1/2 rounded-full bg-clay"
+                style={{ width: `${seekProgress}%` }}
+              />
+            </div>
+          </div>
+        </>
+      )}
+
+      {isImage ? (
         <>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -261,7 +410,7 @@ function TikTokFeedItem({ post, isSaved, onDeleted }: TikTokFeedItemProps) {
           />
           <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
         </>
-      ) : (
+      ) : !isVideo ? (
         <div
           className="absolute inset-0 flex items-center justify-center p-10"
           style={{ background: post.type === "milestone" ? gradient : `linear-gradient(160deg, ${stringToColor(post.uid)}, #0c0a08)` }}
@@ -270,7 +419,7 @@ function TikTokFeedItem({ post, isSaved, onDeleted }: TikTokFeedItemProps) {
             {post.content}
           </p>
         </div>
-      )}
+      ) : null}
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
 
