@@ -4,38 +4,66 @@ import { memo, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { isThisWeek, isToday } from "date-fns";
-import { Bell } from "lucide-react";
+import {
+  AtSign,
+  Award,
+  Ban,
+  Bell,
+  BookOpen,
+  CheckCircle2,
+  Coins as CoinsIcon,
+  Dices,
+  Eye,
+  Flame,
+  Hourglass,
+  HeartCrack,
+  Heart,
+  Megaphone,
+  MessageCircle,
+  PartyPopper,
+  RefreshCw,
+  Trophy,
+  Unlock,
+  UserPlus,
+  Users,
+  Wallet,
+  XCircle,
+  type LucideIcon,
+} from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { markAllAsRead, markAsRead, subscribeToNotifications } from "@/lib/notifications";
 import { formatPostTimestamp } from "@/lib/utils";
 import { NotificationType, type AppNotification } from "@/types";
 
-const TYPE_EMOJI: Record<NotificationType, string> = {
-  [NotificationType.NEW_CHAPTER]: "📖",
-  [NotificationType.COMMENT_REPLY]: "💬",
-  [NotificationType.COMMENT_LIKE]: "❤️",
-  [NotificationType.POST_LIKE]: "❤️",
-  [NotificationType.COINS_RECEIVED]: "🪙",
-  [NotificationType.PLATINUM_EXPIRING]: "⏳",
-  [NotificationType.PLATINUM_EXPIRED]: "💔",
-  [NotificationType.WORK_APPROVED]: "✅",
-  [NotificationType.WORK_REJECTED]: "❌",
-  [NotificationType.NEW_FOLLOWER]: "👤",
-  [NotificationType.ANNOUNCEMENT]: "📢",
-  [NotificationType.ROULETTE_REMINDER]: "🎡",
-  [NotificationType.STREAK_WARNING]: "🔥",
-  [NotificationType.ACHIEVEMENT_UNLOCKED]: "🏆",
-  [NotificationType.EARNINGS_MILESTONE]: "💰",
-  [NotificationType.BADGE_APPROVED]: "🏅",
-  [NotificationType.MODERATION_ACTION]: "🚫",
-  [NotificationType.GROUP_ADDED]: "👥",
-  [NotificationType.GROUP_MENTION]: "📣",
-  [NotificationType.OWNERSHIP_TRANSFER_REQUEST]: "🔄",
-  [NotificationType.OWNERSHIP_TRANSFER_ACCEPTED]: "✅",
-  [NotificationType.APPEAL_APPROVED]: "🎉",
-  [NotificationType.APPEAL_DENIED]: "🚫",
-  [NotificationType.RESTRICTION_LIFTED]: "🔓",
-  [NotificationType.PROFILE_VISIT]: "👁",
+// Beta feedback UI/UX: "Everywhere that emoji were used instead of icons should be changed to
+// icons" — this map was purely structural chrome (a per-type glyph in the notification dropdown),
+// not user-generated content, so it's an in-scope, low-risk swap to lucide icons.
+const TYPE_ICON: Record<NotificationType, LucideIcon> = {
+  [NotificationType.NEW_CHAPTER]: BookOpen,
+  [NotificationType.COMMENT_REPLY]: MessageCircle,
+  [NotificationType.COMMENT_LIKE]: Heart,
+  [NotificationType.POST_LIKE]: Heart,
+  [NotificationType.COINS_RECEIVED]: CoinsIcon,
+  [NotificationType.PLATINUM_EXPIRING]: Hourglass,
+  [NotificationType.PLATINUM_EXPIRED]: HeartCrack,
+  [NotificationType.WORK_APPROVED]: CheckCircle2,
+  [NotificationType.WORK_REJECTED]: XCircle,
+  [NotificationType.NEW_FOLLOWER]: UserPlus,
+  [NotificationType.ANNOUNCEMENT]: Megaphone,
+  [NotificationType.ROULETTE_REMINDER]: Dices,
+  [NotificationType.STREAK_WARNING]: Flame,
+  [NotificationType.ACHIEVEMENT_UNLOCKED]: Trophy,
+  [NotificationType.EARNINGS_MILESTONE]: Wallet,
+  [NotificationType.BADGE_APPROVED]: Award,
+  [NotificationType.MODERATION_ACTION]: Ban,
+  [NotificationType.GROUP_ADDED]: Users,
+  [NotificationType.GROUP_MENTION]: AtSign,
+  [NotificationType.OWNERSHIP_TRANSFER_REQUEST]: RefreshCw,
+  [NotificationType.OWNERSHIP_TRANSFER_ACCEPTED]: CheckCircle2,
+  [NotificationType.APPEAL_APPROVED]: PartyPopper,
+  [NotificationType.APPEAL_DENIED]: Ban,
+  [NotificationType.RESTRICTION_LIFTED]: Unlock,
+  [NotificationType.PROFILE_VISIT]: Eye,
 };
 
 type GroupLabel = "Today" | "This Week" | "Earlier";
@@ -74,8 +102,11 @@ const NotificationItem = memo(function NotificationItem({ notification: n, onCli
           className="mt-0.5 h-9 w-9 shrink-0 rounded-full object-cover"
         />
       ) : (
-        <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center text-lg leading-none">
-          {TYPE_EMOJI[n.type] ?? "🔔"}
+        <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-bg3 text-muted">
+          {(() => {
+            const Icon = TYPE_ICON[n.type] ?? Bell;
+            return <Icon className="h-4 w-4" />;
+          })()}
         </span>
       )}
       <span className="min-w-0 flex-1">
@@ -190,7 +221,7 @@ export default function NotificationBell() {
             <div className="max-h-[380px] overflow-y-auto">
               {notifications.length === 0 ? (
                 <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
-                  <span className="text-2xl">✓</span>
+                  <CheckCircle2 className="h-8 w-8 text-muted" />
                   <p className="font-cinzel text-sm text-text">All Caught Up</p>
                   <p className="font-noto text-xs text-muted">No new notifications</p>
                 </div>

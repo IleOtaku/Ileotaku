@@ -8,16 +8,22 @@ import {
   AlertTriangle,
   Bell,
   BellOff,
+  BookOpen,
   Bug,
   Copy,
   Crown,
   Download,
+  Eye,
   Gift,
   KeyRound,
   Loader2,
   Lock,
+  Megaphone,
+  MessageCircle,
+  Palette,
   ShieldAlert,
   ShieldOff,
+  Smartphone,
   Sparkles,
   UserX,
 } from "lucide-react";
@@ -662,8 +668,8 @@ export default function SettingsTab() {
         <h3 className="mb-4 font-syne text-sm font-semibold text-text">Notifications</h3>
         <div className="flex flex-col gap-5 rounded-2xl border border-bg4 bg-bg2 p-5">
           <div>
-            <p className="mb-3 font-syne text-xs font-semibold uppercase tracking-wide text-muted">
-              📱 Device Notifications
+            <p className="mb-3 flex items-center gap-1.5 font-syne text-xs font-semibold uppercase tracking-wide text-muted">
+              <Smartphone className="h-3.5 w-3.5" /> Device Notifications
             </p>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -712,7 +718,9 @@ export default function SettingsTab() {
           ) : (
             <>
               <div className="border-t border-bg4 pt-4">
-                <p className="mb-2 font-syne text-xs font-semibold uppercase tracking-wide text-muted">📖 Reading</p>
+                <p className="mb-2 flex items-center gap-1.5 font-syne text-xs font-semibold uppercase tracking-wide text-muted">
+                  <BookOpen className="h-3.5 w-3.5" /> Reading
+                </p>
                 <div className="flex flex-col gap-2.5">
                   <Toggle
                     checked={notifPrefs.newChapterFollowedSeries !== false}
@@ -728,7 +736,9 @@ export default function SettingsTab() {
               </div>
 
               <div className="border-t border-bg4 pt-4">
-                <p className="mb-2 font-syne text-xs font-semibold uppercase tracking-wide text-muted">💬 Social</p>
+                <p className="mb-2 flex items-center gap-1.5 font-syne text-xs font-semibold uppercase tracking-wide text-muted">
+                  <MessageCircle className="h-3.5 w-3.5" /> Social
+                </p>
                 <div className="flex flex-col gap-2.5">
                   <Toggle checked={notifPrefs.newDM !== false} onChange={(v) => updateNotifPref("newDM", v)} label="New DM received" />
                   <Toggle
@@ -756,7 +766,9 @@ export default function SettingsTab() {
 
               {profile?.isCreator && (
                 <div className="border-t border-bg4 pt-4">
-                  <p className="mb-2 font-syne text-xs font-semibold uppercase tracking-wide text-muted">🎨 Creator</p>
+                  <p className="mb-2 flex items-center gap-1.5 font-syne text-xs font-semibold uppercase tracking-wide text-muted">
+                    <Palette className="h-3.5 w-3.5" /> Creator
+                  </p>
                   <div className="flex flex-col gap-2.5">
                     <Toggle
                       checked={notifPrefs.workApprovedRejected !== false}
@@ -783,7 +795,9 @@ export default function SettingsTab() {
               )}
 
               <div className="border-t border-bg4 pt-4">
-                <p className="mb-2 font-syne text-xs font-semibold uppercase tracking-wide text-muted">👁 Profile</p>
+                <p className="mb-2 flex items-center gap-1.5 font-syne text-xs font-semibold uppercase tracking-wide text-muted">
+                  <Eye className="h-3.5 w-3.5" /> Profile
+                </p>
                 <div className="flex flex-col gap-2.5">
                   <Toggle
                     checked={notifPrefs.profileVisit !== false}
@@ -799,7 +813,9 @@ export default function SettingsTab() {
               </div>
 
               <div className="border-t border-bg4 pt-4">
-                <p className="mb-2 font-syne text-xs font-semibold uppercase tracking-wide text-muted">📢 Platform</p>
+                <p className="mb-2 flex items-center gap-1.5 font-syne text-xs font-semibold uppercase tracking-wide text-muted">
+                  <Megaphone className="h-3.5 w-3.5" /> Platform
+                </p>
                 <div className="flex flex-col gap-2.5">
                   <Toggle
                     checked={notifPrefs.announcements !== false}

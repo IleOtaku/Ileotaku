@@ -81,9 +81,15 @@ export default function Navbar() {
         {/* Beta feedback bug: "Browse is too close to the logo" on desktop — the outer nav's
             justify-between only distributes LEFTOVER space between every pair of flex children,
             so this gap shrank to almost nothing whenever NavSearch/the auth cluster took up more
-            room. A fixed md:ml-10 guarantees real breathing room next to the logo regardless of
-            how much space is left over to distribute elsewhere. */}
-        <div className="hidden items-center gap-8 md:ml-10 md:flex">
+            room. A fixed lg:ml-10 guarantees real breathing room next to the logo regardless of
+            how much space is left over to distribute elsewhere.
+            Beta feedback UI/UX: "Navbar should be a dropdown menu on mobile and tablet
+            configurations" — this row of links, the coins/notifications/Go-Platinum cluster, and
+            the search bar were all cramped into one line starting at md (768px), which is still
+            tablet width. Bumped every breakpoint in this file from md to lg so tablets get the
+            same compact hamburger-dropdown nav as phones, only switching to the full inline
+            layout at real desktop widths. */}
+        <div className="hidden items-center gap-8 lg:ml-10 lg:flex">
           {NAV_LINKS.map((link) => (
             <Link
               key={link.href}
@@ -97,7 +103,7 @@ export default function Navbar() {
 
         <NavSearch />
 
-        <div className="hidden items-center gap-3 md:flex">
+        <div className="hidden items-center gap-3 lg:flex">
           {/* Reads useAuth().profile.coins — live via subscribeToUserProfile (hooks/useAuth.ts),
               so a purchase or spend anywhere in the app updates this without a page refresh. */}
           {user && (
@@ -208,7 +214,7 @@ export default function Navbar() {
           )}
         </div>
 
-        <div className="flex items-center gap-1 md:hidden">
+        <div className="relative flex items-center gap-1 lg:hidden">
           <MobileNavSearch
             open={mobilePanel === "search"}
             onOpen={() => setMobilePanel("search")}
@@ -223,108 +229,112 @@ export default function Navbar() {
           >
             {mobileOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
           </button>
+
+          {/* Beta feedback UI/UX: was a full-width band that pushed the whole page down; now an
+              actual anchored dropdown under the hamburger button, matching the desktop
+              avatar menu's own pattern, with a max-height + scroll so it never runs off-screen
+              on short viewports. */}
+          <AnimatePresence>
+            {mobileOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                className="glass absolute right-0 top-full z-50 mt-2 max-h-[80vh] w-64 overflow-y-auto rounded-xl p-1.5 lg:hidden"
+              >
+                <div className="flex flex-col gap-1">
+                  {NAV_LINKS.map((link) => (
+                    <Link
+                      key={link.href}
+                      href={link.href}
+                      onClick={() => setMobilePanel(null)}
+                      className="rounded-lg px-3 py-2 font-syne text-sm text-text hover:bg-bg4"
+                    >
+                      {link.label}
+                    </Link>
+                  ))}
+
+                  {!isPlatinum && (
+                    <Link
+                      href="/pricing"
+                      onClick={() => setMobilePanel(null)}
+                      className="btn-plat mt-2 justify-center"
+                    >
+                      <Crown className="h-4 w-4" /> Go Platinum
+                    </Link>
+                  )}
+
+                  {user ? (
+                    <>
+                      <Link
+                        href="/profile"
+                        onClick={() => setMobilePanel(null)}
+                        className="rounded-lg px-3 py-2 font-syne text-sm text-text hover:bg-bg4"
+                      >
+                        Profile
+                      </Link>
+                      <Link
+                        href="/messages"
+                        onClick={() => setMobilePanel(null)}
+                        className="flex items-center justify-between gap-2 rounded-lg px-3 py-2 font-syne text-sm text-text hover:bg-bg4"
+                      >
+                        Messages
+                        {unreadDMs > 0 && (
+                          <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-clay px-1 font-syne text-[10px] font-bold text-ivory">
+                            {unreadDMs > 9 ? "9+" : unreadDMs}
+                          </span>
+                        )}
+                      </Link>
+                      {canModerate && (
+                        <Link
+                          href="/creator"
+                          onClick={() => setMobilePanel(null)}
+                          className="rounded-lg px-3 py-2 font-syne text-sm text-text hover:bg-bg4"
+                        >
+                          Creator Studio
+                        </Link>
+                      )}
+                      {isAdmin && (
+                        <Link
+                          href="/admin"
+                          onClick={() => setMobilePanel(null)}
+                          className="rounded-lg px-3 py-2 font-syne text-sm text-text hover:bg-bg4"
+                        >
+                          Admin
+                        </Link>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleLogout}
+                        className="rounded-lg px-3 py-2 text-left font-syne text-sm text-clay2 hover:bg-bg4"
+                      >
+                        Sign out
+                      </button>
+                    </>
+                  ) : (
+                    <div className="mt-2 flex flex-col gap-2">
+                      <Link
+                        href="/auth/login"
+                        onClick={() => setMobilePanel(null)}
+                        className="btn-ghost justify-center"
+                      >
+                        Sign In
+                      </Link>
+                      <Link
+                        href="/auth/signup"
+                        onClick={() => setMobilePanel(null)}
+                        className="btn-primary justify-center"
+                      >
+                        Join Free
+                      </Link>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </nav>
-
-      <AnimatePresence>
-        {mobileOpen && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden border-t border-bg4 bg-bg2 md:hidden"
-          >
-            <div className="flex flex-col gap-1 px-4 py-4">
-              {NAV_LINKS.map((link) => (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  onClick={() => setMobilePanel(null)}
-                  className="rounded-lg px-3 py-2 font-syne text-sm text-text hover:bg-bg4"
-                >
-                  {link.label}
-                </Link>
-              ))}
-
-              {!isPlatinum && (
-                <Link
-                  href="/pricing"
-                  onClick={() => setMobilePanel(null)}
-                  className="btn-plat mt-2 justify-center"
-                >
-                  <Crown className="h-4 w-4" /> Go Platinum
-                </Link>
-              )}
-
-              {user ? (
-                <>
-                  <Link
-                    href="/profile"
-                    onClick={() => setMobilePanel(null)}
-                    className="rounded-lg px-3 py-2 font-syne text-sm text-text hover:bg-bg4"
-                  >
-                    Profile
-                  </Link>
-                  <Link
-                    href="/messages"
-                    onClick={() => setMobilePanel(null)}
-                    className="flex items-center justify-between gap-2 rounded-lg px-3 py-2 font-syne text-sm text-text hover:bg-bg4"
-                  >
-                    Messages
-                    {unreadDMs > 0 && (
-                      <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-clay px-1 font-syne text-[10px] font-bold text-ivory">
-                        {unreadDMs > 9 ? "9+" : unreadDMs}
-                      </span>
-                    )}
-                  </Link>
-                  {canModerate && (
-                    <Link
-                      href="/creator"
-                      onClick={() => setMobilePanel(null)}
-                      className="rounded-lg px-3 py-2 font-syne text-sm text-text hover:bg-bg4"
-                    >
-                      Creator Studio
-                    </Link>
-                  )}
-                  {isAdmin && (
-                    <Link
-                      href="/admin"
-                      onClick={() => setMobilePanel(null)}
-                      className="rounded-lg px-3 py-2 font-syne text-sm text-text hover:bg-bg4"
-                    >
-                      Admin
-                    </Link>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleLogout}
-                    className="rounded-lg px-3 py-2 text-left font-syne text-sm text-clay2 hover:bg-bg4"
-                  >
-                    Sign out
-                  </button>
-                </>
-              ) : (
-                <div className="mt-2 flex flex-col gap-2">
-                  <Link
-                    href="/auth/login"
-                    onClick={() => setMobilePanel(null)}
-                    className="btn-ghost justify-center"
-                  >
-                    Sign In
-                  </Link>
-                  <Link
-                    href="/auth/signup"
-                    onClick={() => setMobilePanel(null)}
-                    className="btn-primary justify-center"
-                  >
-                    Join Free
-                  </Link>
-                </div>
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </header>
   );
 }

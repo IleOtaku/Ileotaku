@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import toast from "react-hot-toast";
-import { CheckCircle2, Loader2 } from "lucide-react";
+import { Bug, CheckCircle2, Lightbulb, Loader2, MessageCircle, ThumbsUp } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { Modal } from "@/components/ui";
 import { useAuth } from "@/hooks/useAuth";
 import { createFeedback } from "@/lib/admin";
@@ -18,10 +19,12 @@ const EDGE_GAP = 12;
  * modal) rather than a drag — mirrors StoryViewer's own long-press/swipe distinction. */
 const DRAG_THRESHOLD = 6;
 
-const TYPES: { value: BetaFeedbackType; label: string }[] = [
-  { value: "bug", label: "🐛 Bug" },
-  { value: "suggestion", label: "💡 Suggestion" },
-  { value: "compliment", label: "👏 Compliment" },
+// Beta feedback UI/UX: "Everywhere that emoji were used instead of icons should be changed to
+// icons" — these type-selector labels were structural chrome, not user content, so in scope.
+const TYPES: { value: BetaFeedbackType; label: string; icon: LucideIcon }[] = [
+  { value: "bug", label: "Bug", icon: Bug },
+  { value: "suggestion", label: "Suggestion", icon: Lightbulb },
+  { value: "compliment", label: "Compliment", icon: ThumbsUp },
 ];
 
 /** Floating "Feedback" pill, visible on every page during the beta window — opens a short modal
@@ -165,7 +168,7 @@ export default function BetaFeedback() {
         }
         style={position ? { left: position.x, top: position.y } : undefined}
       >
-        <span aria-hidden="true">💬</span>
+        <MessageCircle className="h-4 w-4" aria-hidden="true" />
         <span className="hidden sm:inline">Feedback</span>
       </button>
 
@@ -187,13 +190,13 @@ export default function BetaFeedback() {
                     key={t.value}
                     type="button"
                     onClick={() => setType(t.value)}
-                    className={`rounded-full border px-3 py-1.5 font-noto text-xs font-semibold transition-colors ${
+                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 font-noto text-xs font-semibold transition-colors ${
                       type === t.value
                         ? "border-clay bg-clay text-ivory"
                         : "border-muted2 bg-bg3 text-muted hover:text-text"
                     }`}
                   >
-                    {t.label}
+                    <t.icon className="h-3.5 w-3.5" /> {t.label}
                   </button>
                 ))}
               </div>

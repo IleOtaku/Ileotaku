@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Bug, Lightbulb, ThumbsUp, type LucideIcon } from "lucide-react";
 import { getFeedback, markFeedbackResolved } from "@/lib/admin";
 import { formatTime } from "@/lib/utils";
 import { Skeleton } from "@/components/ui";
@@ -22,10 +23,18 @@ const TYPE_BADGE: Record<BetaFeedbackType, string> = {
   compliment: "bg-green/15 text-green2",
 };
 
+// Beta feedback UI/UX: "Everywhere that emoji were used instead of icons should be changed to
+// icons" — this table's type badges were structural chrome, in scope for the icon swap.
 const TYPE_LABEL: Record<BetaFeedbackType, string> = {
-  bug: "🐛 Bug",
-  suggestion: "💡 Suggestion",
-  compliment: "👏 Compliment",
+  bug: "Bug",
+  suggestion: "Suggestion",
+  compliment: "Compliment",
+};
+
+const TYPE_ICON: Record<BetaFeedbackType, LucideIcon> = {
+  bug: Bug,
+  suggestion: Lightbulb,
+  compliment: ThumbsUp,
 };
 
 function DescriptionCell({ text }: { text: string }) {
@@ -129,7 +138,11 @@ export default function AdminFeedbackTab() {
                   className={`border-t border-bg4 ${entry.resolved ? "opacity-50" : ""}`}
                 >
                   <td className="p-3">
-                    <span className={`rounded-full px-2 py-1 font-syne text-[11px] font-semibold ${TYPE_BADGE[entry.type]}`}>
+                    <span className={`flex w-fit items-center gap-1 rounded-full px-2 py-1 font-syne text-[11px] font-semibold ${TYPE_BADGE[entry.type]}`}>
+                      {(() => {
+                        const Icon = TYPE_ICON[entry.type];
+                        return <Icon className="h-3 w-3" />;
+                      })()}
                       {TYPE_LABEL[entry.type]}
                     </span>
                   </td>

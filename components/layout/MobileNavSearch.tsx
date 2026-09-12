@@ -68,8 +68,12 @@ export default function MobileNavSearch({ open, onOpen, onClose }: MobileNavSear
 
   const showDropdown = query.trim().length > 0 && (mangaResults.length > 0 || peopleResults.length > 0);
 
+  // Beta feedback UI/UX: Navbar's own hamburger cluster now switches to the compact mobile
+  // layout at lg (1024px) instead of md (768px) so tablets get it too — this self-gate has to
+  // match, or the search icon (and NavSearch, which is lg:flex-gated already) would both be
+  // hidden on tablet widths, leaving no way to search there at all.
   return (
-    <div ref={containerRef} className="md:hidden">
+    <div ref={containerRef} className="lg:hidden">
       <button
         type="button"
         onClick={() => (open ? onClose() : onOpen())}
