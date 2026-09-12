@@ -239,8 +239,33 @@ export default function FeedClient() {
 
       {/* ---------------------------- Center feed column ---------------------------- */}
       <div className="relative flex flex-1 justify-center overflow-hidden">
+        {/* Beta feedback bug: mobile had no way to leave the feed at all — the desktop-only left
+            sidebar (hidden below lg) is the only place a back-to-home link exists. This mirrors
+            it for mobile, top-left, always visible above the scrolling posts. */}
+        <Link
+          href="/"
+          aria-label="Back to home"
+          className="absolute left-3 top-3 z-30 flex h-9 w-9 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur lg:hidden"
+        >
+          <ArrowLeft className="h-5 w-5" />
+        </Link>
+
         <div className="absolute right-3 top-3 z-30 flex items-center gap-2 lg:hidden">
           <FeedSoundToggle />
+          {/* Beta feedback bug: this used to float at bottom-right, directly overlapping
+              TikTokFeedItem's own like/comment/share/save rail in that same corner ("the create
+              post icon is on the other control for the feed videos on mobile"). Moved up into the
+              top-right icon row, clear of every post's action rail. */}
+          {user && (
+            <button
+              type="button"
+              onClick={() => setComposerOpen(true)}
+              aria-label="Create post"
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-clay text-ivory shadow-lg"
+            >
+              <Plus className="h-5 w-5" />
+            </button>
+          )}
         </div>
         <div className="absolute right-3 top-3 z-30 hidden lg:flex">
           <FeedSoundToggle />
@@ -321,17 +346,6 @@ export default function FeedClient() {
             </>
           )}
         </div>
-
-        {user && (
-          <button
-            type="button"
-            onClick={() => setComposerOpen(true)}
-            aria-label="Create post"
-            className="absolute bottom-6 right-4 z-30 flex h-12 w-12 items-center justify-center rounded-full bg-clay text-ivory shadow-2xl lg:hidden"
-          >
-            <Plus className="h-6 w-6" />
-          </button>
-        )}
       </div>
 
       <Modal open={composerOpen} onClose={() => setComposerOpen(false)} title="Create Post">

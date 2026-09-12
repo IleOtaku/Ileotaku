@@ -5,7 +5,7 @@ import toast from "react-hot-toast";
 import { Check, Loader2, X as XIcon } from "lucide-react";
 import { Modal, Select } from "@/components/ui";
 import { useAuth } from "@/hooks/useAuth";
-import { getUserProfile, updateUserPrefs } from "@/lib/firestore";
+import { getUserProfile, propagateProfileChange, updateUserPrefs } from "@/lib/firestore";
 import { checkHandleAvailability, claimHandle, HandleTakenError, isValidHandleFormat } from "@/lib/handles";
 import { GENRES } from "@/lib/utils";
 
@@ -95,8 +95,9 @@ export default function EditProfileModal({ open, onClose }: EditProfileModalProp
         }
       }
 
+      const trimmedName = displayName.trim();
       await updateUserPrefs(user.uid, {
-        displayName: displayName.trim(),
+        displayName: trimmedName,
         bio: bio.trim(),
         favoriteGenre,
         socialLinks: {
@@ -105,6 +106,12 @@ export default function EditProfileModal({ open, onClose }: EditProfileModalProp
           ...(website.trim() ? { website: website.trim() } : {}),
         },
       });
+      // Beta feedback: a changed display name used to only ever show on the profile page itself
+      // — every already-published post/series still denormalizes the OLD name. Fan it out
+      // (best-effort, never blocks the save) whenever it actually changed.
+      if (trimmedName !== (profile?.displayName ?? "")) {
+        propagateProfileChange(user.uid, { displayName: trimmedName });
+      }
       const fresh = await getUserProfile(user.uid);
       useAuth.getState().setProfile(fresh);
       toast.success("Profile updated!");

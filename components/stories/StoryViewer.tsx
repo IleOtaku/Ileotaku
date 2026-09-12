@@ -45,6 +45,7 @@ export default function StoryViewer({ uids, startUid, storiesByUid, onClose, onA
   const [viewedBy, setViewedBy] = useState<string[]>([]);
   const [viewerProfiles, setViewerProfiles] = useState<Map<string, UserProfile>>(new Map());
   const touchStartY = useRef<number | null>(null);
+  const replyFocusedRef = useRef(false);
   const rafRef = useRef<number | null>(null);
   const lastTickRef = useRef<number>(0);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -149,7 +150,14 @@ export default function StoryViewer({ uids, startUid, storiesByUid, onClose, onA
     if (pauseIconTimerRef.current) clearTimeout(pauseIconTimerRef.current);
     pauseIconTimerRef.current = setTimeout(() => setShowPauseIcon(false), 700);
   }
+  /** Beta feedback bug: "Replying to a story doesn't pause it." The reply `<input>`'s own
+   * onFocus={pause} correctly paused it, but the SAME tap that focuses the input also bubbles a
+   * touchend up to this viewer's outer handleTouchEnd (bound for hold-to-pause/swipe-to-close),
+   * whose unconditional resume() could win that race and immediately un-pause it again. resume()
+   * is now a no-op for as long as the reply input is genuinely focused, so nothing but the input's
+   * own onBlur can bring the story back. */
   function resume() {
+    if (replyFocusedRef.current) return;
     setPaused(false);
   }
 
@@ -360,8 +368,14 @@ export default function StoryViewer({ uids, startUid, storiesByUid, onClose, onA
             <input
               value={reply}
               onChange={(e) => setReply(e.target.value)}
-              onFocus={pause}
-              onBlur={resume}
+              onFocus={() => {
+                replyFocusedRef.current = true;
+                pause();
+              }}
+              onBlur={() => {
+                replyFocusedRef.current = false;
+                resume();
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleSendReply();
               }}

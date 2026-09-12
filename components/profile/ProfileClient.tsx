@@ -31,7 +31,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { logout } from "@/lib/auth";
 import { auth } from "@/lib/firebase";
 import { getOptimizedImageUrl, uploadImage } from "@/lib/cloudinary";
-import { getUserProfile, upsertUserProfile } from "@/lib/firestore";
+import { getUserProfile, propagateProfileChange, upsertUserProfile } from "@/lib/firestore";
 import { initials, stringToColor } from "@/lib/utils";
 
 type ProfileTab = "library" | "history" | "achievements" | "posts" | "settings";
@@ -108,6 +108,9 @@ export default function ProfileClient() {
       // a signed-in user's Firestore profile doc is somehow missing — updateUserPrefs's plain
       // updateDoc would just throw in that case instead of creating it.
       await upsertUserProfile(user.uid, { photoURL });
+      // Beta feedback: fan the new photo out to every already-published post/series that
+      // denormalized the old one — same reasoning as EditProfileModal's display-name fan-out.
+      propagateProfileChange(user.uid, { photoURL });
       await user.reload();
       useAuth.getState().setUser(auth.currentUser);
       const fresh = await getUserProfile(user.uid);

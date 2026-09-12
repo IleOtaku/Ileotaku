@@ -110,7 +110,7 @@ export default function UsersTable({ users, loading, canManageAdmins = true, onU
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [openMenuUid, setOpenMenuUid] = useState<string | null>(null);
-  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [menuPos, setMenuPos] = useState<{ top?: number; bottom?: number; left: number } | null>(null);
   const [pending, setPending] = useState<{ uid: string; action: PendingAction } | null>(null);
   const [adminModalUser, setAdminModalUser] = useState<UserProfile | null>(null);
   const [tempBanUser, setTempBanUser] = useState<UserProfile | null>(null);
@@ -139,8 +139,21 @@ export default function UsersTable({ users, loading, canManageAdmins = true, onU
       setOpenMenuUid(null);
       return;
     }
+    // Beta feedback bug: on mobile, a trigger near the bottom of the screen opened this menu
+    // further down still — completely off-viewport, with no way to reach the actions inside it.
+    // Two fixes: (1) `getBoundingClientRect()` is already viewport-relative, so adding
+    // window.scrollY/scrollX on top of it (as this used to) was actively wrong for a
+    // `position: fixed` element, which never needs a scroll-offset correction at all — it was
+    // pushing the menu further off-screen the more the page had scrolled. (2) the menu now opens
+    // upward (anchored to the trigger's TOP edge via `bottom`) whenever the trigger sits in the
+    // bottom half of the viewport, downward otherwise, so it always has room to render on-screen
+    // regardless of where in the list the admin taps.
     const rect = triggerEl.getBoundingClientRect();
-    setMenuPos({ top: rect.bottom + window.scrollY + 4, left: rect.right + window.scrollX - 224 });
+    const left = Math.max(8, Math.min(rect.right - 224, window.innerWidth - 232));
+    const opensUpward = rect.top > window.innerHeight / 2;
+    setMenuPos(
+      opensUpward ? { bottom: window.innerHeight - rect.top + 4, left } : { top: rect.bottom + 4, left }
+    );
     setOpenMenuUid(uid);
   }
 
@@ -343,8 +356,8 @@ export default function UsersTable({ users, loading, canManageAdmins = true, onU
             return (
               <div
                 ref={menuRef}
-                className="glass fixed z-50 w-56 overflow-hidden rounded-xl p-1.5 text-left"
-                style={{ top: menuPos.top, left: Math.max(8, menuPos.left) }}
+                className="glass fixed z-50 max-h-[80vh] w-56 overflow-y-auto rounded-xl p-1.5 text-left"
+                style={{ top: menuPos.top, bottom: menuPos.bottom, left: menuPos.left }}
               >
                 <MenuItem
                   onClick={() => {

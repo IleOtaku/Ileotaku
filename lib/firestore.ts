@@ -123,6 +123,56 @@ export async function updateUserPrefs(
   });
 }
 
+/**
+ * Beta feedback bug: "When a user changes display name or pfp, it should change for all their
+ * works, posts, etc." — displayName/photoURL are denormalized onto a creator's feed posts
+ * (`creatorFeed.displayName`/`.photoURL`) and published series (`publishedSeries.authorName`/
+ * `.authorPhotoURL`) at write time, purely so those surfaces never need a per-item profile lookup
+ * — but nothing kept them in sync after the fact, so an edited name/photo only ever showed up on
+ * the profile page itself, not anywhere the old value had already been copied. Call this
+ * alongside any write that changes either field (EditProfileModal's display name save,
+ * ProfileClient's avatar upload) to fan the new value out everywhere it was denormalized.
+ * Best-effort and capped at Firestore's 500-write batch limit per collection — a creator with
+ * more posts/series than that keeps their newest ones in sync; the rest still show the old value
+ * until their next edit touches them, same trade-off any denormalization fan-out makes.
+ */
+export async function propagateProfileChange(
+  uid: string,
+  changes: { displayName?: string; photoURL?: string }
+): Promise<void> {
+  if (changes.displayName === undefined && changes.photoURL === undefined) return;
+  try {
+    const [postsSnap, seriesSnap] = await Promise.all([
+      getDocs(query(collection(db, "creatorFeed"), where("uid", "==", uid), limit(500))),
+      getDocs(query(collection(db, "publishedSeries"), where("authorId", "==", uid), limit(500))),
+    ]);
+
+    if (!postsSnap.empty) {
+      const batch = writeBatch(db);
+      postsSnap.docs.forEach((d) => {
+        batch.update(d.ref, {
+          ...(changes.displayName !== undefined ? { displayName: changes.displayName } : {}),
+          ...(changes.photoURL !== undefined ? { photoURL: changes.photoURL } : {}),
+        });
+      });
+      await batch.commit();
+    }
+
+    if (!seriesSnap.empty) {
+      const batch = writeBatch(db);
+      seriesSnap.docs.forEach((d) => {
+        batch.update(d.ref, {
+          ...(changes.displayName !== undefined ? { authorName: changes.displayName } : {}),
+          ...(changes.photoURL !== undefined ? { authorPhotoURL: changes.photoURL } : {}),
+        });
+      });
+      await batch.commit();
+    }
+  } catch (error) {
+    await logError(error, { operation: "propagateProfileChange", uid });
+  }
+}
+
 /** Lightweight activity stamp for flows that don't otherwise write to the profile document at
  * all — a chapter load, a feed post, a DM, a comment. Also clears any pending deletion warning:
  * any sign of life resets the inactivity clock, the same way an actual login does. Never throws
