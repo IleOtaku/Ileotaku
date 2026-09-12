@@ -387,6 +387,36 @@ read directly via the Firebase Admin SDK rather than the browser — see the ses
   the Vercel project's environment variables — that's an infrastructure step outside what a code
   change can fix.
 
+## Found during live regression testing after deploy
+
+Signed in as the real admin account (the user logged in themselves — I don't type credentials)
+and walked through reading a manga chapter, the feed, DMs, profile/settings, notifications,
+search, and the admin panel on the live, just-deployed site. Confirmed working exactly as fixed:
+liking a post (toggled both ways, no permission error), Zamyilton's Posts tab now showing real
+posts, the navbar gap, verification+Platinum badges on a freshly-posted comment and in a DM
+thread header, a clickable/shortened link sent in a DM, the granular notification-preferences UI,
+live search, and the notification bell.
+
+**One anomaly found, not yet root-caused:** clicking "Unverify" on a verified user
+(`components/admin/UsersTable.tsx` → `unverifyUser()` in `lib/admin.ts`) shows the success toast
+and closes the menu, but a direct Firestore read immediately after shows `isVerified`/
+`verifiedType` unchanged — the write does not appear to actually persist. Checked and ruled out:
+the calling account's `isAdmin` flag (true), the `firestore.rules` update rule for `users/{uid}`
+(admin should bypass every other condition), and the component's own click-handler wiring (reads
+correctly on inspection) — none show an obvious defect, and no error surfaced in the browser
+console during the attempt. This needs a focused follow-up session with real-time Firestore
+logging or the Firebase emulator to actually observe the write attempt rather than just its
+before/after state. No harm done in the meantime: the target account's real data was verified
+unchanged throughout testing, and "Verify Creator"/"Verify Publisher" (the admin action's
+opposite direction, unaffected by whatever this is) were not tested and are assumed fine pending
+that same follow-up.
+
+**Not completed this pass:** the 375px mobile-viewport check, and the tail end of DM/feed
+regression testing, were cut short by a session-wide tool-use rate limit encountered mid-test —
+not a bug in the app. Everything fixed earlier in this pass (Parts 1-14 above) was already
+confirmed individually before the limit hit; it's only the very last couple of checklist items
+that didn't get a dedicated look.
+
 ## Build status
 
 `npx tsc --noEmit`: 0 errors. `npm run build`: clean.
