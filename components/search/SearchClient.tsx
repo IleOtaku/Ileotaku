@@ -55,6 +55,7 @@ function toResultItem(series: PublishedSeries): SearchResultItem {
     image: series.coverImage,
     author: series.authorName,
     authorVerified: series.authorVerified === true,
+    authorVerifiedType: series.authorVerifiedType ?? null,
     genres: series.genres,
     format: series.format,
     reads: series.totalReads ?? 0,

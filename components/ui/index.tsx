@@ -7,6 +7,7 @@ import {
   type ReactNode,
   type SelectHTMLAttributes,
 } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -179,6 +180,13 @@ export interface ModalProps {
   onClose: () => void;
   title?: string;
   children: ReactNode;
+  /**
+   * Stacking order, default 100. Raise this only when the modal is opened from inside another
+   * fixed-position overlay (e.g. a slide-in settings panel) that itself sits above z-100 — the
+   * picker modals launched from DMSettingsPanel (z-[130]/[131]) pass a higher value so they
+   * land above that panel's own backdrop instead of underneath it.
+   */
+  zIndex?: number;
 }
 
 /**
@@ -190,16 +198,23 @@ export interface ModalProps {
  * scrolls in its own region — the header stays put via `sticky top-0` inside that same
  * scroll container, not by being a layout sibling, so it stays visible without a second nested
  * scroll area.
+ *
+ * Rendered via a portal straight to `document.body`. Without this, a modal mounted inside any
+ * ancestor that sets `transform`, `filter`, `contain`, or `backdrop-filter` (Tailwind's
+ * `backdrop-blur`, used on the sticky Navbar header) gets its `fixed` positioning re-anchored to
+ * that ancestor's box instead of the viewport — which is exactly what made the notification-bell
+ * announcement modal render squashed against the top of the screen instead of centered.
  */
-export function Modal({ open, onClose, title, children }: ModalProps) {
-  return (
+export function Modal({ open, onClose, title, children, zIndex = 100 }: ModalProps) {
+  const modal = (
     <AnimatePresence>
       {open && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[100] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4"
+          style={{ zIndex }}
+          className="fixed inset-0 flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4"
           onClick={onClose}
         >
           <motion.div
@@ -226,6 +241,8 @@ export function Modal({ open, onClose, title, children }: ModalProps) {
       )}
     </AnimatePresence>
   );
+  if (typeof document === "undefined") return null;
+  return createPortal(modal, document.body);
 }
 
 /* ---------------------------- SectionEyebrow ---------------------------- */

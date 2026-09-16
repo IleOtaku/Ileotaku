@@ -4,6 +4,9 @@ export interface SearchResultItem {
   image: string;
   author: string;
   authorVerified: boolean;
+  /** 5-tier badge, denormalized from publishedSeries — see CreatorWork.authorVerifiedType's
+   * doc comment in types/index.ts. Renders via lib/verification.ts's tierToBadgeUser(). */
+  authorVerifiedType?: string | null;
   genres: string[];
   format: string;
   reads: number;

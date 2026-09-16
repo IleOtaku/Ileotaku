@@ -6,6 +6,7 @@ import {
   Banknote,
   FileClock,
   Megaphone,
+  RefreshCw,
   ShieldAlert,
   ShieldPlus,
   Sparkles,
@@ -72,36 +73,52 @@ export default function AdminOverviewTab({
   // this one card needs), but this specific number is exactly the one admins watch to know
   // whether there's new triage work waiting, so it's worth being instant.
   const [livePendingCount, setLivePendingCount] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => subscribeToPendingWorkCount(setLivePendingCount), []);
 
+  // Beta feedback: "The admin graph doesn't work" — every card here is a one-shot Promise.all
+  // fetch with no retry path besides a full page reload, so a single slow query (each guarded by
+  // its own 8s-now-20s timeout in lib/admin.ts, degrading to an empty/zero result rather than an
+  // error) left the revenue chart looking permanently broken. Factored into its own function,
+  // callable from both the initial mount and the refresh button below, so a bad load recovers
+  // with one click.
   useEffect(() => {
-    let cancelled = false;
-    Promise.all([
-      getAdminOverviewStats(),
-      getRevenueLast7Days(),
-      getTopSeriesByReadsThisWeek(),
-      getTopCreatorsByEarningsThisMonth(),
-      getRecentSignups(10),
-    ])
-      .then(([s, r, ts, tc, rs]) => {
-        if (cancelled) return;
-        setStats(s);
-        setRevenue(r);
-        setTopSeries(ts);
-        setTopCreators(tc);
-        setRecentSignups(rs);
-      })
-      .catch(() => {
-        if (!cancelled) toast.error("Some overview data couldn't load.");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    const controller = { cancelled: false };
+    void load(setLoading, controller);
     return () => {
-      cancelled = true;
+      controller.cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function load(setBusy: (v: boolean) => void, controller?: { cancelled: boolean }) {
+    setBusy(true);
+    try {
+      const [s, r, ts, tc, rs] = await Promise.all([
+        getAdminOverviewStats(),
+        getRevenueLast7Days(),
+        getTopSeriesByReadsThisWeek(),
+        getTopCreatorsByEarningsThisMonth(),
+        getRecentSignups(10),
+      ]);
+      if (controller?.cancelled) return;
+      setStats(s);
+      setRevenue(r);
+      setTopSeries(ts);
+      setTopCreators(tc);
+      setRecentSignups(rs);
+    } catch {
+      if (!controller?.cancelled) toast.error("Some overview data couldn't load.");
+    } finally {
+      if (!controller?.cancelled) setBusy(false);
+    }
+  }
+
+  async function handleRefresh() {
+    if (refreshing) return;
+    await load(setRefreshing);
+  }
 
   if (loading || !stats) {
     return (
@@ -127,7 +144,18 @@ export default function AdminOverviewTab({
       </section>
 
       <section className="rounded-2xl border border-bg4 bg-bg2 p-5">
-        <h3 className="mb-4 font-syne text-sm font-semibold text-text">Revenue — Last 7 Days</h3>
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="font-syne text-sm font-semibold text-text">Revenue — Last 7 Days</h3>
+          <button
+            type="button"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            aria-label="Refresh overview data"
+            className="flex items-center gap-1.5 rounded-full border border-bg4 px-2.5 py-1 font-noto text-[11px] text-muted transition-colors hover:text-text disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3 w-3 ${refreshing ? "animate-spin" : ""}`} /> Refresh
+          </button>
+        </div>
         <RevenueBarChart data={revenue} />
       </section>
 

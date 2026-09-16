@@ -37,6 +37,23 @@ export interface VerificationBadgeInfo {
  * as `verifiedType: "publisher"` only when `verifiedType` itself is absent, so old documents
  * don't need a backfill migration to keep showing the right color.
  */
+const TIER_INFO: Record<VerificationTier, { color: string; label: string }> = {
+  founder: { color: "#d4a843", label: "Founder" },
+  admin: { color: "#9ecfef", label: "Admin" },
+  publisher: { color: "#a855f7", label: "Verified Publisher" },
+  creator: { color: "#3b82f6", label: "Verified Creator" },
+  verified: { color: "#ffffff", label: "Verified Member" },
+};
+
+/** The tier→color/label half of getVerificationBadge, factored out so a surface that only has a
+ * bare tier string (not the full isFounder/isAdmin/isVerified/verifiedType shape) can still
+ * render the right badge — see tierToBadgeUser's doc comment for why that's needed at all. */
+function getBadgeForTier(tier: VerificationTier | null | undefined): VerificationBadgeInfo | null {
+  if (!tier) return null;
+  const info = TIER_INFO[tier];
+  return info ? { ...info, tier } : null;
+}
+
 export function getVerificationBadge(user: {
   isFounder?: boolean;
   isAdmin?: boolean;
@@ -45,18 +62,54 @@ export function getVerificationBadge(user: {
   /** Legacy fallback only — see doc comment above. */
   isPublisher?: boolean;
 }): VerificationBadgeInfo | null {
-  if (user.isFounder) return { color: "#d4a843", label: "Founder", tier: "founder" };
-  if (user.isAdmin) return { color: "#9ecfef", label: "Admin", tier: "admin" };
+  if (user.isFounder) return getBadgeForTier("founder");
+  if (user.isAdmin) return getBadgeForTier("admin");
 
   const effectiveType = user.verifiedType ?? (user.isPublisher ? "publisher" : undefined);
-  if (user.isVerified && effectiveType === "publisher") {
-    return { color: "#a855f7", label: "Verified Publisher", tier: "publisher" };
-  }
-  if (user.isVerified && effectiveType === "creator") {
-    return { color: "#3b82f6", label: "Verified Creator", tier: "creator" };
-  }
-  if (user.isVerified) return { color: "#ffffff", label: "Verified Member", tier: "verified" };
+  if (user.isVerified && effectiveType === "publisher") return getBadgeForTier("publisher");
+  if (user.isVerified && effectiveType === "creator") return getBadgeForTier("creator");
+  if (user.isVerified) return getBadgeForTier("verified");
   return null;
+}
+
+/** Collapses a user's raw badge fields down to the single tier string denormalized onto
+ * publishedSeries as `authorVerifiedType` (beta feedback: manga search results were showing a
+ * white "General" badge for every creator regardless of their real tier, because the only thing
+ * ever denormalized was a bare `authorVerified` boolean). */
+export function computeVerifiedType(user: {
+  isFounder?: boolean;
+  isAdmin?: boolean;
+  verifiedType?: string | null;
+  isVerified?: boolean;
+  isPublisher?: boolean;
+}): VerificationTier | null {
+  return getVerificationBadge(user)?.tier ?? null;
+}
+
+/**
+ * The inverse of computeVerifiedType — reconstructs a VerificationBadge-compatible object from
+ * just a denormalized tier string. A surface holding only publishedSeries' `authorVerifiedType`
+ * snapshot (not the creator's live isFounder/isAdmin/isVerified/verifiedType fields) still needs
+ * to render through the one shared <VerificationBadge> component rather than growing a second,
+ * parallel badge-rendering path — this bridges that gap.
+ */
+export function tierToBadgeUser(
+  tier: VerificationTier | null | undefined
+): { isFounder?: boolean; isAdmin?: boolean; isVerified?: boolean; verifiedType?: string | null } | null {
+  switch (tier) {
+    case "founder":
+      return { isFounder: true };
+    case "admin":
+      return { isAdmin: true };
+    case "publisher":
+      return { isVerified: true, verifiedType: "publisher" };
+    case "creator":
+      return { isVerified: true, verifiedType: "creator" };
+    case "verified":
+      return { isVerified: true, verifiedType: null };
+    default:
+      return null;
+  }
 }
 
 /* ---------------------------- Applications ---------------------------- */

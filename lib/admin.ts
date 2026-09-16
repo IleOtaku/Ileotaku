@@ -59,6 +59,7 @@ import { db } from "./firebase";
 import { getAllUsers, getUserProfile } from "./firestore";
 import { createNotification, sendPushToUser } from "./notifications";
 import { deleteWork, getAllPublishedSeries } from "./publishedSeries";
+import { computeVerifiedType } from "./verification";
 
 const USERS = "users";
 const CREATOR_WORKS = "creatorWorks";
@@ -70,7 +71,16 @@ const CREATOR_WORKS = "creatorWorks";
  * a stuck collection-group read degrades to `fallback` (an empty stats/chart section) rather
  * than freezing the whole Overview/Finance tab forever.
  */
-function withTimeout<T>(promise: Promise<T>, fallback: T, ms = 8000): Promise<T> {
+// Beta feedback: "The admin graph doesn't work" — traced to this timeout firing repeatedly in
+// the error log (9 occurrences across several days) and silently falling back to an empty
+// result, which renders as a flat, data-less revenue chart with no indication anything went
+// wrong. Confirmed directly against this project's own Firestore data that every query this
+// timeout guards (transactions/history collection-group scans, currently a few dozen to a few
+// hundred docs each) completes in under 2 seconds server-side — so an 8s timeout tripping is
+// almost certainly the client SDK's connection still warming up (several of these queries fire
+// in parallel on the Overview tab's first mount) rather than a genuinely slow query. Raised to
+// 20s to give that room without the fallback ever being what a normal load actually needs.
+function withTimeout<T>(promise: Promise<T>, fallback: T, ms = 20000): Promise<T> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       logError(new Error("Query timed out"), { operation: "admin.withTimeout", ms });
@@ -538,6 +548,9 @@ export async function approveWork(workId: string, creatorId: string, title: stri
 
     const authorName = creator?.displayName ?? "ÍléOtaku Creator";
     const authorVerified = creator?.isVerified === true || creator?.verified === true;
+    // Beta feedback (STEP 5): manga search results only ever had the bare boolean above, so
+    // every creator's card showed the white "General" badge regardless of their real tier.
+    const authorVerifiedType = creator ? computeVerifiedType(creator) : null;
     const coverImage = work?.coverURL ?? "";
     const genres = work?.genres ?? [];
     const format = work?.format ?? "manga";
@@ -557,6 +570,7 @@ export async function approveWork(workId: string, creatorId: string, title: stri
       ...authorHandle,
       ...authorPhotoURL,
       authorVerified,
+      authorVerifiedType,
       seriesId: workId,
       coverImage,
       genres,
@@ -587,6 +601,7 @@ export async function approveWork(workId: string, creatorId: string, title: stri
       ...authorHandle,
       ...authorPhotoURL,
       authorVerified,
+      authorVerifiedType,
       title: work?.title ?? title,
       description: work?.description ?? "",
       coverImage,

@@ -191,11 +191,16 @@ export async function sendDM(
     // Group @mentions — best-effort, never let a notification failure fail the send itself.
     if (convo.type === "group") {
       const senderName = convo.participantNames?.[senderId] ?? "Someone";
+      // Beta feedback: "add an @all to tag everyone in a gc" — a literal "@all" token (checked
+      // as its own word boundary, `\B@all\b` would also match inside e.g. "email@all.com", so
+      // this instead requires @all to not be glued to a preceding word character) notifies every
+      // OTHER member exactly once, same as an individual @mention would.
+      const mentionsAll = /(^|[^\w])@all\b/i.test(trimmed);
       for (const uid of recipientIds) {
         const name = convo.participantNames?.[uid];
-        if (!name) continue;
-        const token = mentionToken(name);
-        if (!token || !trimmed.toLowerCase().includes(`@${token}`)) continue;
+        const token = name ? mentionToken(name) : "";
+        const mentioned = mentionsAll || (token && trimmed.toLowerCase().includes(`@${token}`));
+        if (!mentioned) continue;
         createNotification(
           uid,
           NotificationType.GROUP_MENTION,
@@ -209,6 +214,30 @@ export async function sendDM(
   } catch (error) {
     await logError(error, { operation: "sendDM", conversationId, senderId });
     throw error;
+  }
+}
+
+/** Short, URL-safe invite code — collision risk is negligible at this app's scale (36^8 space)
+ * and, unlike a UUID, it's short enough a member could plausibly read it aloud or type it. */
+function generateInviteCode(): string {
+  return crypto.randomUUID().replace(/-/g, "").slice(0, 8);
+}
+
+/** Beta feedback: "On join, it should show in grey faded text who joined and how (via link,
+ * someone added)." A plain message doc with `senderId: "system"`/`isSystem: true` — rendered
+ * centered/muted by MessagesClient instead of as a bubble. Best-effort: a missed system message
+ * should never fail the join/add it's narrating. */
+async function addSystemMessage(conversationId: string, text: string): Promise<void> {
+  try {
+    await addDoc(collection(doc(db, CONVERSATIONS, conversationId), "messages"), {
+      conversationId,
+      senderId: "system",
+      isSystem: true,
+      text,
+      createdAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    await logError(error, { operation: "addSystemMessage", conversationId });
   }
 }
 
@@ -245,6 +274,8 @@ export async function createGroup(
       participantPhotos,
       adminUids: [creatorUid],
       creatorUid,
+      // Beta feedback: "Groups should have invite via link."
+      inviteCode: generateInviteCode(),
       lastMessage: "",
       lastMessageAt: new Date().toISOString(),
       lastSenderId: "",
@@ -314,10 +345,76 @@ export async function addMembersToGroup(
         "/messages",
         convo.photoURL
       ).catch(() => {});
+      const memberName = nameUpdates[`participantNames.${uid}`];
+      addSystemMessage(conversationId, `${adminName} added ${memberName}`).catch(() => {});
     });
   } catch (error) {
     await logError(error, { operation: "addMembersToGroup", conversationId, adminUid });
     throw error;
+  }
+}
+
+/** Beta feedback: "Groups should have invite via link." Only a current admin may regenerate —
+ * this invalidates every link already handed out (the old code simply matches nothing anymore),
+ * so it doubles as the "revoke access" control WhatsApp/Telegram expose the same way. Returns
+ * the fresh code so the caller can immediately render/copy the new link. */
+export async function regenerateInviteCode(conversationId: string, adminUid: string): Promise<string> {
+  try {
+    const ref = doc(db, CONVERSATIONS, conversationId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) throw new Error("Group not found.");
+    const convo = snap.data() as Conversation;
+    if (!convo.adminUids?.includes(adminUid)) throw new Error("Only a group admin can reset the invite link.");
+    const code = generateInviteCode();
+    await updateDoc(ref, { inviteCode: code });
+    return code;
+  } catch (error) {
+    await logError(error, { operation: "regenerateInviteCode", conversationId, adminUid });
+    throw error;
+  }
+}
+
+export interface JoinViaInviteResult {
+  success: boolean;
+  conversationId?: string;
+  groupName?: string;
+  message?: string;
+}
+
+/** Beta feedback: "Groups should have invite via link." Looks a group up by its current
+ * `inviteCode` and joins `uid` as a plain (non-admin) member — a reset/expired/typo'd code
+ * simply matches nothing, same as any lookup-by-code flow. Already-a-member is treated as
+ * success (not an error) so re-opening a link you already used just lands you back in the
+ * group instead of showing a confusing failure. */
+export async function joinGroupViaInvite(code: string, uid: string): Promise<JoinViaInviteResult> {
+  const trimmed = code.trim();
+  if (!trimmed) return { success: false, message: "That invite link looks incomplete." };
+  try {
+    const q = query(collection(db, CONVERSATIONS), where("inviteCode", "==", trimmed), limit(1));
+    const snap = await getDocs(q);
+    if (snap.empty) {
+      return { success: false, message: "This invite link is invalid or has expired." };
+    }
+    const convoDoc = snap.docs[0];
+    const convo = convoDoc.data() as Conversation;
+    if (convo.participants.includes(uid)) {
+      return { success: true, conversationId: convoDoc.id, groupName: convo.name };
+    }
+
+    const profile = await getUserProfile(uid);
+    const displayName = profile?.displayName ?? "Reader";
+    await updateDoc(convoDoc.ref, {
+      participants: arrayUnion(uid),
+      [`participantNames.${uid}`]: displayName,
+      [`participantPhotos.${uid}`]: profile?.photoURL ?? "",
+      [`unreadCounts.${uid}`]: 0,
+    });
+    await addSystemMessage(convoDoc.id, `${displayName} joined via invite link`);
+
+    return { success: true, conversationId: convoDoc.id, groupName: convo.name };
+  } catch (error) {
+    await logError(error, { operation: "joinGroupViaInvite", uid });
+    return { success: false, message: "Couldn't join this group right now. Please try again." };
   }
 }
 

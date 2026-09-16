@@ -6,6 +6,11 @@ const config: Config = {
     "./pages/**/*.{js,ts,jsx,tsx,mdx}",
     "./components/**/*.{js,ts,jsx,tsx,mdx}",
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
+    // Beta feedback bug: the cover-style picker's preview swatches (className strings defined
+    // in lib/coverStyles.ts, e.g. "from-clay via-bg2 to-green") rendered with no color at all —
+    // Tailwind's JIT scanner never saw those literal class strings because lib/ wasn't in this
+    // content glob, so it never generated CSS for them. lib/sounds.ts has the same pattern.
+    "./lib/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
     extend: {

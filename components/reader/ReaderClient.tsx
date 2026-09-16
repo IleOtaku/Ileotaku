@@ -9,6 +9,7 @@ import { checkAndAwardAchievements } from "@/lib/achievements";
 import { useAuth } from "@/hooks/useAuth";
 import { markChatRead } from "@/hooks/useChatUnread";
 import { useVisualViewportHeight } from "@/hooks/useVisualViewportHeight";
+import { claimStreak } from "@/lib/payments";
 import {
   addHistoryEntry,
   getUserProfile,
@@ -287,6 +288,13 @@ export default function ReaderClient() {
           updatedAt: new Date().toISOString(),
         });
         if (profile) await checkAndAwardAchievements(uid, { ...profile, chaptersRead });
+        // Beta feedback: "Fix the streak thing" — the homepage streak card's counter never
+        // moved unless the user separately noticed and clicked its own "keep your streak"
+        // button, which has nothing to do with whether they actually read anything. Claiming it
+        // here, once a chapter genuinely finishes loading, makes the streak track real reading
+        // activity; claimStreak is itself a no-op past the first call each day (see its own
+        // alreadyClaimedToday short-circuit), so this is safe to run on every chapter.
+        await claimStreak(user).catch(() => {});
       } catch {
         // Non-fatal — reading still works even if progress/achievement tracking fails.
       }

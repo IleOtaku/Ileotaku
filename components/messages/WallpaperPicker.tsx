@@ -99,7 +99,7 @@ export default function WallpaperPicker({ open, onClose, conversationId, current
   const uploads = profile?.uploadedWallpapers ?? [];
 
   return (
-    <Modal open={open} onClose={onClose} title="Chat Wallpaper">
+    <Modal open={open} onClose={onClose} title="Chat Wallpaper" zIndex={140}>
       {!isPlatinum ? (
         <div className="flex flex-col items-center gap-3 py-6 text-center">
           <Lock className="h-8 w-8 text-muted" />

@@ -131,7 +131,7 @@ function TikTokFeedItem({ post, isSaved, onDeleted }: TikTokFeedItemProps) {
           if (isVideo) playVideo(post.id);
           if (!isOwnPost && !viewCountedRef.current) {
             viewCountedRef.current = true;
-            incrementViewCount(post.id);
+            incrementViewCount(post.id, user?.uid);
           }
         } else if (isVideo) {
           pauseVideo(post.id);

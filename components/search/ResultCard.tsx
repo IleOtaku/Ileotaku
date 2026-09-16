@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Star } from "lucide-react";
 import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import { proxyImg } from "@/lib/manga-api";
+import { tierToBadgeUser, type VerificationTier } from "@/lib/verification";
 import type { SearchResultItem } from "./types";
 
 export interface ResultCardProps {
@@ -15,6 +16,11 @@ export interface ResultCardProps {
 export default function ResultCard({ item, view }: ResultCardProps) {
   const isProse = item.format?.toLowerCase() === "prose";
   const href = isProse ? `/story/${item.id}` : `/manga/${encodeURIComponent(item.id)}?from=search`;
+  // Beta feedback (STEP 5): this used to pass a bare `{ isVerified: item.authorVerified }`,
+  // which always rendered the white "General" badge regardless of the creator's real tier —
+  // tierToBadgeUser reconstructs the right founder/admin/publisher/creator/general badge from
+  // the denormalized authorVerifiedType.
+  const badgeUser = tierToBadgeUser(item.authorVerifiedType as VerificationTier | null | undefined);
 
   if (view === "list") {
     return (
@@ -35,7 +41,7 @@ export default function ResultCard({ item, view }: ResultCardProps) {
           <h3 className="truncate font-syne text-sm font-semibold text-text">{item.title}</h3>
           <p className="flex items-center gap-1 font-noto text-xs text-muted">
             by {item.author}
-            <VerificationBadge user={{ isVerified: item.authorVerified }} size={12} />
+            <VerificationBadge user={badgeUser} size={12} />
           </p>
           {item.genres.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
@@ -84,7 +90,7 @@ export default function ResultCard({ item, view }: ResultCardProps) {
         <p className="truncate font-syne text-xs font-semibold text-text">{item.title}</p>
         <p className="flex items-center gap-1 truncate font-noto text-[11px] text-muted">
           {item.author}
-          <VerificationBadge user={{ isVerified: item.authorVerified }} size={12} />
+          <VerificationBadge user={badgeUser} size={12} />
         </p>
         <div className="mt-auto flex items-center justify-between font-noto text-[11px] text-muted">
           <span className="flex items-center gap-1">

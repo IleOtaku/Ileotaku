@@ -367,6 +367,15 @@ export interface CreatePostInput {
   forYouEligible: boolean;
 }
 
+/** Beta feedback: "add profile tags (mentions) and hashtags to feed" — mentions already render
+ * via MentionText (used on every feed card); hashtags had no equivalent. Lowercased and deduped
+ * so "#Manga" and "#manga" collapse to the same tag getPostsByHashtag() can look up later, capped
+ * at 10 since a caption is already capped at 500 chars and won't realistically carry more. */
+function extractHashtags(text: string): string[] {
+  const matches = text.match(/#(\w+)/g) ?? [];
+  return Array.from(new Set(matches.map((m) => m.slice(1).toLowerCase()))).slice(0, 10);
+}
+
 /** Publishes a new feed post. Content is hard-capped at 500 chars here too, as a server-of-truth
  * backstop behind the composer's own client-side limit. Badges are denormalized onto the post at
  * write-time (from the author's current profile) so the feed never needs a per-post profile
@@ -406,6 +415,7 @@ export async function createPost(input: CreatePostInput): Promise<string> {
       ...(photoURL ? { photoURL } : {}),
       ...(handle ? { handle } : {}),
       content: content.trim().slice(0, 500),
+      hashtags: extractHashtags(content),
       type,
       attachments: attachments.slice(0, 4),
       likes: [],
@@ -684,6 +694,26 @@ export async function getPostsByCreator(uid: string): Promise<CreatorPost[]> {
 
 /* ---------------------------- Admin ---------------------------- */
 
+/** Beta feedback: "add ... hashtags to feed." Every non-draft post carrying `tag` (case-
+ * insensitive — tags are stored lowercased by extractHashtags, and the caller here lowercases
+ * too), newest first. A single array-contains filter needs no composite index, so this sorts
+ * client-side rather than adding an orderBy the whole point of avoiding an index deploy skips —
+ * capped generously rather than true-paginated, same trade-off getAllPostsForAdmin below makes,
+ * since a single hashtag rarely has enough posts to matter. */
+export async function getPostsByHashtag(tag: string, cap = 60): Promise<CreatorPost[]> {
+  try {
+    const q = query(collection(db, FEED), where("hashtags", "array-contains", tag.toLowerCase()), limit(cap));
+    const snap = await getDocs(q);
+    return snap.docs
+      .map(toPost)
+      .filter((p) => !p.isDraft)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  } catch (error) {
+    await logError(error, { operation: "creatorFeed.getPostsByHashtag", tag });
+    return [];
+  }
+}
+
 /** Every post, newest first, capped generously rather than paginated — used only by the Super
  * Admin dashboard's Feed tab, whose table already scrolls and filters client-side rather than
  * needing true pagination the way the public feed does. */
@@ -731,10 +761,25 @@ export async function adminSetForYouEligible(postId: string, eligible: boolean):
 
 /** Distinct-viewer counter for video (and, going forward, any) posts — a superset of the older
  * `incrementPostViews`, which only bumped the legacy `views` field. Recomputes `forYouScore` in
- * the same write so a post's ranking reflects fresh views immediately. De-duping per viewer is
- * the caller's responsibility (FeedPostCard uses sessionStorage, same as the legacy view count). */
-export async function incrementViewCount(postId: string): Promise<void> {
+ * the same write so a post's ranking reflects fresh views immediately.
+ *
+ * Beta feedback bug: "If a user views a post 5 times it should count as one view" — the caller
+ * used to be trusted to dedupe this itself, and both actual callers only ever did it with a
+ * `useRef` flag that resets on every remount, page reload, or fresh feed fetch, so the same
+ * signed-in viewer re-inflated the count constantly. Durable per-viewer dedup now lives here
+ * instead: a `viewedBy/{uid}` marker doc under the post (written once, checked before every
+ * increment) means a given uid can only ever count once for a given post, no matter how many
+ * times their client re-mounts or reloads. `uid` is optional — a signed-out viewer still bumps
+ * the raw counter with no durable dedup, same as before this fix, since there's no stable
+ * identity to key a marker on. */
+export async function incrementViewCount(postId: string, uid?: string): Promise<void> {
   try {
+    if (uid) {
+      const viewerRef = doc(db, FEED, postId, "viewedBy", uid);
+      const viewerSnap = await getDoc(viewerRef);
+      if (viewerSnap.exists()) return;
+      await setDoc(viewerRef, { viewedAt: new Date().toISOString() });
+    }
     const ref = doc(db, FEED, postId);
     const snap = await getDoc(ref);
     if (!snap.exists()) return;

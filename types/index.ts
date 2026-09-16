@@ -350,6 +350,11 @@ export interface CreatorWork {
   /** Denormalized from the creator's profile at approval time — powers the verified checkmark
    * next to their name on Explore's African Originals cards without a second profile lookup. */
   authorVerified?: boolean;
+  /** Beta feedback bug: search results/cards only ever had the bare boolean above, so every
+   * creator showed the white "General" badge regardless of their real tier. This is the
+   * creator's 5-tier badge (see lib/verification.ts's VerificationTier), denormalized alongside
+   * authorVerified at the same approval-time write — render it via tierToBadgeUser(). */
+  authorVerifiedType?: string | null;
   /** Equal to this doc's own id — mirrored onto the doc so pages that only hold a
    * publishedSeries summary (which has no `id` field of its own beyond the doc id) still carry
    * an explicit `seriesId` for links back into /manga/[id] and the chapters subcollection. */
@@ -387,6 +392,8 @@ export interface PublishedSeries {
   authorHandle?: string;
   authorPhotoURL?: string;
   authorVerified?: boolean;
+  /** See CreatorWork.authorVerifiedType's doc comment — same denormalized 5-tier badge. */
+  authorVerifiedType?: string | null;
   title: string;
   description: string;
   coverImage: string;
@@ -839,6 +846,11 @@ export interface Conversation {
   /** The uid who created the group — the only one who can delete it outright (see
    * MessagesClient's Delete Group vs. Leave Group distinction). */
   creatorUid?: string;
+  /** Beta feedback: "Groups should have invite via link." A random code any current admin can
+   * view/copy/regenerate from Group Info — /invite/[code] looks a group up by this field and
+   * joins the signed-in visitor. Regenerating invalidates every link already handed out (old
+   * codes simply match nothing anymore), the same "reset to revoke" model WhatsApp/Telegram use. */
+  inviteCode?: string;
   /** Beta feedback: "Allow us to delete people we no longer chat [with]" — uids who've hidden
    * this conversation from their OWN list via hideConversationForUser() (lib/dms.ts). Never
    * deletes the conversation or its messages for the other participant(s); sendDM() clears this
@@ -924,6 +936,11 @@ export interface DMMessage {
   deletedFor?: string[];
   reactions?: MessageReaction[];
   replyTo?: MessageReplyTo;
+  /** Beta feedback: "On join, it should show in grey faded text who joined and how (via link,
+   * someone added)." A system message has `senderId: "system"` and no media/reactions of its
+   * own — the thread renders it centered and muted instead of as a bubble, same convention
+   * WhatsApp/Telegram use for join/leave/rename notices. */
+  isSystem?: boolean;
 
   /* ---- DM overhaul: media messages ---- */
   mediaType?: DMMediaType;
@@ -969,6 +986,10 @@ export interface CreatorPost {
   handle?: string;
   /** Plain text, capped at 500 chars at write-time by createPost. */
   content: string;
+  /** Beta feedback: hashtags — lowercased `#tag` tokens extracted from `content` at post time
+   * (see lib/creatorFeed.ts's extractHashtags/getPostsByHashtag). Absent on posts created before
+   * this field existed. */
+  hashtags?: string[];
   type: CreatorPostType;
   /** Up to 4 image URLs (Firebase Storage download URLs). */
   attachments: string[];

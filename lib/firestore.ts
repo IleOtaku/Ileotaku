@@ -135,6 +135,12 @@ export async function updateUserPrefs(
  * Best-effort and capped at Firestore's 500-write batch limit per collection — a creator with
  * more posts/series than that keeps their newest ones in sync; the rest still show the old value
  * until their next edit touches them, same trade-off any denormalization fan-out makes.
+ *
+ * Beta feedback: "Profile photos/names should update everywhere... including DMs" — DM
+ * conversations denormalize participantNames/participantPhotos the exact same way, so they're
+ * fanned out here too, with a dot-path update (`participantNames.${uid}`) touching only the
+ * caller's own key in the map rather than the whole field, since a conversation can have other
+ * participants whose entries must stay untouched.
  */
 export async function propagateProfileChange(
   uid: string,
@@ -142,9 +148,10 @@ export async function propagateProfileChange(
 ): Promise<void> {
   if (changes.displayName === undefined && changes.photoURL === undefined) return;
   try {
-    const [postsSnap, seriesSnap] = await Promise.all([
+    const [postsSnap, seriesSnap, conversationsSnap] = await Promise.all([
       getDocs(query(collection(db, "creatorFeed"), where("uid", "==", uid), limit(500))),
       getDocs(query(collection(db, "publishedSeries"), where("authorId", "==", uid), limit(500))),
+      getDocs(query(collection(db, "conversations"), where("participants", "array-contains", uid), limit(500))),
     ]);
 
     if (!postsSnap.empty) {
@@ -164,6 +171,17 @@ export async function propagateProfileChange(
         batch.update(d.ref, {
           ...(changes.displayName !== undefined ? { authorName: changes.displayName } : {}),
           ...(changes.photoURL !== undefined ? { authorPhotoURL: changes.photoURL } : {}),
+        });
+      });
+      await batch.commit();
+    }
+
+    if (!conversationsSnap.empty) {
+      const batch = writeBatch(db);
+      conversationsSnap.docs.forEach((d) => {
+        batch.update(d.ref, {
+          ...(changes.displayName !== undefined ? { [`participantNames.${uid}`]: changes.displayName } : {}),
+          ...(changes.photoURL !== undefined ? { [`participantPhotos.${uid}`]: changes.photoURL } : {}),
         });
       });
       await batch.commit();

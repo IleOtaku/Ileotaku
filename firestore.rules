@@ -447,8 +447,14 @@ service cloud.firestore {
       // directly (with no null check) denied that existence check unconditionally, which broke
       // starting a first conversation for everyone. `update` never runs against a nonexistent
       // doc (there's nothing to update), so it doesn't need the same null guard.
+      // Beta feedback: "Groups should have invite via link" — joinGroupViaInvite() (lib/dms.ts)
+      // has to look a group up by its inviteCode BEFORE the visitor is a participant, which a
+      // participants-only read can never allow. Group metadata (name/photo/inviteCode/roster) is
+      // relaxed to any signed-in user, same as WhatsApp/Telegram showing a group's name before
+      // you've joined it — a 1:1's doc (and every conversation's actual messages subcollection
+      // below) stays participant-only, since a DM's existence/preview is the sensitive part here.
       allow read: if isSignedIn()
-        && (resource == null || request.auth.uid in resource.data.participants);
+        && (resource == null || request.auth.uid in resource.data.participants || resource.data.type == "group");
       allow create: if isSignedIn() && request.auth.uid in request.resource.data.participants;
       // Two update shapes: (1) any current participant may bump the message-send side effects
       // (sendDM, markDMRead) — unchanged from before groups existed. (2) group-only fields —
@@ -476,7 +482,7 @@ service cloud.firestore {
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(
             ["lastMessage", "lastMessageAt", "lastSenderId", "unreadCounts",
              "name", "description", "photoURL", "participants", "participantNames",
-             "participantPhotos", "adminUids", "hiddenFor"])
+             "participantPhotos", "adminUids", "hiddenFor", "inviteCode"])
           || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["archivedBy"])
           || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["nicknames"])
           || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["mutedBy"])
@@ -489,6 +495,20 @@ service cloud.firestore {
               || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["participantBubbleStyles"])
             ))
         );
+      // Beta feedback: "Groups should have invite via link" — joinGroupViaInvite() adds the
+      // CALLER, who by definition isn't a participant yet, so it can never satisfy the
+      // `request.auth.uid in resource.data.participants` gate the rule above requires. A separate
+      // `allow update` (Firestore ORs multiple statements on the same path) covers exactly that
+      // one shape instead: a group grows by exactly one member, that member is the caller
+      // themselves, and only their own roster entries are touched — never someone else's, never
+      // group name/admin/etc.
+      allow update: if isSignedIn() && resource.data.type == "group"
+        && !(request.auth.uid in resource.data.participants)
+        && request.auth.uid in request.resource.data.participants
+        && request.resource.data.participants.size() == resource.data.participants.size() + 1
+        && request.resource.data.participants.hasAll(resource.data.participants)
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["participants", "participantNames", "participantPhotos", "unreadCounts"]);
       // The group's creator only (deleteGroup in lib/dms.ts) — a 1:1 conversation is never
       // deleted, only left implicitly by no longer being messaged.
       allow delete: if isSignedIn() && resource.data.creatorUid == request.auth.uid;
@@ -497,7 +517,13 @@ service cloud.firestore {
         allow read: if isSignedIn()
           && request.auth.uid in
             get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
-        allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid;
+        // Beta feedback: join/add system messages ("X joined via invite link", "Y added Z") have
+        // senderId "system", not the caller's own uid — same trust level as the caller's-own-uid
+        // branch above (no participant check here either), just for this one narrow, cosmetic-
+        // only message shape.
+        allow create: if isSignedIn()
+          && (request.resource.data.senderId == request.auth.uid
+            || (request.resource.data.senderId == "system" && request.resource.data.isSystem == true));
 
         // Four distinct update shapes, each scoped to exactly the field(s) that operation
         // touches so none of them can be used to smuggle a change to anything else on the
@@ -651,7 +677,16 @@ service cloud.firestore {
           // counters + forYouScore only" carve-out the rest of this list already covers.
           || request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(["viewCount", "watchTime", "forYouScore", "completedViews", "replayCount",
-                "profileVisits", "profileVisitsFromPost", "shareCount", "commentCount", "bookmarkCount"]));
+                "profileVisits", "profileVisitsFromPost", "shareCount", "commentCount", "bookmarkCount"])
+          // Beta feedback / error log: expireBoosts() sweeps EVERY expired boost across the whole
+          // feed from whichever client's feed page happens to load next — almost never the
+          // boosted post's own author, and never an admin — so it had no matching branch here at
+          // all and failed outright ("Missing or insufficient permissions", 6+ occurrences).
+          // Scoped narrowly to only the reset it ever performs (never lets a caller set an
+          // arbitrary boostLevel/boostExpiresAt, only clear them alongside the score recompute).
+          || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(["boostLevel", "boostExpiresAt", "forYouScore"])
+            && request.resource.data.boostLevel == 0
+            && request.resource.data.boostExpiresAt == null));
       allow delete: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
 
       // ---------------------------- feed post comments ----------------------------
@@ -674,6 +709,17 @@ service cloud.firestore {
             || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(["isDeleted", "deletedAt", "text"])
                 && get(/databases/$(database)/documents/creatorFeed/$(postId)).data.uid == request.auth.uid));
         allow delete: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      }
+
+      // Beta feedback bug: "If a user views a post on feed 5 times, it should count as one
+      // view" — viewCount previously had zero durable per-viewer memory (just an in-memory ref
+      // that reset on remount/reload), so every re-view kept incrementing it. One doc per viewer
+      // per post, written once and checked before every increment (see incrementViewCount in
+      // lib/creatorFeed.ts) — same per-viewer-marker shape as profileVisits above, scoped so a
+      // user can only ever write their own marker doc.
+      match /viewedBy/{uid} {
+        allow read: if isSignedIn() && request.auth.uid == uid;
+        allow create: if isSignedIn() && request.auth.uid == uid;
       }
     }
 

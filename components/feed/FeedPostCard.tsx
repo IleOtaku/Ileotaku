@@ -21,6 +21,7 @@ import BoostModal from "./BoostModal";
 import EditingAppBadge from "./EditingAppBadge";
 import { Avatar } from "@/components/ui/Avatar";
 import { PlatinumBadge } from "@/components/ui/Badges";
+import MentionText from "@/components/ui/MentionText";
 import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import { getOptimizedImageUrl, getVideoThumbnail } from "@/lib/cloudinary";
 import { deletePost, incrementPostViews, incrementViewCount, likePost, trackWatchTime } from "@/lib/creatorFeed";
@@ -141,7 +142,7 @@ function FeedPostCard({ post, onDeleted }: FeedPostCardProps) {
             viewTimer.current = setTimeout(() => {
               viewCounted.current = true;
               incrementPostViews(post.id);
-              incrementViewCount(post.id);
+              incrementViewCount(post.id, user?.uid);
             }, 3000);
           }
         } else {
@@ -371,7 +372,7 @@ function FeedPostCard({ post, onDeleted }: FeedPostCardProps) {
         }`}
       >
         {isMilestone && <Trophy className="mr-1.5 inline h-4 w-4 text-gold" />}
-        {post.content}
+        <MentionText text={post.content} />
       </p>
 
       {isVideo ? (

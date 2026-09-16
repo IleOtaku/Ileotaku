@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui";
 import { Avatar } from "@/components/ui/Avatar";
 import { useAuth } from "@/hooks/useAuth";
 import { checkAndAwardAchievements } from "@/lib/achievements";
+import { claimStreak } from "@/lib/payments";
 import {
   getLockConfig,
   isChapterUnlocked,
@@ -328,6 +329,9 @@ export default function ProseReaderClient({ workId }: ProseReaderClientProps) {
           );
         }
         if (freshProfile) await checkAndAwardAchievements(uid, { ...freshProfile, chaptersRead });
+        // Beta feedback: "Fix the streak thing" — see ReaderClient's matching comment. Prose
+        // chapters should extend the streak exactly like manga chapters do.
+        await claimStreak(user).catch(() => {});
       } catch {
         // Non-fatal — reading still works even if progress/achievement tracking fails.
       }

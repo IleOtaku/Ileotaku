@@ -53,7 +53,7 @@ export default function BubbleStylePicker({ open, onClose, conversationId }: Bub
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Bubble Style">
+    <Modal open={open} onClose={onClose} title="Bubble Style" zIndex={140}>
       {!isPlatinum ? (
         <div className="flex flex-col items-center gap-3 py-6 text-center">
           <Lock className="h-8 w-8 text-muted" />

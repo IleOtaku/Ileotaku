@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { BadgeCheck, Star } from "lucide-react";
+import { Star } from "lucide-react";
 import EmailSignupForm from "@/components/explore/EmailSignupForm";
 import GenreBrowser from "@/components/explore/GenreBrowser";
 import SpotlightCreatorLive from "@/components/explore/SpotlightCreatorLive";
@@ -8,7 +8,9 @@ import TrendingSoundsSection, { TrendingSoundsEmpty } from "@/components/explore
 import Trending from "@/components/landing/Trending";
 import Reveal from "@/components/landing/Reveal";
 import { SectionEyebrow } from "@/components/ui";
+import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import { proxyImg } from "@/lib/manga-api";
+import { tierToBadgeUser, type VerificationTier } from "@/lib/verification";
 import {
   getAfricanOriginals,
   getFeaturedPublishedSeries,
@@ -102,7 +104,11 @@ function WorkCardGrid({
             <p className="truncate font-syne text-base font-semibold text-text">{work.title}</p>
             <p className="mt-0.5 flex items-center gap-1 truncate font-noto text-xs text-muted">
               {work.authorName}
-              {work.authorVerified && <BadgeCheck className="h-3 w-3 shrink-0 text-plat" />}
+              {/* Beta feedback (STEP 5): this raw checkmark used to show for every verified creator
+                  regardless of tier — VerificationBadge + tierToBadgeUser render the real
+                  founder/admin/publisher/creator/general badge from the denormalized
+                  authorVerifiedType instead. */}
+              <VerificationBadge user={tierToBadgeUser(work.authorVerifiedType as VerificationTier | null | undefined)} size={12} />
             </p>
             {work.averageRating > 0 && (
               <p className="mt-1 flex items-center gap-1 font-noto text-xs text-gold2">
@@ -189,7 +195,11 @@ export default async function ExplorePage() {
                         </p>
                         <p className="mt-0.5 flex items-center gap-1 truncate font-noto text-xs text-ivory/70">
                           {work.authorName}
-                          {work.authorVerified && <BadgeCheck className="h-3 w-3 shrink-0 text-plat" />}
+                          {/* Beta feedback (STEP 5): this raw checkmark used to show for every verified creator
+                  regardless of tier — VerificationBadge + tierToBadgeUser render the real
+                  founder/admin/publisher/creator/general badge from the denormalized
+                  authorVerifiedType instead. */}
+              <VerificationBadge user={tierToBadgeUser(work.authorVerifiedType as VerificationTier | null | undefined)} size={12} />
                         </p>
                         {work.genres.length > 0 && (
                           <div className="mt-2 flex flex-wrap gap-1">

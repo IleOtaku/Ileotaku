@@ -73,7 +73,7 @@ export default function ChatColorPicker({ open, onClose, conversationId }: ChatC
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Bubble Color">
+    <Modal open={open} onClose={onClose} title="Bubble Color" zIndex={140}>
       {!isPlatinum ? (
         <div className="flex flex-col items-center gap-3 py-6 text-center">
           <Lock className="h-8 w-8 text-muted" />

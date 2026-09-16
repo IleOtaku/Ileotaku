@@ -12,12 +12,14 @@ import {
   Clock,
   Copy,
   ImagePlus,
+  Link2,
   Loader2,
   LogOut,
   MoreHorizontal,
   Paperclip,
   Pencil,
   Plus,
+  RefreshCw,
   Reply,
   Search,
   Send,
@@ -61,6 +63,7 @@ import {
   leaveGroup,
   makeGroupAdmin,
   markDMRead,
+  regenerateInviteCode,
   removeMemberFromGroup,
   removeReaction,
   sendDM,
@@ -160,6 +163,7 @@ export default function MessagesClient() {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const handledWithParam = useRef(false);
+  const handledOpenParam = useRef(false);
   // uid -> currently-playing, for the sidebar's green dot. Deliberately a plain poll (not a
   // real-time listener) — a conversation list can show many contacts at once, and this only
   // needs to be roughly fresh, not instant.
@@ -228,6 +232,9 @@ export default function MessagesClient() {
   const [addingMembers, setAddingMembers] = useState(false);
   const [memberActionUid, setMemberActionUid] = useState<string | null>(null);
   const [groupInfoBusy, setGroupInfoBusy] = useState(false);
+  // Beta feedback: "Groups should have invite via link."
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteCopied, setInviteCopied] = useState(false);
   // 5-tier verification overhaul: the group roster only denormalizes participantNames/Photos
   // (strings) onto the Conversation doc, not verification data — fetched on demand instead of a
   // full schema/write-path change, since a group's member list is small and only loaded while its
@@ -307,6 +314,17 @@ export default function MessagesClient() {
     setHeaderMenuOpen(false);
   }, [selectedId]);
 
+  // ?open=[conversationId] — from the invite-link join page (app/invite/[code]), right after it
+  // adds the visitor as a participant server-side. Just selects it; subscribeToConversations'
+  // own live listener is what actually makes the new group show up in the sidebar.
+  useEffect(() => {
+    if (!user || handledOpenParam.current) return;
+    const openId = searchParams.get("open");
+    if (!openId) return;
+    handledOpenParam.current = true;
+    setSelectedId(openId);
+  }, [user, searchParams]);
+
   // ?with=[uid] — from a creator page's Message button. Idempotent: startConversation resolves
   // to the same deterministic id whether or not it already exists.
   useEffect(() => {
@@ -335,7 +353,20 @@ export default function MessagesClient() {
       setMessages([]);
       return;
     }
-    const unsub = subscribeToConversation(selectedId, setMessages, () => setMessages([]));
+    // Beta feedback: unread badges kept climbing for a conversation the viewer was actively
+    // looking at, because markDMRead only ever ran once, on open — a message that arrived a
+    // second later still bumped unreadCounts (sendDM has no notion of "recipient is already
+    // staring at this thread") and nothing zeroed it back out. Re-marking read on every message
+    // snapshot, not just on open, keeps the count at 0 for as long as this conversation stays
+    // selected.
+    const unsub = subscribeToConversation(
+      selectedId,
+      (msgs) => {
+        setMessages(msgs);
+        if (user) markDMRead(selectedId, user.uid).catch(() => {});
+      },
+      () => setMessages([])
+    );
     if (user) markDMRead(selectedId, user.uid).catch(() => {});
     return unsub;
   }, [selectedId, user]);
@@ -625,6 +656,34 @@ export default function MessagesClient() {
       await makeGroupAdmin(selectedGroup.id, user.uid, targetUid);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't promote that member.");
+    }
+  }
+
+  function inviteLinkFor(code: string): string {
+    return typeof window !== "undefined" ? `${window.location.origin}/invite/${code}` : `/invite/${code}`;
+  }
+
+  async function handleCopyInviteLink() {
+    if (!selectedGroup?.inviteCode) return;
+    try {
+      await navigator.clipboard.writeText(inviteLinkFor(selectedGroup.inviteCode));
+      setInviteCopied(true);
+      setTimeout(() => setInviteCopied(false), 2000);
+    } catch {
+      toast.error("Couldn't copy the link.");
+    }
+  }
+
+  async function handleResetInviteLink() {
+    if (!user || !selectedGroup || inviteBusy) return;
+    setInviteBusy(true);
+    try {
+      await regenerateInviteCode(selectedGroup.id, user.uid);
+      toast.success("Invite link reset — the old link no longer works.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't reset the invite link.");
+    } finally {
+      setInviteBusy(false);
     }
   }
 
@@ -1482,6 +1541,15 @@ export default function MessagesClient() {
                       );
                     }
                     const m = item.message;
+                    if (m.isSystem) {
+                      return (
+                        <div key={m.id} className="my-1 flex items-center justify-center">
+                          <span className="rounded-full bg-bg3/60 px-3 py-1 text-center font-noto text-[11px] text-muted">
+                            {m.text}
+                          </span>
+                        </div>
+                      );
+                    }
                     const isOwn = m.senderId === user.uid;
                     const isEditing = editingId === m.id;
                     // DM Feature Overhaul (Parts C/D): a sender's own bubbleStyle/bubbleColor
@@ -1722,6 +1790,19 @@ export default function MessagesClient() {
                 <div className="relative shrink-0 border-t border-bg4">
                   {mentionQuery !== null && selectedGroup && (
                     <div className="absolute bottom-full left-3 z-10 mb-1 w-56 overflow-hidden rounded-xl border border-bg4 bg-bg2 shadow-lg">
+                      {/* Beta feedback: "add an @all to tag everyone in a gc" */}
+                      {"all".includes(mentionQuery.toLowerCase()) && (
+                        <button
+                          type="button"
+                          onClick={() => insertMention("all")}
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-bg3"
+                        >
+                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-clay text-ivory">
+                            <Users className="h-3.5 w-3.5" />
+                          </span>
+                          <span className="truncate font-noto text-sm font-semibold text-text">All</span>
+                        </button>
+                      )}
                       {Object.entries(selectedGroup.participantNames ?? {})
                         .filter(([uid, name]) => uid !== user.uid && name.toLowerCase().includes(mentionQuery.toLowerCase()))
                         .slice(0, 6)
@@ -1881,17 +1962,31 @@ export default function MessagesClient() {
 
       <Modal open={reactionViewer !== null} onClose={() => setReactionViewer(null)} title={reactionViewer ? `Reacted ${reactionViewer.emoji}` : ""}>
         <div className="flex flex-col gap-2">
-          {reactionViewer?.uids.map((uid) => (
-            <div key={uid} className="flex items-center gap-3">
-              <Avatar
-                uid={uid}
-                photoURL={uid === user.uid ? (profile?.photoURL ?? user.photoURL ?? undefined) : otherPhoto}
-                displayName={uid === user.uid ? "You" : otherName}
-                size={32}
-              />
-              <span className="font-noto text-sm text-text">{uid === user.uid ? "You" : otherName}</span>
-            </div>
-          ))}
+          {reactionViewer?.uids.map((uid) => {
+            // Beta feedback: "Reactions on groups doesn't show who reacted" — every non-self
+            // reactor fell back to the single fixed `otherName`/`otherPhoto` (correct for a 1:1,
+            // where there's only ever one other participant), so in a group every reactor besides
+            // "You" rendered as the same wrong person. Group threads resolve each uid against the
+            // conversation's own denormalized roster instead, same lookup already used for
+            // message sender names/avatars elsewhere in this file.
+            const isMe = uid === user.uid;
+            const name = isMe
+              ? "You"
+              : isGroupThread
+                ? (user && selected?.nicknames?.[user.uid]?.[uid]) ?? selected?.participantNames?.[uid] ?? "Reader"
+                : otherName;
+            const photo = isMe
+              ? profile?.photoURL ?? user.photoURL ?? undefined
+              : isGroupThread
+                ? selected?.participantPhotos?.[uid]
+                : otherPhoto;
+            return (
+              <div key={uid} className="flex items-center gap-3">
+                <Avatar uid={uid} photoURL={photo} displayName={name} size={32} />
+                <span className="font-noto text-sm text-text">{name}</span>
+              </div>
+            );
+          })}
         </div>
       </Modal>
 
@@ -2150,6 +2245,55 @@ export default function MessagesClient() {
                 )}
                 <p className="font-noto text-xs text-muted">{selectedGroup.participants.length} members</p>
               </div>
+
+              {selectedGroup.inviteCode ? (
+                <div>
+                  <p className="mb-2 flex items-center gap-1.5 font-syne text-xs font-semibold uppercase tracking-wide text-muted">
+                    <Link2 className="h-3.5 w-3.5" /> Invite via link
+                  </p>
+                  <div className="flex items-center gap-2 rounded-xl border border-bg4 bg-bg p-2">
+                    <p className="min-w-0 flex-1 truncate font-noto text-xs text-muted">
+                      {inviteLinkFor(selectedGroup.inviteCode)}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleCopyInviteLink}
+                      aria-label="Copy invite link"
+                      className="shrink-0 rounded-full bg-bg3 p-1.5 text-muted hover:text-text"
+                    >
+                      {inviteCopied ? <Check className="h-3.5 w-3.5 text-green2" /> : <Copy className="h-3.5 w-3.5" />}
+                    </button>
+                    {isGroupAdmin && (
+                      <button
+                        type="button"
+                        onClick={handleResetInviteLink}
+                        disabled={inviteBusy}
+                        aria-label="Reset invite link"
+                        className="shrink-0 rounded-full bg-bg3 p-1.5 text-muted hover:text-text"
+                      >
+                        <RefreshCw className={`h-3.5 w-3.5 ${inviteBusy ? "animate-spin" : ""}`} />
+                      </button>
+                    )}
+                  </div>
+                  <p className="mt-1 font-noto text-[10px] text-muted">
+                    Anyone with this link can join {isGroupAdmin ? "— reset it to revoke old links." : "."}
+                  </p>
+                </div>
+              ) : (
+                // Groups created before invite links existed have no code yet — any admin can
+                // mint the first one on demand rather than this staying permanently unavailable.
+                isGroupAdmin && (
+                  <button
+                    type="button"
+                    onClick={handleResetInviteLink}
+                    disabled={inviteBusy}
+                    className="btn-ghost flex items-center justify-center gap-2 text-sm"
+                  >
+                    {inviteBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
+                    Create invite link
+                  </button>
+                )
+              )}
 
               <div className="flex items-center justify-between">
                 <p className="font-syne text-xs font-semibold uppercase tracking-wide text-muted">Members</p>

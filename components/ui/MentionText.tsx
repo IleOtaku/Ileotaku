@@ -5,9 +5,9 @@ import { useRouter } from "next/navigation";
 import { getUserByHandle } from "@/lib/firestore";
 import { getUserProfileUrl } from "@/lib/utils";
 
-// Captures @mentions and http(s) URLs in one pass so a single text.split() interleaves both
-// kinds of tokens with the plain-text runs between them, in original order.
-const TOKEN_PATTERN = /(@\w+|https?:\/\/[^\s]+)/g;
+// Captures @mentions, #hashtags, and http(s) URLs in one pass so a single text.split()
+// interleaves all three kinds of tokens with the plain-text runs between them, in original order.
+const TOKEN_PATTERN = /(@\w+|#\w+|https?:\/\/[^\s]+)/g;
 const FIRST_URL_PATTERN = /https?:\/\/[^\s]+/;
 
 /** Beta feedback: "...show the preview." The first http(s) URL in `text`, if any — used to decide
@@ -37,12 +37,14 @@ export interface MentionTextProps {
 
 /**
  * Renders plain message/comment text with any `@handle` tokens highlighted in plat purple and
- * made clickable, and any `http(s)://` URL made into a real clickable link (opened in a new tab,
- * with a shortened label — see shortenUrlLabel) — used everywhere free-text is shown back to a
- * reader: DM threads (direct and group), series/chapter comments, and the reader's live chat. An
- * @mention click looks the handle up (getUserByHandle) and navigates to that account's profile; a
- * handle that doesn't resolve to a real account (typed freehand, or since renamed/deleted) is a
- * silent no-op rather than a broken link.
+ * made clickable, any `#hashtag` token highlighted in gold and linked to that tag's feed
+ * (/feed/tag/[tag] — beta feedback: "add ... hashtags to feed"), and any `http(s)://` URL made
+ * into a real clickable link (opened in a new tab, with a shortened label — see shortenUrlLabel)
+ * — used everywhere free-text is shown back to a reader: DM threads (direct and group), series/
+ * chapter comments, feed posts, and the reader's live chat. An @mention click looks the handle up
+ * (getUserByHandle) and navigates to that account's profile; a handle that doesn't resolve to a
+ * real account (typed freehand, or since renamed/deleted) is a silent no-op rather than a broken
+ * link.
  */
 export default function MentionText({ text, className }: MentionTextProps) {
   const router = useRouter();
@@ -67,6 +69,22 @@ export default function MentionText({ text, className }: MentionTextProps) {
                 if (e.key === "Enter") goToMention(part.slice(1));
               }}
               className="cursor-pointer font-semibold text-plat hover:underline"
+            >
+              {part}
+            </span>
+          );
+        }
+        if (part.startsWith("#") && part.length > 1) {
+          return (
+            <span
+              key={i}
+              role="link"
+              tabIndex={0}
+              onClick={() => router.push(`/feed/tag/${part.slice(1).toLowerCase()}`)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") router.push(`/feed/tag/${part.slice(1).toLowerCase()}`);
+              }}
+              className="cursor-pointer font-semibold text-gold hover:underline"
             >
               {part}
             </span>
