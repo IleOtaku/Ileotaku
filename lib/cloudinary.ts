@@ -89,8 +89,16 @@ function uploadToCloudinary(
  * other file type — "📁 File — any file type up to 25MB" — via Cloudinary's raw/video endpoints.
  * Kept separate from uploadImage/uploadVideo above (which stay File-only, matching every existing
  * call site) rather than widening their signatures. */
+/** Beta feedback bug: "Voice note keeps sending the same voice recording" / "vns keep sending
+ * the first voice note sent to a user." Root cause — every voice note in a conversation was
+ * uploaded under the literal filename "voice-message.webm", so every one after the first landed
+ * on the exact same Cloudinary public_id (folder + filename, with no other differentiator) —
+ * Cloudinary treated every later recording as re-uploading the same asset and kept serving back
+ * the FIRST one's actual audio, no matter what was actually recorded afterward. A unique
+ * filename per recording (timestamp + random suffix) gives every voice note its own public_id. */
 export function uploadVoiceNote(blob: Blob, folder: string, onProgress?: (percent: number) => void) {
-  return uploadToCloudinary(blob, folder, "video", onProgress, "voice-message.webm");
+  const uniqueName = `voice-message-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.webm`;
+  return uploadToCloudinary(blob, folder, "video", onProgress, uniqueName);
 }
 
 export function uploadAnyFile(file: File, folder: string, onProgress?: (percent: number) => void) {

@@ -107,20 +107,36 @@ export default function NowPlayingCard({ uid, compact = false }: NowPlayingCardP
     return startNowPlayingSync(uid);
   }, [viewer, uid]);
 
-  // Smooth the progress bar between 30s sync ticks by advancing it locally every second,
-  // clamped to durationMs — the actual number only ever moves forward in real increments from
-  // Spotify itself; this just avoids the bar visibly freezing for up to 30s at a time.
+  // Beta feedback bug: "the seekbar aint showing the person's progress in the song." The old
+  // version re-ran this whole effect (tearing down and restarting the interval, and SNAPPING
+  // displayProgress back to data.progressMs) on every single 30s resync — visible as the bar
+  // jumping backward roughly once every 30 seconds rather than advancing smoothly, which read as
+  // "not really showing progress." Tracking a fixed (progressMs, wall-clock-time-received)
+  // baseline in a ref and computing displayProgress as elapsed-time-since-baseline means a
+  // resync only updates the baseline (harmless — the baseline barely differs from where local
+  // elapsed-time tracking already put it) without restarting the ticking interval at all.
+  const baselineRef = useRef<{ progressMs: number; receivedAt: number } | null>(null);
   useEffect(() => {
-    if (tickRef.current) clearInterval(tickRef.current);
-    if (!data?.isPlaying || data.durationMs === undefined) return;
+    if (!data?.isPlaying || data.durationMs === undefined) {
+      baselineRef.current = null;
+      if (tickRef.current) clearInterval(tickRef.current);
+      return;
+    }
+    baselineRef.current = { progressMs: data.progressMs ?? 0, receivedAt: Date.now() };
     setDisplayProgress(data.progressMs ?? 0);
+  }, [data?.isPlaying, data?.progressMs, data?.durationMs]);
+
+  useEffect(() => {
+    if (!data?.isPlaying || data.durationMs === undefined) return undefined;
     tickRef.current = setInterval(() => {
-      setDisplayProgress((p) => Math.min(data.durationMs ?? p, p + 1000));
+      if (!baselineRef.current) return;
+      const elapsed = Date.now() - baselineRef.current.receivedAt;
+      setDisplayProgress(Math.min(data.durationMs ?? 0, baselineRef.current.progressMs + elapsed));
     }, 1000);
     return () => {
       if (tickRef.current) clearInterval(tickRef.current);
     };
-  }, [data?.isPlaying, data?.progressMs, data?.durationMs]);
+  }, [data?.isPlaying, data?.durationMs]);
 
   const canShow = targetProfile?.spotifyConnected === true && targetProfile?.showNowPlaying !== false;
   if (!canShow || !data) return null;

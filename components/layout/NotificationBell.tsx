@@ -35,6 +35,7 @@ import {
 import { Modal } from "@/components/ui";
 import { useAuth } from "@/hooks/useAuth";
 import { markAllAsRead, markAsRead, subscribeToNotifications } from "@/lib/notifications";
+import { playNotificationSound } from "@/lib/notificationSound";
 import { formatPostTimestamp } from "@/lib/utils";
 import { NotificationType, type AppNotification } from "@/types";
 
@@ -134,6 +135,11 @@ export default function NotificationBell() {
   // Beta feedback: "Clicking an announcement should show a modal popup of the full announcement
   // and the signed sender" — every other notification type still just navigates via actionURL.
   const [announcementModal, setAnnouncementModal] = useState<AppNotification | null>(null);
+  // Beta feedback: "Notifications should have a custom sound of our own." Tracks the newest
+  // notification id seen so far so the chime only ever plays for a genuinely NEW arrival, never
+  // for the initial snapshot of an already-existing list on page load/refresh.
+  const lastSeenIdRef = useRef<string | null>(null);
+  const hasLoadedOnceRef = useRef(false);
 
   useEffect(() => {
     if (!user) {
@@ -142,6 +148,12 @@ export default function NotificationBell() {
       return;
     }
     return subscribeToNotifications(user.uid, (snapshot) => {
+      const newestId = snapshot.notifications[0]?.id ?? null;
+      if (hasLoadedOnceRef.current && newestId && newestId !== lastSeenIdRef.current) {
+        playNotificationSound();
+      }
+      hasLoadedOnceRef.current = true;
+      lastSeenIdRef.current = newestId;
       setNotifications(snapshot.notifications);
       setUnreadCount(snapshot.unreadCount);
     });

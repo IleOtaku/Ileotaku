@@ -498,15 +498,15 @@ export default function UsersTable({ users, loading, canManageAdmins = true, onU
                 </MenuItem>
                 <MenuItem
                   danger
-                  disabled={!canManageAdmins}
-                  title={!canManageAdmins ? "Super Admin only" : undefined}
+                  disabled={!canManageAdmins || u.isFounder === true}
+                  title={u.isFounder ? "The founder account can't be deleted" : !canManageAdmins ? "Super Admin only" : undefined}
                   onClick={() => {
-                    if (!canManageAdmins) return;
+                    if (!canManageAdmins || u.isFounder) return;
                     setDeleteUserTarget(u);
                     setOpenMenuUid(null);
                   }}
                 >
-                  Delete Account{!canManageAdmins && " (Super Admin only)"}
+                  Delete Account{u.isFounder ? " (Protected)" : !canManageAdmins ? " (Super Admin only)" : ""}
                 </MenuItem>
               </div>
             );

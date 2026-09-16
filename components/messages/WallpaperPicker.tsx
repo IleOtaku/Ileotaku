@@ -7,7 +7,7 @@ import { ExternalLink, Loader2, Lock, Search, Trash2, Upload } from "lucide-reac
 import { Modal, Toggle } from "@/components/ui";
 import { useAuth } from "@/hooks/useAuth";
 import { uploadImageWithProgress } from "@/lib/cloudinary";
-import { addUploadedWallpaper, removeUploadedWallpaper, setConversationWallpaper } from "@/lib/dms";
+import { addUploadedWallpaper, removeUploadedWallpaper, setConversationWallpaper, setConversationWallpaperBlur } from "@/lib/dms";
 import { getUserProfile } from "@/lib/firestore";
 
 export interface WallpaperPickerProps {
@@ -98,6 +98,19 @@ export default function WallpaperPicker({ open, onClose, conversationId, current
 
   const uploads = profile?.uploadedWallpapers ?? [];
 
+  // Beta feedback bug: "The blur wallpaper toggle doesn't work" — persists the instant it's
+  // flipped, rather than only ever being saved as a side effect of picking a whole new
+  // wallpaper (see setConversationWallpaperBlur's own doc comment).
+  async function handleToggleBlur(value: boolean) {
+    setBlur(value);
+    try {
+      await setConversationWallpaperBlur(conversationId, value);
+    } catch {
+      setBlur(!value);
+      toast.error("Couldn't update the blur setting.");
+    }
+  }
+
   return (
     <Modal open={open} onClose={onClose} title="Chat Wallpaper" zIndex={140}>
       {!isPlatinum ? (
@@ -123,7 +136,7 @@ export default function WallpaperPicker({ open, onClose, conversationId, current
             ))}
           </div>
 
-          <Toggle checked={blur} onChange={setBlur} label="Blur wallpaper" />
+          <Toggle checked={blur} onChange={handleToggleBlur} label="Blur wallpaper" />
 
           {tab === "colors" && (
             <>

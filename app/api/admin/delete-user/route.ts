@@ -27,20 +27,47 @@ export async function POST(request: Request) {
     return Response.json({ error: "FIREBASE_SERVICE_ACCOUNT is not configured." }, { status: 500 });
   }
 
+  // Beta feedback bug: "Delete account is not working." Every failure here (and in the two
+  // identical logged 500s: adminDeleteUserAccount always got back the generic "Couldn't delete
+  // this account." fallback, never a specific reason) came back with that same uninformative
+  // message — a strong signal this JSON.parse/cert() call was throwing UNCAUGHT (a malformed
+  // FIREBASE_SERVICE_ACCOUNT value — a common Vercel gotcha where the private key's embedded
+  // newlines get mangled on paste — throws here, not in the try/catch below it), which Next.js
+  // turns into a generic platform 500 HTML page. The client's `res.json()` then fails to parse
+  // that as JSON and silently falls back to `{}`, permanently hiding the real reason. Wrapping
+  // this in its own try/catch surfaces the actual error message instead.
   if (!getApps().length) {
-    initializeApp({ credential: cert(JSON.parse(serviceAccountJson)) });
+    try {
+      initializeApp({ credential: cert(JSON.parse(serviceAccountJson)) });
+    } catch (error) {
+      return Response.json(
+        {
+          error: `Server credentials are misconfigured: ${error instanceof Error ? error.message : "invalid FIREBASE_SERVICE_ACCOUNT"}. Check the FIREBASE_SERVICE_ACCOUNT value in Vercel's environment variables.`,
+        },
+        { status: 500 }
+      );
+    }
   }
 
   const db = getFirestore();
 
-  // Verify the caller is actually an admin before doing anything destructive — the client only
-  // ever shows this action to an admin, but the server can't trust that alone.
-  const adminDoc = await db.collection("users").doc(adminUid).get();
-  if (!adminDoc.exists || adminDoc.data()?.isAdmin !== true) {
-    return Response.json({ error: "Unauthorized." }, { status: 403 });
-  }
-
   try {
+    // Verify the caller is actually an admin before doing anything destructive — the client
+    // only ever shows this action to an admin, but the server can't trust that alone.
+    const adminDoc = await db.collection("users").doc(adminUid).get();
+    if (!adminDoc.exists || adminDoc.data()?.isAdmin !== true) {
+      return Response.json({ error: "Unauthorized." }, { status: 403 });
+    }
+
+    // Beta feedback bug: "as the main admin everything ought to work, i should be able to delete
+    // all accounts except zamyilton's." The client already disables/hides the delete action for
+    // the founder account, but that's UI-only — a direct call to this route would bypass it, so
+    // the founder flag is re-checked here server-side as the real source of truth.
+    const targetDoc = await db.collection("users").doc(targetUid).get();
+    if (targetDoc.exists && targetDoc.data()?.isFounder === true) {
+      return Response.json({ error: "The founder account can't be deleted." }, { status: 403 });
+    }
+
     // Delete the Firebase Auth account first — if this fails (e.g. the uid never had one, or
     // was already removed), we still want the Firestore cleanup below to run so a partially-
     // deleted account doesn't linger.

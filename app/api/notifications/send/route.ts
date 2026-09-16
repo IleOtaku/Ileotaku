@@ -30,8 +30,21 @@ export async function POST(request: Request) {
     );
   }
 
+  // Same hardening as app/api/admin/delete-user/route.ts — an uncaught throw here (a malformed
+  // FIREBASE_SERVICE_ACCOUNT value) becomes a generic platform 500 HTML page the caller can't
+  // parse or act on, rather than a real error message.
   if (!getApps().length) {
-    initializeApp({ credential: cert(JSON.parse(serviceAccountJson)) });
+    try {
+      initializeApp({ credential: cert(JSON.parse(serviceAccountJson)) });
+    } catch (error) {
+      return Response.json(
+        {
+          success: false,
+          error: `Server credentials are misconfigured: ${error instanceof Error ? error.message : "invalid FIREBASE_SERVICE_ACCOUNT"}.`,
+        },
+        { status: 500 }
+      );
+    }
   }
 
   const messaging = getMessaging();

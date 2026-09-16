@@ -230,8 +230,24 @@ export async function addAdminRole(uid: string, adminType: AdminType): Promise<v
   await updateUser(uid, { isAdmin: true, adminType });
 }
 
+/** Beta feedback bug: "Remove admin doesnt work." updateUser() spreads its patch straight into
+ * Firestore's updateDoc(), which THROWS on a literal `undefined` field value (`adminType:
+ * undefined` here) rather than clearing it — every call to this failed outright. deleteField()
+ * is Firestore's actual sentinel for "remove this field", same as unbanUser/liftSuspension above
+ * already use for suspendedUntil — calls updateDoc directly (bypassing updateUser's
+ * Partial<UserProfile> signature, which can't type a FieldValue sentinel) for the same reason
+ * those two do. */
 export async function removeAdminRole(uid: string): Promise<void> {
-  await updateUser(uid, { isAdmin: false, adminType: undefined });
+  try {
+    await updateDoc(doc(db, USERS, uid), {
+      isAdmin: false,
+      adminType: deleteField(),
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    await logError(error, { operation: "removeAdminRole", uid });
+    throw error;
+  }
 }
 
 /** Temporarily suspends an account and notifies the user of the exact date it lifts. */

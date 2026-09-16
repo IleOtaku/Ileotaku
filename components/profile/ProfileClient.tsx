@@ -324,7 +324,15 @@ export default function ProfileClient() {
 
       <div className="mt-10 grid gap-10 lg:grid-cols-[1fr_280px]">
         <div>
-          <Tabs tabs={TABS} value={tab} onChange={(v) => setTab(v as ProfileTab)} />
+          {/* Beta feedback bug: "The part that has library, history, achievements, etc should be
+              scrollable on mobile" — 5 tabs in one non-wrapping inline-flex row overflowed a
+              375px viewport with no way to reach the ones that got cut off (and, worse, could
+              force the whole page to scroll horizontally). Wrapping just this row in its own
+              horizontal-scroll container fixes both without changing the shared Tabs component
+              other pages use with fewer tabs. */}
+          <div className="overflow-x-auto">
+            <Tabs tabs={TABS} value={tab} onChange={(v) => setTab(v as ProfileTab)} />
+          </div>
           <div className="mt-8">
             {tab === "library" && <LibraryTab />}
             {tab === "history" && <HistoryTab />}

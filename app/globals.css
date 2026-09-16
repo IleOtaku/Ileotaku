@@ -355,32 +355,40 @@ body {
    * group thread can show up in different shapes/colors at once. The `.other` variant on
    * 3/5 mirrors the tail/blob asymmetry for a message rendered on the LEFT side of the thread
    * instead of the right. */
+  /* Beta feedback bug: "All bubble styles are the same and arent fine, redo it." Several of the
+   * original 10 shared an identical border-radius (1 and 9 were BOTH plain 18px, differing only
+   * in a `box-shadow: 0 0 Npx currentColor` glow that's easy to miss against a busy background),
+   * so cycling through them genuinely could look like nothing was changing. Every style below now
+   * has its own distinct radius/shape AND at least one other differentiator (padding, shadow
+   * depth, or border weight) so no two are a near-match. */
   .bubble-style-1 {
     border-radius: 18px;
   }
   .bubble-style-2 {
-    border-radius: 4px;
+    border-radius: 2px;
+    border: 1px solid currentColor;
   }
   .bubble-style-3 {
-    border-radius: 18px 18px 4px 18px;
+    border-radius: 22px 22px 2px 22px;
   }
   .bubble-style-3.other {
-    border-radius: 18px 18px 18px 4px;
+    border-radius: 22px 22px 22px 2px;
   }
   .bubble-style-4 {
     border-radius: 999px;
-    padding-left: 20px;
-    padding-right: 20px;
+    padding-left: 22px;
+    padding-right: 22px;
   }
   .bubble-style-5 {
-    border-radius: 30px 10px 30px 10px;
+    border-radius: 32px 6px 32px 6px;
   }
   .bubble-style-5.other {
-    border-radius: 10px 30px 10px 30px;
+    border-radius: 6px 32px 6px 32px;
   }
   .bubble-style-6 {
     background: transparent !important;
     border: 2px solid currentColor;
+    border-radius: 18px;
   }
   .bubble-style-7 {
     background: rgba(255, 255, 255, 0.1) !important;
@@ -389,15 +397,17 @@ body {
     border-radius: 16px;
   }
   .bubble-style-8 {
-    border-radius: 8px;
+    border-radius: 6px;
     border: 2px solid #000;
-    box-shadow: 3px 3px 0px #000;
+    box-shadow: 4px 4px 0px #000;
   }
   .bubble-style-9 {
-    border-radius: 18px;
+    border-radius: 26px;
+    padding-top: 10px;
+    padding-bottom: 10px;
     box-shadow:
-      0 0 10px currentColor,
-      0 0 20px currentColor;
+      0 0 14px currentColor,
+      0 0 28px currentColor;
   }
   .bubble-style-10 {
     background: transparent !important;

@@ -79,7 +79,7 @@ import { subscribeToUserStatus, type OnlineStatus } from "@/lib/onlineStatus";
 import { subscribeToStories } from "@/lib/stories";
 import type { TenorGif } from "@/lib/tenor";
 import SpotifyMiniPlayer from "@/components/spotify/SpotifyMiniPlayer";
-import { contrastTextColor, formatPostTimestamp, formatTime, initials, stringToColor, truncate } from "@/lib/utils";
+import { contrastTextColor, formatExactTime, formatPostTimestamp, formatTime, initials, stringToColor, truncate } from "@/lib/utils";
 import type { Conversation, DMMessage, MessageReplyTo, UserProfile } from "@/types";
 
 const MAX_TEXTAREA_HEIGHT = 112; // ~4 lines at this input's font/line-height + padding
@@ -736,19 +736,37 @@ export default function MessagesClient() {
     }
   }
 
+  // Beta feedback bug: "Some users can't send a photo or video and it reflects... it just sends
+  // without the video or photo." Couldn't reproduce a specific device/file combination, so per
+  // "if intermittent, add better error handling so it fails gracefully": this now (1) rejects a
+  // file whose type isn't recognizably image/video up front, with a clear message, rather than
+  // silently attempting an upload the wrong Cloudinary endpoint may or may not accept, and (2)
+  // never calls sendMediaMessage with an empty/missing secureUrl — previously, if a Cloudinary
+  // response somehow came back "successful" without a usable URL, that gap would have gone
+  // straight through as an empty-media message instead of surfacing an error.
   async function handlePhotoVideoPicked(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file || !user || !selectedId || blockedFromSending()) return;
     const isVideo = file.type.startsWith("video/");
+    const isImage = file.type.startsWith("image/");
+    if (!isVideo && !isImage) {
+      toast.error(
+        file.type === "image/heic" || file.type === "image/heif"
+          ? "HEIC photos aren't supported yet — try converting to JPEG first."
+          : "That file type isn't supported — pick a photo or video."
+      );
+      return;
+    }
     setMediaUploading({ percent: 0, label: isVideo ? "Uploading video..." : "Uploading photo..." });
     try {
       const { secureUrl } = isVideo
         ? await uploadVideo(file, `dms/${selectedId}`, (p) => setMediaUploading({ percent: p, label: "Uploading video..." }))
         : await uploadImageWithProgress(file, `dms/${selectedId}`, (p) => setMediaUploading({ percent: p, label: "Uploading photo..." }));
+      if (!secureUrl) throw new Error("Upload returned no URL.");
       await sendMediaMessage({ mediaType: isVideo ? "video" : "image", mediaUrl: secureUrl });
     } catch {
-      toast.error("Couldn't upload that file.");
+      toast.error("Couldn't upload that file. Please try again.");
     } finally {
       setMediaUploading(null);
     }
@@ -1533,7 +1551,14 @@ export default function MessagesClient() {
                             {m.replyTo && (
                               <div
                                 className={`mb-1.5 border-l-2 pl-2 text-xs ${
-                                  isOwn ? "border-ivory/40 text-ivory/80" : "border-muted2 text-muted"
+                                  // Beta feedback bug: bubble-color contrast. `text-ivory`/
+                                  // `border-ivory` assumed every "own" bubble is dark — once a
+                                  // light bubbleColor is picked, the outer bubble's own text
+                                  // correctly flips via contrastTextColor (see bubbleInlineStyle
+                                  // above), but these hardcoded ivory children didn't, leaving
+                                  // white-on-white. `text-inherit`/`border-current` instead
+                                  // follow whatever color the bubble actually resolved to.
+                                  isOwn ? "border-current/40 text-inherit opacity-80" : "border-muted2 text-muted"
                                 }`}
                               >
                                 <p className="font-semibold">{m.replyTo.senderName}</p>
@@ -1570,8 +1595,12 @@ export default function MessagesClient() {
                                   <LinkPreviewCard url={extractFirstUrl(m.text)!} className="mt-1.5" />
                                 )}
                                 <span className="mt-1 flex items-center gap-1 text-[10px]">
-                                  <span className={isOwn ? "text-ivory/70" : "text-muted"}>{formatPostTimestamp(m.createdAt)}</span>
-                                  {m.isEdited && <span className={isOwn ? "text-ivory/70" : "text-muted"}>(edited)</span>}
+                                  {/* Beta feedback bug: "Show exact time stamps of messages, not
+                                      'about 2 minutes ago'." A day separator already labels which
+                                      day each group of messages is from (see dayLabel below), so
+                                      a per-message clock time is unambiguous on its own. */}
+                                  <span className={isOwn ? "text-inherit opacity-70" : "text-muted"}>{formatExactTime(m.createdAt)}</span>
+                                  {m.isEdited && <span className={isOwn ? "text-inherit opacity-70" : "text-muted"}>(edited)</span>}
                                   {m.expiresAt && <Clock className="h-2.5 w-2.5 opacity-60" />}
                                 </span>
                               </>
@@ -1614,10 +1643,19 @@ export default function MessagesClient() {
                         {menuForId === m.id && (
                           <>
                             <div className="fixed inset-0 z-40" onClick={closeMenu} />
+                            {/* Beta feedback bug: "When i touch the three dots on desktop view
+                                on a chat, it should bring the popup directly underneath the
+                                dots, not underneath the post." This menu is a sibling of the
+                                dots button inside the same `relative` bubble container — anchoring
+                                it at `top-full` (the BOTTOM of the whole bubble) put it far below
+                                the dots on any multi-line message, since the dots button itself
+                                sits pinned near the TOP of the bubble (`top-1`), not the bottom.
+                                `top-7` instead sits it right under the dots button regardless of
+                                how tall the message content above it is. */}
                             <div
-                              className={`glass absolute z-50 flex w-48 flex-col gap-0.5 rounded-xl p-1.5 ${
+                              className={`glass absolute top-7 z-50 flex w-48 flex-col gap-0.5 rounded-xl p-1.5 ${
                                 isOwn ? "right-0" : "left-0"
-                              } top-full mt-1`}
+                              }`}
                             >
                               <div className="flex items-center justify-around border-b border-white/10 px-1 pb-1.5">
                                 {REACTION_EMOJIS.map((emoji) => (

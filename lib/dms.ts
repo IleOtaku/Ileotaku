@@ -503,6 +503,10 @@ export async function leaveGroup(conversationId: string, uid: string): Promise<v
       participants: (convo.participants ?? []).filter((id) => id !== uid),
       adminUids: (convo.adminUids ?? []).filter((id) => id !== uid),
     });
+    // Beta feedback: "Add inline activity messages in dms (...aythex left)" — same grey
+    // system-message convention as the join-via-invite/added-by-admin messages.
+    const leaverName = convo.participantNames?.[uid] ?? "Someone";
+    await addSystemMessage(conversationId, `${leaverName} left`);
   } catch (error) {
     await logError(error, { operation: "leaveGroup", conversationId, uid });
     throw error;
@@ -618,6 +622,19 @@ export async function deleteMessage(
         deletedAt: new Date().toISOString(),
         text: "This message was deleted",
       });
+      // Beta feedback bug: "if the latest message was deleted, it should show the deleted
+      // message text in the person's chat preview instead of still showing the deleted
+      // message's contents." Deleting a message only ever touched the message doc itself —
+      // conversations.lastMessage (the sidebar's own denormalized preview string) was never
+      // told, so it kept showing the original text forever. Only worth the extra read when the
+      // deleted message is actually the newest one in the thread; anything further back never
+      // reached the preview in the first place.
+      const latestSnap = await getDocs(
+        query(collection(db, CONVERSATIONS, conversationId, "messages"), orderBy("createdAt", "desc"), limit(1))
+      );
+      if (latestSnap.docs[0]?.id === messageId) {
+        await updateDoc(doc(db, CONVERSATIONS, conversationId), { lastMessage: "This message was deleted" });
+      }
     } else {
       await updateDoc(messageRef(conversationId, messageId), { deletedFor: arrayUnion(uid) });
     }
@@ -759,6 +776,21 @@ export async function setConversationWallpaper(conversationId: string, input: Wa
     });
   } catch (error) {
     await logError(error, { operation: "setConversationWallpaper", conversationId });
+    throw error;
+  }
+}
+
+/** Beta feedback bug: "The blur wallpaper toggle doesn't work." The toggle in WallpaperPicker
+ * only ever updated its own local React state — the value never actually reached Firestore
+ * unless the user ALSO picked a brand-new wallpaper in the same visit (setConversationWallpaper
+ * bundles it in only as part of THAT write). Toggling blur on an already-set wallpaper did
+ * nothing at all. This narrow, single-field update lets the toggle persist immediately on its
+ * own, independent of picking a new color/gradient/image. */
+export async function setConversationWallpaperBlur(conversationId: string, blur: boolean): Promise<void> {
+  try {
+    await updateDoc(doc(db, CONVERSATIONS, conversationId), { wallpaperBlur: blur });
+  } catch (error) {
+    await logError(error, { operation: "setConversationWallpaperBlur", conversationId });
     throw error;
   }
 }

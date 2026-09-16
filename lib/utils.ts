@@ -21,6 +21,18 @@ export function formatTime(date: string | number | Date): string {
  * hard to place on a real timeline for anything that old. Scoped to this one helper, applied only
  * at the specific call sites the spec named, rather than changing formatTime() itself, which
  * other call sites (admin tables, "member since", ...) rely on staying purely relative. */
+/** Beta feedback bug: "Show exact time stamps of messages not about 2 minuites ago etc." A DM
+ * thread already shows a day separator ("Today"/"Yesterday"/a weekday — see MessagesClient's own
+ * dayLabel()), so each individual message only needs a clock time, not a full date, to be
+ * unambiguous — same convention WhatsApp/Telegram/iMessage all use. */
+export function formatExactTime(date: string | number | Date): string {
+  try {
+    return format(new Date(date), "h:mm a");
+  } catch {
+    return "";
+  }
+}
+
 export function formatPostTimestamp(date: string | number | Date): string {
   try {
     const d = new Date(date);
