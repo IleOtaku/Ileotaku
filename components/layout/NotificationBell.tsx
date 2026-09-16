@@ -30,6 +30,7 @@ import {
   XCircle,
   type LucideIcon,
 } from "lucide-react";
+import { Modal } from "@/components/ui";
 import { useAuth } from "@/hooks/useAuth";
 import { markAllAsRead, markAsRead, subscribeToNotifications } from "@/lib/notifications";
 import { formatPostTimestamp } from "@/lib/utils";
@@ -126,6 +127,9 @@ export default function NotificationBell() {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Beta feedback: "Clicking an announcement should show a modal popup of the full announcement
+  // and the signed sender" — every other notification type still just navigates via actionURL.
+  const [announcementModal, setAnnouncementModal] = useState<AppNotification | null>(null);
 
   useEffect(() => {
     if (!user) {
@@ -159,6 +163,10 @@ export default function NotificationBell() {
       } catch {
         // Navigation still proceeds even if the read-receipt write fails.
       }
+    }
+    if (n.type === NotificationType.ANNOUNCEMENT) {
+      setAnnouncementModal(n);
+      return;
     }
     router.push(n.actionURL);
   }
@@ -241,6 +249,19 @@ export default function NotificationBell() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <Modal
+        open={!!announcementModal}
+        onClose={() => setAnnouncementModal(null)}
+        title={announcementModal?.title ?? "Announcement"}
+      >
+        <p className="whitespace-pre-wrap font-noto text-sm text-text">{announcementModal?.body}</p>
+        <p className="mt-4 font-noto text-xs text-muted">
+          — {announcementModal?.sentByName ?? "ÍléOtaku Team"}
+          <span className="mx-1.5">·</span>
+          {announcementModal && formatPostTimestamp(announcementModal.createdAt)}
+        </p>
+      </Modal>
     </div>
   );
 }

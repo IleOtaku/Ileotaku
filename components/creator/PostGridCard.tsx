@@ -1,6 +1,7 @@
 "use client";
 
-import { Heart, Play } from "lucide-react";
+import { Eye, Play } from "lucide-react";
+import { getVideoThumbnail } from "@/lib/cloudinary";
 import type { CreatorPost } from "@/types";
 
 export interface PostGridCardProps {
@@ -10,11 +11,18 @@ export interface PostGridCardProps {
 
 /** Small rectangular preview card for a creator's Posts tab — beta feedback: "should just be
  * small cards and not the entire post... like tiktok's." Shows the post's own thumbnail (video
- * poster, first image, or a gradient-and-text preview for a text-only post) plus a like count;
- * tapping opens the full post in CreatorPostsViewer. */
+ * poster, first image, or a gradient-and-text preview for a text-only post) plus a view count;
+ * tapping opens the full post in CreatorPostsViewer.
+ *
+ * Beta feedback bug: "Videos and image preview... aren't showing their previews. Just broken
+ * images. And they should show the views not likes." Two fixes: (1) recomputes the video poster
+ * fresh via getVideoThumbnail(videoUrl) instead of trusting the stored videoPosterUrl field,
+ * which was broken for every post ever created (see getVideoThumbnail's own doc comment for the
+ * root cause) — this self-heals old posts with no backfill needed; (2) swapped the like count for
+ * viewCount. */
 export default function PostGridCard({ post, onClick }: PostGridCardProps) {
   const isVideo = post.mediaType === "video" && !!post.videoUrl;
-  const thumbnail = isVideo ? post.videoPosterUrl : post.attachments?.[0];
+  const thumbnail = isVideo && post.videoUrl ? getVideoThumbnail(post.videoUrl) : post.attachments?.[0];
 
   return (
     <button
@@ -43,8 +51,8 @@ export default function PostGridCard({ post, onClick }: PostGridCardProps) {
       )}
 
       <div className="absolute inset-x-0 bottom-0 flex items-center gap-1 bg-gradient-to-t from-black/70 to-transparent px-2 py-1.5">
-        <Heart className="h-3 w-3 fill-white text-white" />
-        <span className="font-syne text-[11px] font-semibold text-white">{post.likes.length}</span>
+        <Eye className="h-3 w-3 text-white" />
+        <span className="font-syne text-[11px] font-semibold text-white">{post.viewCount ?? 0}</span>
       </div>
     </button>
   );

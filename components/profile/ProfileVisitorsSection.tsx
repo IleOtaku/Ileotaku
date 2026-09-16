@@ -26,7 +26,7 @@ interface VisitorRow extends ProfileVisitor {
  * refresh. Anonymous entries (a Platinum visitor with hideProfileVisits on) stay a grey
  * silhouette + relative time until the owner spends coins to reveal the 3 most recent ones. */
 export default function ProfileVisitorsSection() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [visitors, setVisitors] = useState<VisitorRow[]>([]);
   const [weeklyCount, setWeeklyCount] = useState(0);
   const [expanded, setExpanded] = useState(false);
@@ -34,11 +34,18 @@ export default function ProfileVisitorsSection() {
   const [revealing, setRevealing] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
+  // Error log bug: "Missing or insufficient permissions" on getVisitorCount/
+  // isVisitorRevealActive, at the exact millisecond right after sign-in. Root cause — `user`
+  // alone goes non-null the instant onAuthStateChanged fires, but Firestore's own internal auth
+  // listener re-authenticating its active connection lags a beat behind that same event; a read
+  // fired in that gap can transiently see the OLD (signed-out) credential. useAuth's `loading`
+  // only flips false once the profile's first live snapshot has actually arrived (see
+  // hooks/useAuth.ts), which gives Firestore's own handoff enough of a head start.
   useEffect(() => {
-    if (!user) return;
+    if (!user || authLoading) return;
     getVisitorCount(user.uid).then(setWeeklyCount);
     isVisitorRevealActive(user.uid, user.uid).then(setRevealActive);
-  }, [user]);
+  }, [user, authLoading]);
 
   useEffect(() => {
     if (!user) return;

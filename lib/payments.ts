@@ -226,8 +226,17 @@ export async function purchasePlatinumWithCoins(
 /* ---------------------------- Tipping ---------------------------- */
 
 /** Deducts `coins` from the sender and credits 65% of it to the creator, logging both sides. */
+/** Error log bug: "Missing or insufficient permissions" on tipCreator, every single time — the
+ * old version credited the RECIPIENT's balance with a plain client-side write executed under the
+ * SENDER's own auth, which firestore.rules' users/{uid} rule (rightly) never allows. Moved the
+ * cross-user part of the tip to app/api/tip-creator/route.ts, a trusted server-side function
+ * (verifying the caller's real identity via their Firebase ID token, so nobody can tip "as"
+ * someone else) — the only safe way to credit another account's coin balance without opening up
+ * a client-writable rule that any signed-in user could abuse to set anyone's balance directly.
+ * Still does the balance pre-check client-side first, purely for fast UX feedback before making
+ * the request; the server route re-validates it for real inside its transaction. */
 export async function tipCreator(
-  fromUserId: string,
+  user: User,
   toCreatorId: string,
   coins: number,
   mangaId?: string
@@ -235,48 +244,29 @@ export async function tipCreator(
   if (coins <= 0) {
     return { success: false, message: "Enter a tip amount first." };
   }
-  if (fromUserId === toCreatorId) {
+  if (user.uid === toCreatorId) {
     return { success: false, message: "You can't tip yourself." };
   }
 
-  const sender = await getUserProfile(fromUserId);
+  const sender = await getUserProfile(user.uid);
   if (!sender || (sender.coins ?? 0) < coins) {
     return { success: false, message: "Not enough coins for this tip." };
   }
 
-  const creator = await getUserProfile(toCreatorId);
-  if (!creator) {
-    return { success: false, message: "This creator isn't set up to receive tips yet." };
-  }
-
-  const creatorShare = Math.round(coins * 0.65 * 100) / 100;
-  const senderBalance = sender.coins - coins;
-  const creatorBalance = (creator.coins ?? 0) + creatorShare;
-
   try {
-    await updateUserPrefs(fromUserId, { coins: senderBalance });
-    await updateUserPrefs(toCreatorId, { coins: creatorBalance });
-
-    await addTransaction(fromUserId, {
-      type: "spend",
-      amount: -coins,
-      balanceAfter: senderBalance,
-      description: `Tipped ${creator.displayName}`,
-      category: "tip",
-      ...(mangaId ? { relatedMangaId: mangaId } : {}),
+    const idToken = await user.getIdToken();
+    const res = await fetch("/api/tip-creator", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idToken, toCreatorId, coins, mangaId }),
     });
-    await addTransaction(toCreatorId, {
-      type: "reward",
-      amount: creatorShare,
-      balanceAfter: creatorBalance,
-      description: `Tip received from ${sender.displayName}`,
-      category: "tip",
-      ...(mangaId ? { relatedMangaId: mangaId } : {}),
-    });
-
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) {
+      return { success: false, message: data.message ?? "Couldn't complete the tip. Please try again." };
+    }
     return { success: true };
   } catch (error) {
-    await logError(error, { operation: "tipCreator", fromUserId, toCreatorId, coins });
+    await logError(error, { operation: "tipCreator", fromUserId: user.uid, toCreatorId, coins });
     return { success: false, message: "Couldn't complete the tip. Please try again." };
   }
 }

@@ -8,6 +8,7 @@ import { EmptyState, Skeleton } from "@/components/ui";
 import { useAuth } from "@/hooks/useAuth";
 import { useMangaSummaries } from "@/hooks/useMangaSummaries";
 import { getSavedPosts, type SavedPostEntry } from "@/lib/creatorFeed";
+import { getVideoThumbnail } from "@/lib/cloudinary";
 import { proxyImg } from "@/lib/manga-api";
 
 /** Currently Reading (real per-manga progress), a Bookmarked grid fetched from readingList, and
@@ -149,11 +150,13 @@ export default function LibraryTab() {
             {savedPosts.map((post) => (
               <Link key={post.postId} href={`/feed/${post.postId}`} className="group overflow-hidden rounded-xl border border-bg4 bg-bg2">
                 <div className="aspect-[3/4] overflow-hidden bg-bg3">
-                  {post.videoPosterUrl || post.attachments[0] ? (
+                  {(post.videoUrl ? getVideoThumbnail(post.videoUrl) : post.videoPosterUrl) || post.attachments[0] ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       loading="lazy"
-                      src={proxyImg(post.videoPosterUrl || post.attachments[0])}
+                      src={proxyImg(
+                        (post.videoUrl ? getVideoThumbnail(post.videoUrl) : post.videoPosterUrl) || post.attachments[0]
+                      )}
                       alt=""
                       className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
                     />

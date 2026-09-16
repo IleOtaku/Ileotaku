@@ -15,6 +15,7 @@ import { collection, deleteDoc, doc, getDocs, limit, query, where, writeBatch } 
 import { appleProvider, auth, db, googleProvider, twitterProvider } from "./firebase";
 import { logError } from "./errorLogger";
 import { getUserProfile, updateLastActive, updateUserPrefs, upsertUserProfile } from "./firestore";
+import { setOffline } from "./onlineStatus";
 
 export type SocialProviderName = "google" | "apple" | "twitter";
 
@@ -125,7 +126,18 @@ export async function resetPassword(email: string): Promise<void> {
   return sendPasswordResetEmail(auth, email);
 }
 
+/** Error log bug: "Missing or insufficient permissions" on onlineStatus.setOffline, on every
+ * sign-out. Root cause — useAuth.ts's onAuthStateChanged handler reactively calls setOffline()
+ * for the PREVIOUS uid once it sees the new (signed-out) state, but by then request.auth is
+ * already null (or a different user's), so firestore.rules' `isOwner(uid)` check on the OLD uid
+ * can never pass — that write was structurally guaranteed to fail every single time. Fixed by
+ * marking presence offline HERE, before auth.currentUser stops being this account, while the
+ * write can still actually satisfy isOwner(). Best-effort: a failure here shouldn't block sign-out
+ * itself. */
 export async function logout(): Promise<void> {
+  if (auth.currentUser) {
+    await setOffline(auth.currentUser.uid).catch(() => {});
+  }
   return signOut(auth);
 }
 

@@ -50,8 +50,15 @@ export function initAuthListener(): void {
     const { setUser, setProfile, setLoading } = useAuth.getState();
     setUser(user);
 
+    // Error log bug: "Missing or insufficient permissions" on onlineStatus.setOffline, on every
+    // sign-out. This used to call setOffline(currentOnlineUid) reactively right here — but by the
+    // time onAuthStateChanged fires with the new state, request.auth is already null (a real
+    // sign-out) or a different uid (switching accounts), so firestore.rules' isOwner(uid) check
+    // on the OLD uid can never pass; the write was structurally guaranteed to fail every time.
+    // lib/auth.ts's logout() now marks presence offline proactively, before auth.currentUser
+    // actually changes, while the write can still satisfy isOwner() — the only real path to
+    // getting signed out in this app, so nothing is lost by not also trying (and failing) here.
     if (currentOnlineUid && currentOnlineUid !== user?.uid) {
-      setOffline(currentOnlineUid);
       currentOnlineUid = null;
     }
 

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { Shield } from "lucide-react";
 import { getAllUsers } from "@/lib/firestore";
-import { getFeedback, subscribeToPendingAppealCount } from "@/lib/admin";
+import { getFeedback, subscribeToPendingAppealCount, sweepInactiveVerifiedAccounts } from "@/lib/admin";
 import { getAllApplications } from "@/lib/verification";
 import { Skeleton, Tabs } from "@/components/ui";
 import type { UserProfile } from "@/types";
@@ -59,6 +59,10 @@ export default function SuperAdminDashboard({ adminName, isSuperAdmin = true }: 
       .then(setUsers)
       .catch(() => setUsers([]))
       .finally(() => setUsersLoading(false));
+    // Beta feedback: "Verification should also automatically remove after 6 months of...
+    // inactivity" — see sweepInactiveVerifiedAccounts' own doc comment for why this lazy,
+    // on-dashboard-load sweep stands in for real cron infrastructure this project doesn't have.
+    sweepInactiveVerifiedAccounts().catch(() => {});
   }, []);
 
   useEffect(() => {

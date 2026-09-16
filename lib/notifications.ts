@@ -54,7 +54,7 @@ function isPushEnabled(type: NotificationType, prefs: NotificationCategoryPrefer
  * that route's own comment for why). Best-effort: a delivery failure never blocks the in-app
  * notification this always accompanies. A token the API reports as no-longer-registered is
  * pruned from the profile so it isn't retried on the next notification. */
-async function sendPushToUser(uid: string, type: NotificationType, title: string, body: string, url: string): Promise<void> {
+export async function sendPushToUser(uid: string, type: NotificationType, title: string, body: string, url: string): Promise<void> {
   try {
     const snap = await getDoc(doc(db, "users", uid));
     if (!snap.exists()) return;

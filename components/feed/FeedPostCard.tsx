@@ -22,7 +22,7 @@ import EditingAppBadge from "./EditingAppBadge";
 import { Avatar } from "@/components/ui/Avatar";
 import { PlatinumBadge } from "@/components/ui/Badges";
 import { VerificationBadge } from "@/components/ui/VerificationBadge";
-import { getOptimizedImageUrl } from "@/lib/cloudinary";
+import { getOptimizedImageUrl, getVideoThumbnail } from "@/lib/cloudinary";
 import { deletePost, incrementPostViews, incrementViewCount, likePost, trackWatchTime } from "@/lib/creatorFeed";
 import { useAuth } from "@/hooks/useAuth";
 import { useFeedAudio } from "@/lib/audioContext";
@@ -380,7 +380,7 @@ function FeedPostCard({ post, onDeleted }: FeedPostCardProps) {
           <video
             ref={videoRef}
             src={post.videoUrl}
-            poster={post.videoPosterUrl}
+            poster={post.videoUrl ? getVideoThumbnail(post.videoUrl) : post.videoPosterUrl}
             className="max-h-[480px] w-full object-contain"
             muted
             loop

@@ -167,10 +167,22 @@ export function getOptimizedImageUrl(url: string, width?: number, quality: numbe
 /** Cloudinary auto-generates a poster frame for any uploaded video at `so_auto` (a special
  * "smart" offset, distinct from a fixed timestamp) when the same public_id is requested through
  * the /image/upload delivery path instead of /video/upload — this swaps a video's own secure_url
- * into that thumbnail form. Returns the url unchanged if it isn't a Cloudinary video url. */
+ * into that thumbnail form. Returns the url unchanged if it isn't a Cloudinary video url.
+ *
+ * Beta feedback bug: "Videos and image preview on posts section of user profiles aren't showing
+ * their previews. Just broken images." Root cause — this only ever inserted `so_auto` into the
+ * existing `/video/upload/` path, never actually swapping it for `/image/upload/` the way the
+ * comment above (and Cloudinary's own API) requires, and never changing the file extension either
+ * — the result was a URL still pointing at the original .mp4/.mov file, which an `<img>` (and a
+ * `<video poster>`) can't render as a still image. Every video post's poster has been broken since
+ * this function was written; only became visible as an actual broken-image icon once
+ * PostGridCard's `<img>` started rendering it directly (a `<video poster>` just silently shows no
+ * poster instead, which is why this went unnoticed everywhere else). */
 export function getVideoThumbnail(videoUrl: string): string {
-  if (!videoUrl || !videoUrl.includes("res.cloudinary.com") || !videoUrl.includes("/upload/")) {
+  if (!videoUrl || !videoUrl.includes("res.cloudinary.com") || !videoUrl.includes("/video/upload/")) {
     return videoUrl;
   }
-  return videoUrl.replace("/upload/", "/upload/so_auto/");
+  return videoUrl
+    .replace("/video/upload/", "/image/upload/so_auto/")
+    .replace(/\.[a-zA-Z0-9]+(\?.*)?$/, ".jpg$1");
 }

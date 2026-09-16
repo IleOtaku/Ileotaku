@@ -57,7 +57,7 @@ import {
 import { logError } from "./errorLogger";
 import { db } from "./firebase";
 import { getAllUsers, getUserProfile } from "./firestore";
-import { createNotification } from "./notifications";
+import { createNotification, sendPushToUser } from "./notifications";
 import { deleteWork, getAllPublishedSeries } from "./publishedSeries";
 
 const USERS = "users";
@@ -163,6 +163,42 @@ export async function unverifyUser(uid: string): Promise<void> {
     "Your verified badge has been removed by an ÍléOtaku moderator.",
     "/profile"
   );
+}
+
+const STALE_VERIFIED_MS = 180 * 24 * 60 * 60 * 1000; // ~6 months
+
+/** Beta feedback: "Verification should also automatically remove after 6 months of the creator
+ * or publisher being inactive." This project has no cron/scheduled-task infrastructure to run a
+ * true background sweep on a timer (see BUGS_FIXED.md for why deploying one isn't something this
+ * session can safely commit to) — this is a lazy, on-access sweep instead, called from the admin
+ * Users tab's own load effect. It's not "automatic on a schedule" in the literal sense, but it IS
+ * a genuine, working implementation of the underlying rule: any isVerified creator/publisher
+ * (never isFounder or isAdmin — this rule is about the apply-and-review tiers, not a manual grant
+ * or a staff role) whose lastActiveAt has drifted past 6 months gets unverified the next time an
+ * admin opens the dashboard, no manual trigger needed. */
+export async function sweepInactiveVerifiedAccounts(): Promise<number> {
+  const cutoff = new Date(Date.now() - STALE_VERIFIED_MS).toISOString();
+  const all = await getAllUsers();
+  const stale = all.filter(
+    (u) =>
+      u.isVerified === true &&
+      !u.isFounder &&
+      !u.isAdmin &&
+      (u.lastActiveAt ?? "") < cutoff
+  );
+  await Promise.all(
+    stale.map(async (u) => {
+      await updateUser(u.uid, { isVerified: false, verifiedType: null });
+      await createNotification(
+        u.uid,
+        NotificationType.MODERATION_ACTION,
+        "Verification removed",
+        "Your verified badge was automatically removed after 6 months of inactivity. Apply again any time from Settings.",
+        "/profile"
+      ).catch(() => {});
+    })
+  );
+  return stale.length;
 }
 
 export async function makePublisher(uid: string): Promise<void> {
@@ -932,22 +968,37 @@ export async function sendAnnouncement(
   const recipients = await targetedUserIds(input.target);
   const total = recipients.length;
 
-  for (let i = 0; i < recipients.length; i += NOTIFY_BATCH_SIZE) {
-    const chunk = recipients.slice(i, i + NOTIFY_BATCH_SIZE);
-    const batch = writeBatch(db);
-    chunk.forEach(({ uid }) => {
-      const ref = doc(collection(db, USERS, uid, "notifications"));
-      batch.set(ref, {
-        type: NotificationType.ANNOUNCEMENT,
-        title: input.title,
-        body: input.body,
-        actionURL: "/",
-        isRead: false,
-        createdAt: new Date().toISOString(),
+  // Beta feedback: "Everything that shows in notification bell should push notifications to the
+  // users device." This was the one notification-creating call site in the whole app that wrote
+  // straight to the notifications subcollection instead of going through createNotification() —
+  // every other notification type gets a device push alongside its in-app entry; an announcement
+  // never did. Also now actually respects `deliverInApp`, which the compose form has always
+  // offered but this never checked (every announcement paged out an in-app entry regardless of
+  // that toggle).
+  if (input.deliverInApp) {
+    for (let i = 0; i < recipients.length; i += NOTIFY_BATCH_SIZE) {
+      const chunk = recipients.slice(i, i + NOTIFY_BATCH_SIZE);
+      const batch = writeBatch(db);
+      chunk.forEach(({ uid }) => {
+        const ref = doc(collection(db, USERS, uid, "notifications"));
+        batch.set(ref, {
+          type: NotificationType.ANNOUNCEMENT,
+          title: input.title,
+          body: input.body,
+          actionURL: "/",
+          sentByName: input.sentByName,
+          isRead: false,
+          createdAt: new Date().toISOString(),
+        });
       });
-    });
-    await batch.commit();
-    onProgress?.(Math.min(i + NOTIFY_BATCH_SIZE, total), total);
+      await batch.commit();
+      await Promise.all(
+        chunk.map(({ uid }) =>
+          sendPushToUser(uid, NotificationType.ANNOUNCEMENT, input.title, input.body, "/")
+        )
+      );
+      onProgress?.(Math.min(i + NOTIFY_BATCH_SIZE, total), total);
+    }
   }
 
   await addDoc(collection(db, "announcements"), {

@@ -27,10 +27,22 @@ export default function MobileNavSearch({ open, onOpen, onClose }: MobileNavSear
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
+  // Beta feedback bug: "Search bar for mobile users now appears outside the navbar on the right
+  // side outside the screen." Root cause — this panel is `absolute inset-x-0`, meant to span the
+  // full <header> (its originally-intended nearest positioned ancestor, since <header> is
+  // `sticky`). Navbar.tsx's own beta-feedback UI/UX pass since wrapped this component in a new
+  // `relative` div (for the hamburger dropdown's own anchoring) that sits BETWEEN this component
+  // and <header> — that div is now the nearest positioned ancestor instead, and it's only as wide
+  // as the search+bell+hamburger icon cluster, over on the right edge of the bar. Measuring the
+  // real <header>'s own bottom edge and using `fixed` (viewport-relative, immune to any ancestor's
+  // position) sidesteps the whole class of bug regardless of how Navbar's markup changes later.
+  const [topOffset, setTopOffset] = useState(64);
   const { mangaResults, peopleResults } = useSearchPreview(query);
 
   useEffect(() => {
     if (open) {
+      const header = containerRef.current?.closest("header");
+      if (header) setTopOffset(header.getBoundingClientRect().bottom);
       const t = setTimeout(() => inputRef.current?.focus(), 50);
       return () => clearTimeout(t);
     }
@@ -90,7 +102,8 @@ export default function MobileNavSearch({ open, onOpen, onClose }: MobileNavSear
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="absolute inset-x-0 top-full z-50 overflow-hidden border-t border-bg4 bg-bg2 shadow-xl"
+            style={{ top: topOffset }}
+            className="fixed inset-x-0 z-50 overflow-hidden border-t border-bg4 bg-bg2 shadow-xl"
           >
             <form onSubmit={handleSubmit} className="flex items-center gap-2 px-4 py-3">
               <Search className="h-4 w-4 shrink-0 text-muted" />

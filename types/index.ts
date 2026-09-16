@@ -710,6 +710,11 @@ export interface AppNotification {
   imageURL?: string;
   isRead: boolean;
   createdAt: string;
+  /** Beta feedback: "Clicking an announcement should show a modal popup of the full announcement
+   * and the signed sender." Only set on NotificationType.ANNOUNCEMENT (see sendAnnouncement in
+   * lib/admin.ts) — denormalized from Announcement.sentByName so NotificationBell's modal doesn't
+   * need a separate lookup. */
+  sentByName?: string;
 }
 
 /* ---------------------------- Comments & ratings ---------------------------- */

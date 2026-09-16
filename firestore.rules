@@ -210,8 +210,19 @@ service cloud.firestore {
     // "narrow, self-scoped write on someone else's document" shape as the `blocked` subcollection
     // above (isOwner(profileUid) can never be true here, since the writer is visiting SOMEONE
     // ELSE's profile by definition).
+    // Error log bug: "Missing or insufficient permissions" on profileVisits.recordVisit, on
+    // every single profile visit. Root cause — recordVisit() itself does a getDoc(ref) READ on
+    // this exact doc (to check whether this is a fresh visit worth re-notifying about) before
+    // its setDoc write, executed as the VISITOR, not the profile owner — but the read rule below
+    // only ever allowed request.auth.uid == profileUid (or admin) to read here. That getDoc
+    // always threw permission-denied for every real visitor, and since it's the first of two
+    // Promise.all() calls in recordVisit(), the rejection skipped the setDoc write entirely: no
+    // visit was ever actually being recorded. Letting the visitor also read their OWN sub-doc
+    // (not the whole visitors list — subscribeToVisitors/getRecentVisitors, gated to the owner,
+    // are untouched) fixes this without loosening anything a visitor doesn't already know (that
+    // they themselves visited, and when).
     match /profileVisits/{profileUid}/visitors/{visitorUid} {
-      allow read: if isSignedIn() && (request.auth.uid == profileUid || isAdmin());
+      allow read: if isSignedIn() && (request.auth.uid == profileUid || request.auth.uid == visitorUid || isAdmin());
       allow write: if isSignedIn() && request.auth.uid == visitorUid;
     }
 
@@ -326,11 +337,17 @@ service cloud.firestore {
       // incrementSeriesReads() (lib/publishedSeries.ts) is called by ANY signed-in reader who
       // opens a chapter, not just the work's own author, so it needs its own narrow allowance —
       // same "any signed-in user, one field only" shape as `likes` elsewhere in this ruleset.
+      // Error log bug: "Missing or insufficient permissions" on incrementSeriesReads, for every
+      // logged-out reader. incrementSeriesReads() is called unconditionally from ReaderClient/
+      // ProseReaderClient (no `if (user)` gate — this app allows fully logged-out reading), but
+      // this totalReads-only carve-out required isSignedIn(), so an anonymous reader's view never
+      // actually counted. Dropped that requirement for this one narrow field, same as the public
+      // creatorFeed read rule already trusts anyone (signed in or not) to view/count.
       allow update: if isAdmin()
         || (isSignedIn() && resource.data.authorId == request.auth.uid)
         || (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(["authorId", "authorName", "authorHandle", "authorPhotoURL"]))
-        || (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["totalReads"]));
+        || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["totalReads"]);
       allow delete: if isAdmin() || (isSignedIn() && resource.data.authorId == request.auth.uid);
     }
 
@@ -385,14 +402,16 @@ service cloud.firestore {
       // author to be able to remove their own chapters, not just an admin.
       match /chapters/{chapterId} {
         allow read: if true;
-        // Sprint "Polish-2" Part 1: incrementChapterReads() (lib/publishedSeries.ts) is called by
-        // ANY signed-in reader who opens a chapter, not just the work's own author — same
-        // "any signed-in user, one field only" carve-out publishedSeries' own totalReads field
-        // already has above, needed here for the identical reason.
-        allow update: if isSignedIn()
-          && (isAdmin()
-            || get(/databases/$(database)/documents/publishedSeries/$(seriesId)).data.authorId == request.auth.uid
-            || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["readCount"]));
+        // Error log bug: "Missing or insufficient permissions" on incrementChapterReads, for
+        // every logged-out reader — this carve-out (like publishedSeries' own totalReads one)
+        // used to require isSignedIn() around the WHOLE update, so the readCount-only branch
+        // could never help an anonymous reader (this app allows fully logged-out reading, and
+        // incrementChapterReads() is called with no `if (user)` gate). readCount-only writes no
+        // longer require signing in at all; the author/admin branches still do.
+        allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(["readCount"])
+          || (isSignedIn()
+            && (isAdmin()
+              || get(/databases/$(database)/documents/publishedSeries/$(seriesId)).data.authorId == request.auth.uid));
         allow create, delete: if isSignedIn()
           && (isAdmin()
             || get(/databases/$(database)/documents/publishedSeries/$(seriesId)).data.authorId == request.auth.uid);

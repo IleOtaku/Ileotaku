@@ -37,7 +37,7 @@ export default function TipModal({ open, onClose, creatorId, creatorName, mangaI
     if (!user || !creatorId || effectiveAmount <= 0) return;
     setSending(true);
     try {
-      const result = await tipCreator(user.uid, creatorId, effectiveAmount, mangaId);
+      const result = await tipCreator(user, creatorId, effectiveAmount, mangaId);
       if (result.success) {
         toast.success("Creator has been tipped! 🎉");
         const fresh = await getUserProfile(user.uid);

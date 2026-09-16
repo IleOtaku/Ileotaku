@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Flame } from "lucide-react";
-import FeedPostCard from "@/components/feed/FeedPostCard";
 import PostComposer from "@/components/feed/PostComposer";
+import CreatorPostsViewer from "@/components/creator/CreatorPostsViewer";
+import PostGridCard from "@/components/creator/PostGridCard";
 import { EmptyState, Skeleton } from "@/components/ui";
 import { useAuth } from "@/hooks/useAuth";
 import { getPostsByCreator } from "@/lib/creatorFeed";
@@ -16,6 +17,7 @@ export default function ProfilePostsTab() {
   const { user, profile } = useAuth();
   const [posts, setPosts] = useState<CreatorPost[]>([]);
   const [loading, setLoading] = useState(true);
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const canPost = profile?.isCreator === true || profile?.isPublisher === true;
 
   useEffect(() => {
@@ -60,13 +62,15 @@ export default function ProfilePostsTab() {
       ) : posts.length === 0 ? (
         <EmptyState title="No posts yet" description="Share your first update above." />
       ) : (
-        posts.map((post) => (
-          <FeedPostCard
-            key={post.id}
-            post={post}
-            onDeleted={(id) => setPosts((prev) => prev.filter((p) => p.id !== id))}
-          />
-        ))
+        <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
+          {posts.map((post, i) => (
+            <PostGridCard key={post.id} post={post} onClick={() => setViewerIndex(i)} />
+          ))}
+        </div>
+      )}
+
+      {viewerIndex !== null && (
+        <CreatorPostsViewer posts={posts} startIndex={viewerIndex} onClose={() => setViewerIndex(null)} />
       )}
     </div>
   );

@@ -25,6 +25,7 @@ import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import MentionText from "@/components/ui/MentionText";
 import { useAuth } from "@/hooks/useAuth";
 import { useFeedAudio } from "@/lib/audioContext";
+import { getVideoThumbnail } from "@/lib/cloudinary";
 import {
   deletePost,
   incrementViewCount,
@@ -334,7 +335,7 @@ function TikTokFeedItem({ post, isSaved, onDeleted }: TikTokFeedItemProps) {
         <video
           ref={videoRef}
           src={post.videoUrl}
-          poster={post.videoPosterUrl}
+          poster={post.videoUrl ? getVideoThumbnail(post.videoUrl) : post.videoPosterUrl}
           className="absolute inset-0 h-full w-full object-contain"
           muted={effectiveMuted}
           loop
