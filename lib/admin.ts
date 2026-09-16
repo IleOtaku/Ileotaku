@@ -787,11 +787,23 @@ export interface DailyRevenuePoint {
 }
 
 /** Last 7 calendar days (oldest first) of coin-sale vs Platinum-subscription revenue, read
- * from every user's transactions subcollection via a collectionGroup query. */
+ * from every user's transactions subcollection via a collectionGroup query.
+ *
+ * Beta feedback bug: "The admin graph doesn't work" — this always came back either empty or
+ * missing "today", because the cutoff was computed with `setHours(0, 0, 0, 0)`, which zeroes the
+ * time in the CALLER'S OWN LOCAL TIMEZONE (this runs client-side, in the admin's browser — see
+ * AdminOverviewTab.tsx), while every bucket key and every stored `createdAt` is a UTC ISO string
+ * (dayKey() below always calls toISOString()). For any admin not physically in UTC+0 (this app's
+ * own target market, WAT/UTC+1, included) "local midnight" lands on the PREVIOUS UTC calendar
+ * day, so the whole cutoff/bucket range silently shifts back a day and the newest day's real
+ * transactions never match any bucket. Building the cutoff from UTC date components (Date.UTC)
+ * instead keeps the query filter and every bucket key on the exact same UTC calendar days,
+ * regardless of the viewer's own timezone. Confirmed live against this project's own Firestore
+ * data: a same-day ₦7,500 Platinum transaction was present but never showed up before this fix.
+ */
 export async function getRevenueLast7Days(): Promise<DailyRevenuePoint[]> {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - 6);
-  cutoff.setHours(0, 0, 0, 0);
+  const now = new Date();
+  const cutoff = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 6));
 
   const q = query(collectionGroup(db, "transactions"), where("createdAt", ">=", cutoff.toISOString()));
   const transactions = await safeQueryDocs<CoinTransaction>(q);
@@ -799,7 +811,7 @@ export async function getRevenueLast7Days(): Promise<DailyRevenuePoint[]> {
   const byDay = new Map<string, DailyRevenuePoint>();
   for (let i = 0; i < 7; i++) {
     const d = new Date(cutoff);
-    d.setDate(d.getDate() + i);
+    d.setUTCDate(d.getUTCDate() + i);
     const key = dayKey(d);
     byDay.set(key, { date: key, coinsNGN: 0, platinumNGN: 0 });
   }

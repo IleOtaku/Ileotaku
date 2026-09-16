@@ -19,7 +19,10 @@ export default function RevenueBarChart({ data }: RevenueBarChartProps) {
           const totalPct = (total / max) * 100;
           const coinsPct = total > 0 ? (point.coinsNGN / total) * 100 : 0;
           const platPct = total > 0 ? (point.platinumNGN / total) * 100 : 0;
-          const label = new Date(point.date).toLocaleDateString(undefined, { weekday: "short" });
+          // timeZone: "UTC" — point.date is a UTC calendar day (see getRevenueLast7Days' own
+          // fix comment); formatting it in the viewer's local zone could shift the weekday label
+          // for anyone west of UTC even though the underlying data is correct.
+          const label = new Date(point.date).toLocaleDateString(undefined, { weekday: "short", timeZone: "UTC" });
 
           return (
             <div key={point.date} className="flex flex-1 flex-col items-center gap-1.5">
