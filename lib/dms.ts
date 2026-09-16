@@ -390,7 +390,19 @@ export async function joinGroupViaInvite(code: string, uid: string): Promise<Joi
   const trimmed = code.trim();
   if (!trimmed) return { success: false, message: "That invite link looks incomplete." };
   try {
-    const q = query(collection(db, CONVERSATIONS), where("inviteCode", "==", trimmed), limit(1));
+    // `type == "group"` is included as an explicit filter, not just implied, because
+    // firestore.rules' read rule grants any signed-in user access to a conversation ONLY when
+    // `resource.data.type == "group"` — Firestore can only prove a query satisfies a
+    // resource-data-dependent rule when the query's own filters structurally guarantee it, so
+    // without this second equality filter the query is rejected outright with "Missing or
+    // insufficient permissions" before it ever runs, even though every real match already has
+    // type "group" in practice. Confirmed live: exactly this failure on Isaac's own account.
+    const q = query(
+      collection(db, CONVERSATIONS),
+      where("inviteCode", "==", trimmed),
+      where("type", "==", "group"),
+      limit(1)
+    );
     const snap = await getDocs(q);
     if (snap.empty) {
       return { success: false, message: "This invite link is invalid or has expired." };
