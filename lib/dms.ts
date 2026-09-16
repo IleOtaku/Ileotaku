@@ -1,8 +1,10 @@
 import {
   addDoc,
+  arrayRemove,
   arrayUnion,
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -21,7 +23,31 @@ import { logError } from "./errorLogger";
 import { db } from "./firebase";
 import { getUserProfile, updateLastActive } from "./firestore";
 import { createNotification } from "./notifications";
-import { NotificationType, type Conversation, type DMMessage, type MessageReplyTo } from "@/types";
+import { NotificationType, type Conversation, type DMMediaType, type DMMessage, type MessageReplyTo } from "@/types";
+
+/** DM overhaul: the conversation-list preview text for a media/share message with no caption
+ * (a bare GIF, a shared manga, ...) — mirrors how every chat app shows "📷 Photo" etc. instead of
+ * a blank last-message line. */
+function mediaPreviewLabel(options: { mediaType?: DMMediaType; sharedMangaId?: string; sharedPostId?: string } | undefined): string {
+  if (options?.sharedMangaId) return "📖 Shared a manga";
+  if (options?.sharedPostId) return "📤 Shared a post";
+  switch (options?.mediaType) {
+    case "image":
+      return "📷 Photo";
+    case "video":
+      return "🎥 Video";
+    case "voice":
+      return "🎤 Voice message";
+    case "file":
+      return "📁 File";
+    case "gif":
+      return "GIF";
+    case "sticker":
+      return "🎭 Sticker";
+    default:
+      return "";
+  }
+}
 
 /** A group @mention's token is the member's display name with whitespace stripped, lowercased —
  * there's no real @handle stored per-conversation-participant (only participantNames), so this
@@ -78,14 +104,38 @@ export async function startConversation(uid1: string, uid2: string): Promise<str
   }
 }
 
+/** DM overhaul: everything beyond plain text a message can carry — a media attachment (image/
+ * video/voice/file/gif/sticker) or a rich share (manga/post), plus the existing reply-quote.
+ * `text` may legitimately be empty for a pure media/share message (a GIF or sticker needs no
+ * caption) — sendDM's own `if (!trimmed) return` guard below is bypassed whenever any of these
+ * are present. */
+export interface SendDMOptions {
+  replyTo?: MessageReplyTo;
+  mediaType?: DMMediaType;
+  mediaUrl?: string;
+  mediaDuration?: number;
+  mediaFileName?: string;
+  mediaSize?: number;
+  mediaWidth?: number;
+  mediaHeight?: number;
+  sharedMangaId?: string;
+  sharedMangaTitle?: string;
+  sharedMangaCoverURL?: string;
+  sharedPostId?: string;
+  sharedPostAuthorName?: string;
+  sharedPostPreviewText?: string;
+  sharedPostMediaUrl?: string;
+}
+
 export async function sendDM(
   conversationId: string,
   senderId: string,
   text: string,
-  replyTo?: MessageReplyTo
+  options?: SendDMOptions
 ): Promise<void> {
   const trimmed = text.trim();
-  if (!trimmed) return;
+  const hasAttachment = !!(options?.mediaType || options?.sharedMangaId || options?.sharedPostId);
+  if (!trimmed && !hasAttachment) return;
 
   try {
     const convoRef = doc(db, CONVERSATIONS, conversationId);
@@ -97,19 +147,33 @@ export async function sendDM(
     // 1:1-only implementation) silently left every other group member's unread count frozen.
     const recipientIds = convo.participants.filter((id) => id !== senderId);
 
+    // DM overhaul: disappearing messages — stamped at send-time from the conversation's current
+    // setting, so toggling it later never retroactively changes an already-sent message's fate.
+    const disappearing = convo.disappearingMessages;
+    const expiresAt =
+      disappearing?.enabled && disappearing.duration > 0
+        ? new Date(Date.now() + disappearing.duration).toISOString()
+        : undefined;
+
+    const { replyTo, ...media } = options ?? {};
+    const mediaFields = Object.fromEntries(Object.entries(media).filter(([, v]) => v !== undefined));
+
     await addDoc(collection(convoRef, "messages"), {
       conversationId,
       senderId,
       text: trimmed,
       createdAt: new Date().toISOString(),
       ...(replyTo ? { replyTo } : {}),
+      ...mediaFields,
+      ...(expiresAt ? { expiresAt } : {}),
     });
 
     const unreadUpdates = Object.fromEntries(
       recipientIds.map((id) => [`unreadCounts.${id}`, (convo.unreadCounts?.[id] ?? 0) + 1])
     );
+    const previewText = trimmed || mediaPreviewLabel(options);
     await updateDoc(convoRef, {
-      lastMessage: trimmed,
+      lastMessage: previewText,
       lastMessageAt: new Date().toISOString(),
       lastSenderId: senderId,
       ...unreadUpdates,
@@ -117,6 +181,10 @@ export async function sendDM(
       // into whoever had hidden it (see hideConversationForUser's own doc comment) rather than
       // leaving it hidden forever the first time either side messages again.
       ...(convo.hiddenFor && convo.hiddenFor.length > 0 ? { hiddenFor: [] } : {}),
+      // DM overhaul: a new message un-archives the conversation for anyone who'd archived it —
+      // same "activity brings it back" precedent as hiddenFor above (see the Archive feature's
+      // own doc comments on archiveConversation/unarchiveConversation).
+      ...(convo.archivedBy && Object.keys(convo.archivedBy).length > 0 ? { archivedBy: {} } : {}),
     });
     await updateLastActive(senderId);
 
@@ -362,7 +430,18 @@ export function subscribeToConversation(
   );
   return onSnapshot(
     q,
-    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as DMMessage)),
+    (snap) => {
+      const now = Date.now();
+      // DM overhaul (Part H): "Client-side: check expiresAt on each message render, hide if
+      // expired." A Cloud Function sweep to actually DELETE expired docs is Phase 2 (no cron
+      // infrastructure exists on this project today — see BUGS_FIXED.md); for now this is the
+      // full disappearing-messages experience from every viewer's perspective, since a message
+      // with no one left able to see it is functionally gone even before it's physically deleted.
+      const messages = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }) as DMMessage)
+        .filter((m) => !m.expiresAt || new Date(m.expiresAt).getTime() > now);
+      callback(messages);
+    },
     onError
   );
 }
@@ -522,6 +601,139 @@ export async function clearConversationForUser(conversationId: string, uid: stri
     await logError(error, { operation: "clearConversationForUser", conversationId, uid });
     throw error;
   }
+}
+
+/* ---------------------------- DM overhaul: wallpaper ---------------------------- */
+
+export interface WallpaperInput {
+  wallpaperUrl: string;
+  wallpaperType: "color" | "gradient" | "image";
+  wallpaperBlur: boolean;
+  setBy: string;
+}
+
+/** DM Feature Overhaul (Part B): saves a wallpaper onto the conversation itself — every
+ * participant's onSnapshot listener on this same doc picks it up in real time, which is what
+ * makes it "everyone sees the same background" rather than a per-viewer preference. Enforced
+ * Platinum-only server-side too (firestore.rules checks the caller's own isPlatinum), not just by
+ * this function's own caller (WallpaperPicker.tsx) hiding the UI from free accounts. */
+export async function setConversationWallpaper(conversationId: string, input: WallpaperInput): Promise<void> {
+  try {
+    await updateDoc(doc(db, CONVERSATIONS, conversationId), {
+      wallpaperUrl: input.wallpaperUrl,
+      wallpaperType: input.wallpaperType,
+      wallpaperBlur: input.wallpaperBlur,
+      wallpaperSetBy: input.setBy,
+    });
+  } catch (error) {
+    await logError(error, { operation: "setConversationWallpaper", conversationId });
+    throw error;
+  }
+}
+
+export async function clearConversationWallpaper(conversationId: string): Promise<void> {
+  await updateDoc(doc(db, CONVERSATIONS, conversationId), {
+    wallpaperUrl: "",
+    wallpaperType: "",
+    wallpaperBlur: false,
+    wallpaperSetBy: "",
+  });
+}
+
+/** DM Feature Overhaul (Part B, "My Uploads"): appends a freshly-uploaded wallpaper image to the
+ * caller's own users/{uid}.uploadedWallpapers list. */
+export async function addUploadedWallpaper(uid: string, url: string): Promise<void> {
+  await updateDoc(doc(db, "users", uid), { uploadedWallpapers: arrayUnion(url) });
+}
+
+export async function removeUploadedWallpaper(uid: string, url: string): Promise<void> {
+  await updateDoc(doc(db, "users", uid), { uploadedWallpapers: arrayRemove(url) });
+}
+
+/* ---------------------------- DM overhaul: chat-specific bubble color ---------------------------- */
+
+/** DM Feature Overhaul (Part D): a per-conversation override of `uid`'s own bubble color — takes
+ * priority over their universal users/{uid}.dmPreferences.bubbleColor default for messages in
+ * THIS conversation only. Platinum-gated the same way wallpaper is. */
+export async function setConversationBubbleColor(conversationId: string, uid: string, color: string): Promise<void> {
+  await updateDoc(doc(db, CONVERSATIONS, conversationId), { [`participantColors.${uid}`]: color });
+}
+
+/** DM Feature Overhaul (Part C): the bubble-SHAPE equivalent of setConversationBubbleColor above
+ * — see Conversation.participantBubbleStyles' own doc comment for why this exists alongside the
+ * universal users/{uid}.dmPreferences.bubbleStyle default. */
+export async function setConversationBubbleStyle(conversationId: string, uid: string, style: number): Promise<void> {
+  await updateDoc(doc(db, CONVERSATIONS, conversationId), { [`participantBubbleStyles.${uid}`]: style });
+}
+
+/** DM Feature Overhaul (Parts C/D/G): writes ONE field on the caller's own
+ * users/{uid}.dmPreferences map at a time, via dot-notation — a plain `{ dmPreferences: {...} }`
+ * updateDoc() would REPLACE the whole map and silently wipe out whichever of
+ * bubbleStyle/bubbleColor/universalBubble isn't included in that particular write. */
+export async function setUserDmPreference(
+  uid: string,
+  key: "bubbleStyle" | "bubbleColor" | "universalBubble",
+  value: number | string | boolean
+): Promise<void> {
+  await updateDoc(doc(db, "users", uid), { [`dmPreferences.${key}`]: value });
+}
+
+/* ---------------------------- DM overhaul: nicknames ---------------------------- */
+
+/** DM Feature Overhaul (Part E): `viewerUid` sets a private nickname for `targetUid` (the other
+ * 1:1 participant, or a specific group member), visible only to `viewerUid` themselves — see the
+ * Conversation.nicknames doc comment for why this is nicknames[viewerUid][targetUid] rather than
+ * a flat per-conversation map. Free for everyone, no Platinum gate (unlike wallpaper/bubble
+ * styling). */
+export async function setNickname(conversationId: string, viewerUid: string, targetUid: string, nickname: string): Promise<void> {
+  const trimmed = nickname.trim().slice(0, 30);
+  if (!trimmed) return;
+  await updateDoc(doc(db, CONVERSATIONS, conversationId), { [`nicknames.${viewerUid}.${targetUid}`]: trimmed });
+}
+
+export async function resetNickname(conversationId: string, viewerUid: string, targetUid: string): Promise<void> {
+  await updateDoc(doc(db, CONVERSATIONS, conversationId), { [`nicknames.${viewerUid}.${targetUid}`]: deleteField() });
+}
+
+/* ---------------------------- DM overhaul: mute ---------------------------- */
+
+export async function muteConversation(conversationId: string, uid: string, durationMs: number | null): Promise<void> {
+  const until = durationMs === null ? "forever" : new Date(Date.now() + durationMs).toISOString();
+  await updateDoc(doc(db, CONVERSATIONS, conversationId), { [`mutedBy.${uid}`]: { until } });
+}
+
+export async function unmuteConversation(conversationId: string, uid: string): Promise<void> {
+  await updateDoc(doc(db, CONVERSATIONS, conversationId), { [`mutedBy.${uid}`]: deleteField() });
+}
+
+/* ---------------------------- DM overhaul: disappearing messages ---------------------------- */
+
+export type DisappearingDuration = 3600000 | 86400000 | 604800000; // 1hr / 24hr / 7days, in ms
+
+/** DM Feature Overhaul (Part H): toggles auto-delete for NEW messages sent from now on — sendDM
+ * stamps `expiresAt` at send-time from whatever this is set to; turning it off (or changing the
+ * duration) never touches already-sent messages, only what happens going forward. */
+export async function setDisappearingMessages(
+  conversationId: string,
+  enabled: boolean,
+  duration: DisappearingDuration
+): Promise<void> {
+  await updateDoc(doc(db, CONVERSATIONS, conversationId), {
+    disappearingMessages: { enabled, duration },
+  });
+}
+
+/* ---------------------------- DM overhaul: archive ---------------------------- */
+
+/** DM Feature Overhaul (Part I): hides a conversation into the sidebar's collapsed "Archived"
+ * section for `uid` only — see Conversation.archivedBy's own doc comment for why a new message
+ * clears this the same way hiddenFor does. */
+export async function archiveConversation(conversationId: string, uid: string): Promise<void> {
+  await updateDoc(doc(db, CONVERSATIONS, conversationId), { [`archivedBy.${uid}`]: true });
+}
+
+export async function unarchiveConversation(conversationId: string, uid: string): Promise<void> {
+  await updateDoc(doc(db, CONVERSATIONS, conversationId), { [`archivedBy.${uid}`]: deleteField() });
 }
 
 /** Real-time listener for a user's total unread DM count, for the Navbar badge. */

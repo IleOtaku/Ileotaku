@@ -30,6 +30,8 @@ import {
 import { Modal, Select, Skeleton, Toggle } from "@/components/ui";
 import { SpotifyGlyph } from "@/components/spotify/NowPlayingCard";
 import VerificationApplicationSection from "./VerificationApplicationSection";
+import BubbleStylePicker from "@/components/messages/BubbleStylePicker";
+import ChatColorPicker from "@/components/messages/ChatColorPicker";
 import { useAuth } from "@/hooks/useAuth";
 import { deleteMyAccount, friendlyError, hasPasswordProvider, resetPassword } from "@/lib/auth";
 import { subscribeToBlockedUsers, unblockUser } from "@/lib/blocking";
@@ -116,6 +118,9 @@ export default function SettingsTab() {
   const [savingTagline, setSavingTagline] = useState(false);
   const [reminderDraft, setReminderDraft] = useState("");
   const [savingReminder, setSavingReminder] = useState(false);
+  // DM Feature Overhaul (Part G).
+  const [bubbleStylePickerOpen, setBubbleStylePickerOpen] = useState(false);
+  const [bubbleColorPickerOpen, setBubbleColorPickerOpen] = useState(false);
 
   const prefs = profile?.preferences ?? DEFAULT_PREFS;
   const notifPrefs: NotificationCategoryPreferences = profile?.notificationPreferences ?? {};
@@ -672,6 +677,52 @@ export default function SettingsTab() {
             </p>
           </div>
 
+          {/* DM Feature Overhaul (Part G): universal defaults for every NEW conversation — a
+              specific conversation's own DM Settings panel (per-chat "This chat only" option)
+              overrides these, per the feature spec. */}
+          <div className="border-t border-bg4 pt-4">
+            <label className="mb-1.5 flex items-center gap-1.5 font-syne text-xs font-semibold text-muted">
+              Default Bubble Style
+              {!isPlatinum && <Lock className="h-3 w-3" />}
+            </label>
+            {isPlatinum ? (
+              <div className="flex items-center gap-3 rounded-lg border border-muted2 bg-bg3 px-3 py-2.5">
+                <span
+                  className={`h-7 w-12 shrink-0 bg-clay bubble-style-${profile?.dmPreferences?.bubbleStyle ?? 1}`}
+                  style={profile?.dmPreferences?.bubbleColor ? { background: profile.dmPreferences.bubbleColor } : undefined}
+                />
+                <span className="flex-1 font-noto text-xs text-text">Style {profile?.dmPreferences?.bubbleStyle ?? 1}</span>
+                <button type="button" onClick={() => setBubbleStylePickerOpen(true)} className="btn-ghost shrink-0 text-xs">
+                  Change
+                </button>
+              </div>
+            ) : (
+              <p className="rounded-lg border border-dashed border-muted2 bg-bg3 px-3 py-2.5 font-noto text-xs text-muted">
+                Platinum feature — pick from 10 message bubble shapes for your DMs.
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label className="mb-1.5 flex items-center gap-1.5 font-syne text-xs font-semibold text-muted">
+              Default Bubble Color
+              {!isPlatinum && <Lock className="h-3 w-3" />}
+            </label>
+            {isPlatinum ? (
+              <div className="flex items-center gap-3 rounded-lg border border-muted2 bg-bg3 px-3 py-2.5">
+                <span className="h-7 w-7 shrink-0 rounded-full" style={{ background: profile?.dmPreferences?.bubbleColor ?? "#c4622d" }} />
+                <span className="flex-1 font-noto text-xs text-text">{profile?.dmPreferences?.bubbleColor ?? "Default"}</span>
+                <button type="button" onClick={() => setBubbleColorPickerOpen(true)} className="btn-ghost shrink-0 text-xs">
+                  Change
+                </button>
+              </div>
+            ) : (
+              <p className="rounded-lg border border-dashed border-muted2 bg-bg3 px-3 py-2.5 font-noto text-xs text-muted">
+                Platinum feature — pick a custom color or gradient for your DM bubbles.
+              </p>
+            )}
+          </div>
+
           {!isPlatinum && (
             <Link href="/pricing" className="btn-plat w-fit text-sm">
               <Crown className="h-4 w-4" /> Unlock Platinum Perks
@@ -679,6 +730,9 @@ export default function SettingsTab() {
           )}
         </div>
       </section>
+
+      <BubbleStylePicker open={bubbleStylePickerOpen} onClose={() => setBubbleStylePickerOpen(false)} />
+      <ChatColorPicker open={bubbleColorPickerOpen} onClose={() => setBubbleColorPickerOpen(false)} />
 
       {profile?.isCreator && (
         <section>

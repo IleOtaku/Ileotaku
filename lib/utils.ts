@@ -54,6 +54,23 @@ export function stringToColor(str: string): string {
   return `hsl(${hue}, 55%, 42%)`;
 }
 
+/** DM Feature Overhaul (Parts C/D): picks black or white text for readability against a custom
+ * hex bubble color — "Message bubbles render on top — must remain readable with any wallpaper"
+ * applies just as much to an arbitrary user-picked bubble color as it does to a wallpaper.
+ * Standard relative-luminance threshold; falls back to white for anything that isn't a plain
+ * #rgb/#rrggbb hex (a gradient string, say), since dark text is the riskier default there. */
+export function contrastTextColor(hex: string | undefined): string {
+  if (!hex) return "#ffffff";
+  const match = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
+  if (!match) return "#ffffff";
+  const full = match[1].length === 3 ? match[1].split("").map((c) => c + c).join("") : match[1];
+  const r = parseInt(full.slice(0, 2), 16);
+  const g = parseInt(full.slice(2, 4), 16);
+  const b = parseInt(full.slice(4, 6), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.6 ? "#000000" : "#ffffff";
+}
+
 /** Reduces a display name (or email) down to 1-2 uppercase initials. */
 export function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);

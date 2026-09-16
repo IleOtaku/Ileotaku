@@ -5,19 +5,23 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import {
+  Archive,
   ArrowLeft,
   Check,
   ChevronRight,
+  Clock,
   Copy,
   ImagePlus,
   Loader2,
   LogOut,
   MoreHorizontal,
+  Paperclip,
   Pencil,
   Plus,
   Reply,
   Search,
   Send,
+  Settings,
   ShieldOff,
   Shield,
   Smile,
@@ -33,12 +37,21 @@ import { PlatinumBadge } from "@/components/ui/Badges";
 import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import LinkPreviewCard from "@/components/ui/LinkPreviewCard";
 import MentionText, { extractFirstUrl } from "@/components/ui/MentionText";
+import AttachmentTray from "./AttachmentTray";
+import DMMediaContent from "./DMMediaContent";
+import DMSettingsPanel from "./DMSettingsPanel";
+import GifPicker from "./GifPicker";
+import InAppCamera from "./InAppCamera";
+import SharePickerModal, { type SharedManga, type SharedPost } from "./SharePickerModal";
+import StickerPicker from "./StickerPicker";
+import VoiceRecorder from "./VoiceRecorder";
 import { useAuth } from "@/hooks/useAuth";
 import { getBlockedUsers, isBlockedBy } from "@/lib/blocking";
-import { uploadImage } from "@/lib/cloudinary";
+import { uploadAnyFile, uploadImage, uploadImageWithProgress, uploadVideo, uploadVoiceNote } from "@/lib/cloudinary";
 import {
   addMembersToGroup,
   addReaction,
+  archiveConversation,
   clearConversationForUser,
   createGroup,
   deleteGroup,
@@ -56,14 +69,17 @@ import {
   subscribeToConversation,
   subscribeToConversations,
   subscribeToTyping,
+  unarchiveConversation,
   updateGroupInfo,
+  type SendDMOptions,
 } from "@/lib/dms";
 import { getUserProfile, searchUsers } from "@/lib/firestore";
 import { getNowPlayingOnce } from "@/lib/nowPlaying";
 import { subscribeToUserStatus, type OnlineStatus } from "@/lib/onlineStatus";
 import { subscribeToStories } from "@/lib/stories";
+import type { TenorGif } from "@/lib/tenor";
 import SpotifyMiniPlayer from "@/components/spotify/SpotifyMiniPlayer";
-import { formatPostTimestamp, formatTime, initials, stringToColor, truncate } from "@/lib/utils";
+import { contrastTextColor, formatPostTimestamp, formatTime, initials, stringToColor, truncate } from "@/lib/utils";
 import type { Conversation, DMMessage, MessageReplyTo, UserProfile } from "@/types";
 
 const MAX_TEXTAREA_HEIGHT = 112; // ~4 lines at this input's font/line-height + padding
@@ -107,6 +123,8 @@ export default function MessagesClient() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loadingConvos, setLoadingConvos] = useState(true);
   const [sidebarQuery, setSidebarQuery] = useState("");
+  // DM Feature Overhaul (Part I): collapsed by default, per the feature spec.
+  const [archivedOpen, setArchivedOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [otherProfile, setOtherProfile] = useState<UserProfile | null>(null);
   // 5-tier verification overhaul: the sidebar conversation list only denormalizes
@@ -115,12 +133,30 @@ export default function MessagesClient() {
   // (an on-demand, additive-only cache) rather than a new denormalize-and-propagate write path.
   const [otherParticipantProfiles, setOtherParticipantProfiles] = useState<Map<string, UserProfile>>(new Map());
   const [messages, setMessages] = useState<DMMessage[]>([]);
+  // DM Feature Overhaul (Part C/D): per-session cache of every sender's bubble style/color
+  // preferences, so the message list can render each sender's OWN look (a group chat naturally
+  // ends up with every member's bubbles styled differently) without a per-message profile fetch.
+  // "Cached per-session to avoid excessive Firestore reads" per the feature spec — additive-only,
+  // same pattern as otherParticipantProfiles above.
+  const [senderProfiles, setSenderProfiles] = useState<Map<string, UserProfile>>(new Map());
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   // Beta feedback bug: "The emoji button doesn't work" — it rendered with no onClick at all,
   // just a "coming soon" tooltip. Same QUICK_EMOJIS-grid pattern FeedCommentSheet's own (already
   // working) emoji button uses.
   const [emojiOpen, setEmojiOpen] = useState(false);
+  // DM Feature Overhaul (Part A): attachment tray + every picker/overlay it can open.
+  const [attachmentTrayOpen, setAttachmentTrayOpen] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [gifPickerOpen, setGifPickerOpen] = useState(false);
+  const [stickerPickerOpen, setStickerPickerOpen] = useState(false);
+  const [sharePickerMode, setSharePickerMode] = useState<"manga" | "post" | null>(null);
+  const [voiceMode, setVoiceMode] = useState(false);
+  const [mediaUploading, setMediaUploading] = useState<{ percent: number; label: string } | null>(null);
+  const photoVideoInputRef = useRef<HTMLInputElement>(null);
+  const anyFileInputRef = useRef<HTMLInputElement>(null);
+  // DM Feature Overhaul (Part F): the slide-in DM Settings panel, opened from the header menu.
+  const [dmSettingsOpen, setDmSettingsOpen] = useState(false);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const handledWithParam = useRef(false);
@@ -303,6 +339,30 @@ export default function MessagesClient() {
     if (user) markDMRead(selectedId, user.uid).catch(() => {});
     return unsub;
   }, [selectedId, user]);
+
+  // DM Feature Overhaul (Part C/D): fetches (additively) every message sender's profile, for
+  // their bubbleStyle/bubbleColor — see senderProfiles' own doc comment above.
+  useEffect(() => {
+    const missing = Array.from(new Set(messages.map((m) => m.senderId))).filter(
+      (uid) => !senderProfiles.has(uid)
+    );
+    if (missing.length === 0) return;
+    let cancelled = false;
+    Promise.all(missing.map((uid) => getUserProfile(uid).then((p) => [uid, p] as const))).then((results) => {
+      if (cancelled) return;
+      setSenderProfiles((prev) => {
+        const next = new Map(prev);
+        results.forEach(([uid, p]) => {
+          if (p) next.set(uid, p);
+        });
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages]);
 
   useEffect(() => {
     setBlockingMe(false);
@@ -681,7 +741,7 @@ export default function MessagesClient() {
     };
     setMessages((prev) => [...prev, optimistic]);
     try {
-      await sendDM(selectedId, user.uid, value, replyTo);
+      await sendDM(selectedId, user.uid, value, { replyTo });
       // getConversations refetch isn't needed for the sidebar (subscribeToConversations already
       // picks up the updated lastMessage/lastMessageAt in real time); kept as a no-op-safe
       // read only if that ever needs a manual nudge.
@@ -699,6 +759,116 @@ export default function MessagesClient() {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+    }
+  }
+
+  // DM Feature Overhaul (Part A): shared guard + send path for every non-text attachment type —
+  // handleSend above stays text-only (it's also the Enter-key path, which media messages never
+  // go through) rather than growing branches for each media kind.
+  function blockedFromSending(): boolean {
+    if (!user || !selectedId) return true;
+    const other = conversations.find((c) => c.id === selectedId)?.participants.find((id) => id !== user.uid);
+    if ((other && blockedUids.has(other)) || blockingMe) {
+      toast.error("You can't message this user.");
+      return true;
+    }
+    return false;
+  }
+
+  async function sendMediaMessage(options: SendDMOptions) {
+    if (!user || !selectedId || blockedFromSending()) return;
+    try {
+      await sendDM(selectedId, user.uid, "", options);
+    } catch {
+      toast.error("Couldn't send that.");
+    }
+  }
+
+  async function handlePhotoVideoPicked(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !user || !selectedId || blockedFromSending()) return;
+    const isVideo = file.type.startsWith("video/");
+    setMediaUploading({ percent: 0, label: isVideo ? "Uploading video..." : "Uploading photo..." });
+    try {
+      const { secureUrl } = isVideo
+        ? await uploadVideo(file, `dms/${selectedId}`, (p) => setMediaUploading({ percent: p, label: "Uploading video..." }))
+        : await uploadImageWithProgress(file, `dms/${selectedId}`, (p) => setMediaUploading({ percent: p, label: "Uploading photo..." }));
+      await sendMediaMessage({ mediaType: isVideo ? "video" : "image", mediaUrl: secureUrl });
+    } catch {
+      toast.error("Couldn't upload that file.");
+    } finally {
+      setMediaUploading(null);
+    }
+  }
+
+  async function handleAnyFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !user || !selectedId || blockedFromSending()) return;
+    if (file.size > 25 * 1024 * 1024) {
+      toast.error("Files must be under 25MB.");
+      return;
+    }
+    setMediaUploading({ percent: 0, label: "Uploading file..." });
+    try {
+      const { secureUrl } = await uploadAnyFile(file, `dms/${selectedId}`, (p) => setMediaUploading({ percent: p, label: "Uploading file..." }));
+      await sendMediaMessage({ mediaType: "file", mediaUrl: secureUrl, mediaFileName: file.name, mediaSize: file.size });
+    } catch {
+      toast.error("Couldn't upload that file.");
+    } finally {
+      setMediaUploading(null);
+    }
+  }
+
+  async function handleCameraCapture(file: File) {
+    if (!user || !selectedId || blockedFromSending()) return;
+    setMediaUploading({ percent: 0, label: "Uploading photo..." });
+    try {
+      const { secureUrl } = await uploadImageWithProgress(file, `dms/${selectedId}`, (p) => setMediaUploading({ percent: p, label: "Uploading photo..." }));
+      await sendMediaMessage({ mediaType: "image", mediaUrl: secureUrl });
+    } catch {
+      toast.error("Couldn't upload that photo.");
+    } finally {
+      setMediaUploading(null);
+    }
+  }
+
+  async function handleVoiceSend(blob: Blob, durationSeconds: number) {
+    setVoiceMode(false);
+    if (!user || !selectedId || blockedFromSending()) return;
+    setMediaUploading({ percent: 0, label: "Uploading voice message..." });
+    try {
+      const { secureUrl } = await uploadVoiceNote(blob, `dms/${selectedId}/voice`, (p) =>
+        setMediaUploading({ percent: p, label: "Uploading voice message..." })
+      );
+      await sendMediaMessage({ mediaType: "voice", mediaUrl: secureUrl, mediaDuration: durationSeconds });
+    } catch {
+      toast.error("Couldn't send that voice message.");
+    } finally {
+      setMediaUploading(null);
+    }
+  }
+
+  function handleGifSelected(gif: TenorGif) {
+    sendMediaMessage({ mediaType: "gif", mediaUrl: gif.fullUrl, mediaWidth: gif.width, mediaHeight: gif.height });
+  }
+
+  function handleStickerSelected(sticker: string) {
+    sendMediaMessage({ mediaType: "sticker", mediaUrl: sticker });
+  }
+
+  function handleShareSelected(item: SharedManga | SharedPost) {
+    setSharePickerMode(null);
+    if (item.kind === "manga") {
+      sendMediaMessage({ sharedMangaId: item.id, sharedMangaTitle: item.title, sharedMangaCoverURL: item.coverURL });
+    } else {
+      sendMediaMessage({
+        sharedPostId: item.id,
+        sharedPostAuthorName: item.authorName,
+        sharedPostPreviewText: item.previewText,
+        ...(item.mediaUrl ? { sharedPostMediaUrl: item.mediaUrl } : {}),
+      });
     }
   }
 
@@ -856,6 +1026,14 @@ export default function MessagesClient() {
   const isGroupThread = selected?.type === "group";
   const otherUid = selected?.participants.find((id) => id !== user.uid);
   const otherName = isGroupThread ? selected?.name ?? "Group" : (otherUid && selected?.participantNames?.[otherUid]) || "Reader";
+  // DM Feature Overhaul (Part E): a nickname is private to whoever set it — it stands in for the
+  // real display name in the thread header (and anywhere else this component shows the contact's
+  // name) for the viewer who set it, nobody else, and only for a 1:1 thread (a group's own name
+  // isn't a "contact" to nickname).
+  const displayName =
+    !isGroupThread && user && otherUid && selected?.nicknames?.[user.uid]?.[otherUid]
+      ? selected.nicknames[user.uid][otherUid]
+      : otherName;
   const otherPhoto = isGroupThread ? selected?.photoURL : otherUid ? selected?.participantPhotos?.[otherUid] : undefined;
   const otherProfileHref = otherProfile?.handle
     ? `/creator/${otherProfile.handle}`
@@ -865,7 +1043,7 @@ export default function MessagesClient() {
   const blockedByMe = !isGroupThread && otherUid ? blockedUids.has(otherUid) : false;
   const conversationBlocked = blockedByMe || blockingMe;
 
-  const filteredConversations = sidebarQuery.trim()
+  const searchFiltered = sidebarQuery.trim()
     ? conversations.filter((c) => {
         if (c.type === "group") return (c.name ?? "").toLowerCase().includes(sidebarQuery.trim().toLowerCase());
         const other = c.participants.find((id) => id !== user.uid) ?? "";
@@ -873,6 +1051,12 @@ export default function MessagesClient() {
         return name.toLowerCase().includes(sidebarQuery.trim().toLowerCase());
       })
     : conversations;
+  // DM Feature Overhaul (Part I): archived conversations move into their own collapsed section
+  // rather than the main list — getConversations/subscribeToConversations don't filter archivedBy
+  // out (unlike hiddenFor, which really does hide), since "archived" is a display bucket, not a
+  // removal.
+  const filteredConversations = searchFiltered.filter((c) => !c.archivedBy?.[user.uid]);
+  const archivedConversations = searchFiltered.filter((c) => !!c.archivedBy?.[user.uid]);
 
   // Date-separated message groups: an entry is either a message or a "day changed" marker.
   // Messages this viewer chose "delete for me" on never even enter the list — everyone else's
@@ -937,7 +1121,8 @@ export default function MessagesClient() {
             filteredConversations.map((c) => {
               const isGroup = c.type === "group";
               const other = c.participants.find((id) => id !== user.uid) ?? "";
-              const name = isGroup ? c.name ?? "Group" : c.participantNames?.[other] ?? "Reader";
+              // DM Feature Overhaul (Part E): the conversation list shows a saved nickname too.
+              const name = isGroup ? c.name ?? "Group" : c.nicknames?.[user.uid]?.[other] ?? c.participantNames?.[other] ?? "Reader";
               const photo = isGroup ? c.photoURL : c.participantPhotos?.[other];
               const unread = c.unreadCounts?.[user.uid] ?? 0;
               const typingHere = c.id === selectedId && typingUids.length > 0;
@@ -1020,6 +1205,20 @@ export default function MessagesClient() {
                     </div>
                   </div>
                 </button>
+                {/* DM Feature Overhaul (Part I): "Long press... → Archive" — a hover-revealed
+                    icon button alongside the existing delete one, same discoverability pattern,
+                    since a press-and-hold gesture has no real desktop equivalent. */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    archiveConversation(c.id, user.uid);
+                  }}
+                  aria-label="Archive conversation"
+                  className="absolute right-10 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-muted opacity-70 hover:bg-bg4 hover:text-text sm:opacity-0 sm:group-hover:opacity-100"
+                >
+                  <Archive className="h-3.5 w-3.5" />
+                </button>
                 <button
                   type="button"
                   onClick={(e) => {
@@ -1034,6 +1233,53 @@ export default function MessagesClient() {
                 </div>
               );
             })
+          )}
+
+          {/* DM Feature Overhaul (Part I): collapsed by default. */}
+          {archivedConversations.length > 0 && (
+            <div className="border-t border-bg4">
+              <button
+                type="button"
+                onClick={() => setArchivedOpen((o) => !o)}
+                className="flex w-full items-center justify-between px-4 py-3 font-syne text-xs font-semibold text-muted"
+              >
+                <span className="flex items-center gap-1.5">
+                  <Archive className="h-3.5 w-3.5" /> Archived ({archivedConversations.length})
+                </span>
+                <ChevronRight className={`h-3.5 w-3.5 transition-transform ${archivedOpen ? "rotate-90" : ""}`} />
+              </button>
+              {archivedOpen &&
+                archivedConversations.map((c) => {
+                  const isGroup = c.type === "group";
+                  const other = c.participants.find((id) => id !== user.uid) ?? "";
+                  const name = isGroup ? c.name ?? "Group" : c.nicknames?.[user.uid]?.[other] ?? c.participantNames?.[other] ?? "Reader";
+                  const photo = isGroup ? c.photoURL : c.participantPhotos?.[other];
+                  return (
+                    <div key={c.id} className="group relative flex items-center gap-3 border-b border-bg4 py-3 pl-4 pr-10 opacity-70">
+                      {photo ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img loading="lazy" src={photo} alt={name} className="h-10 w-10 shrink-0 rounded-full object-cover" />
+                      ) : (
+                        <div
+                          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full font-syne text-xs font-bold text-white"
+                          style={{ background: stringToColor(name) }}
+                        >
+                          {initials(name)}
+                        </div>
+                      )}
+                      <span className="min-w-0 flex-1 truncate font-syne text-sm font-semibold text-text">{name}</span>
+                      <button
+                        type="button"
+                        onClick={() => unarchiveConversation(c.id, user.uid)}
+                        aria-label="Unarchive conversation"
+                        className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-muted hover:bg-bg4 hover:text-text"
+                      >
+                        <Archive className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
+            </div>
           )}
         </div>
 
@@ -1100,7 +1346,7 @@ export default function MessagesClient() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <Link href={otherProfileHref ?? "#"} className="flex items-center gap-1 truncate font-syne text-sm font-semibold text-text hover:underline">
-                        <span className="truncate">{otherName}</span>
+                        <span className="truncate">{displayName}</span>
                         <VerificationBadge user={otherProfile} size={14} />
                         <PlatinumBadge isPlatinum={otherProfile?.isPlatinum} className="h-3.5 w-3.5" />
                         {otherProfile?.handle && (
@@ -1135,6 +1381,14 @@ export default function MessagesClient() {
                   </>
                 )}
 
+                {/* DM Feature Overhaul (Part H): "Show a timer icon in thread header when
+                    disappearing messages is active." */}
+                {selected?.disappearingMessages?.enabled && (
+                  <span title="Disappearing messages are on" className="shrink-0 text-muted">
+                    <Clock className="h-4 w-4" />
+                  </span>
+                )}
+
                 <div className="relative shrink-0">
                   <button
                     type="button"
@@ -1148,6 +1402,28 @@ export default function MessagesClient() {
                     <>
                       <div className="fixed inset-0 z-10" onClick={() => setHeaderMenuOpen(false)} />
                       <div className="glass absolute right-0 top-full z-20 mt-1 w-48 overflow-hidden rounded-xl p-1.5">
+                        {/* DM Feature Overhaul (Part F). */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setHeaderMenuOpen(false);
+                            setDmSettingsOpen(true);
+                          }}
+                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-noto text-sm text-text hover:bg-bg4"
+                        >
+                          <Settings className="h-4 w-4" /> Chat Settings
+                        </button>
+                        {/* DM Feature Overhaul (Part I). */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setHeaderMenuOpen(false);
+                            if (selectedId && user) archiveConversation(selectedId, user.uid).then(() => setSelectedId(null));
+                          }}
+                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-noto text-sm text-text hover:bg-bg4"
+                        >
+                          <Archive className="h-4 w-4" /> Archive
+                        </button>
                         {/* Beta feedback: "...and also a clear conversation button." */}
                         <button
                           type="button"
@@ -1164,8 +1440,37 @@ export default function MessagesClient() {
                 </div>
               </div>
 
-              <div ref={messagesContainerRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
-                <div className="flex flex-col gap-2">
+              {/* DM Feature Overhaul (Part B): the wallpaper (same for every participant, live via
+                  onSnapshot on the conversation doc itself) renders as this container's own
+                  background — an image uses background-image/cover, a color/gradient just goes
+                  straight into `background` since both are valid CSS values there. The blur
+                  overlay sits on its own layer between the wallpaper and the actual message
+                  content so bubbles stay crisp/readable regardless of the wallpaper. */}
+              <div
+                ref={messagesContainerRef}
+                className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain p-4"
+                style={
+                  selected?.wallpaperUrl
+                    ? selected.wallpaperType === "image"
+                      ? { backgroundImage: `url(${selected.wallpaperUrl})`, backgroundSize: "cover", backgroundPosition: "center" }
+                      : { background: selected.wallpaperUrl }
+                    : undefined
+                }
+              >
+                {selected?.wallpaperUrl && selected.wallpaperBlur && (
+                  <div className="pointer-events-none absolute inset-0 bg-bg/40" style={{ backdropFilter: "blur(8px)" }} />
+                )}
+                {/* DM Feature Overhaul (Part H): "Disappearing messages are on..." banner. */}
+                {selected?.disappearingMessages?.enabled && (
+                  <div className="relative z-10 mb-3 flex items-center justify-center gap-1.5 rounded-full bg-bg2/90 px-3 py-1.5 text-center font-noto text-[11px] text-muted">
+                    <Clock className="h-3 w-3 shrink-0" />
+                    Disappearing messages are on — messages delete after{" "}
+                    {selected.disappearingMessages.duration >= 86400000
+                      ? `${Math.round(selected.disappearingMessages.duration / 86400000)} day(s)`
+                      : `${Math.round(selected.disappearingMessages.duration / 3600000)} hour(s)`}
+                  </div>
+                )}
+                <div className="relative z-10 flex flex-col gap-2">
                   {messageItems.map((item) => {
                     if (item.kind === "separator") {
                       return (
@@ -1179,11 +1484,30 @@ export default function MessagesClient() {
                     const m = item.message;
                     const isOwn = m.senderId === user.uid;
                     const isEditing = editingId === m.id;
-                    const bubbleShape = isOwn
-                      ? "rounded-tl-2xl rounded-bl-2xl rounded-tr-sm bg-clay text-ivory"
-                      : "rounded-tr-2xl rounded-br-2xl rounded-tl-sm bg-bg3 text-text";
+                    // DM Feature Overhaul (Parts C/D): a sender's own bubbleStyle/bubbleColor
+                    // (Platinum-exclusive, set from BubbleStylePicker/ChatColorPicker) overrides
+                    // the plain default look — a chat-specific color (selected?.participantColors)
+                    // takes priority over that sender's universal default, per the feature spec.
+                    const senderPrefs = isOwn ? profile?.dmPreferences : senderProfiles.get(m.senderId)?.dmPreferences;
+                    const bubbleStyleNum = selected?.participantBubbleStyles?.[m.senderId] ?? senderPrefs?.bubbleStyle;
+                    const bubbleColor = selected?.participantColors?.[m.senderId] ?? senderPrefs?.bubbleColor;
+                    const bubbleShape = bubbleStyleNum
+                      ? `bubble-style-${bubbleStyleNum} ${!isOwn ? "other" : ""} ${bubbleColor ? "" : isOwn ? "bg-clay text-ivory" : "bg-bg3 text-text"}`
+                      : isOwn
+                        ? "rounded-tl-2xl rounded-bl-2xl rounded-tr-sm bg-clay text-ivory"
+                        : "rounded-tr-2xl rounded-br-2xl rounded-tl-sm bg-bg3 text-text";
+                    // `background` (not backgroundColor) so a gradient string works here too, not
+                    // just a plain hex color — both are valid values for the shorthand.
+                    const bubbleInlineStyle = bubbleColor
+                      ? { background: bubbleColor, color: contrastTextColor(bubbleColor) }
+                      : undefined;
 
-                    const senderName = isGroupThread ? selected?.participantNames?.[m.senderId] ?? "Reader" : otherName;
+                    // DM Feature Overhaul (Part E): a group sender's name is nickname-able too —
+                    // nicknames[viewerUid][senderId] only ever shows a nickname the current
+                    // viewer themselves set for that specific member, matching how it's private.
+                    const senderName = isGroupThread
+                      ? (user && selected?.nicknames?.[user.uid]?.[m.senderId]) ?? selected?.participantNames?.[m.senderId] ?? "Reader"
+                      : displayName;
                     const senderPhoto = isGroupThread ? selected?.participantPhotos?.[m.senderId] : otherPhoto;
 
                     if (m.isDeleted) {
@@ -1211,6 +1535,7 @@ export default function MessagesClient() {
                             onTouchStart={() => handleTouchStart(m.id)}
                             onTouchEnd={handleTouchEnd}
                             onTouchMove={handleTouchEnd}
+                            style={bubbleInlineStyle}
                             className={`relative w-full px-4 py-2 font-noto text-sm ${bubbleShape}`}
                           >
                             {m.replyTo && (
@@ -1244,16 +1569,18 @@ export default function MessagesClient() {
                               </div>
                             ) : (
                               <>
-                                <MentionText text={m.text} />
+                                <DMMediaContent message={m} isOwn={isOwn} />
+                                {m.text && <MentionText text={m.text} />}
                                 {/* Beta feedback: "Links should be clickable, show the preview
                                     and should be formatted to be shorter." Clickable+shortened is
                                     MentionText's own job above; this is the preview itself. */}
-                                {extractFirstUrl(m.text) && (
+                                {m.text && extractFirstUrl(m.text) && (
                                   <LinkPreviewCard url={extractFirstUrl(m.text)!} className="mt-1.5" />
                                 )}
                                 <span className="mt-1 flex items-center gap-1 text-[10px]">
                                   <span className={isOwn ? "text-ivory/70" : "text-muted"}>{formatPostTimestamp(m.createdAt)}</span>
                                   {m.isEdited && <span className={isOwn ? "text-ivory/70" : "text-muted"}>(edited)</span>}
+                                  {m.expiresAt && <Clock className="h-2.5 w-2.5 opacity-60" />}
                                 </span>
                               </>
                             )}
@@ -1454,41 +1781,100 @@ export default function MessagesClient() {
                     ))}
                   </div>
                 )}
+                {mediaUploading && (
+                  <div className="flex items-center gap-2 border-t border-bg4 bg-bg2 px-3 py-2">
+                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-clay" />
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-bg3">
+                      <div className="h-full bg-clay transition-all" style={{ width: `${mediaUploading.percent}%` }} />
+                    </div>
+                    <span className="shrink-0 font-noto text-[10px] text-muted">{mediaUploading.label}</span>
+                  </div>
+                )}
+                <AttachmentTray
+                  open={attachmentTrayOpen}
+                  onClose={() => setAttachmentTrayOpen(false)}
+                  onCamera={() => setCameraOpen(true)}
+                  onPhotoVideo={() => photoVideoInputRef.current?.click()}
+                  onVoice={() => setVoiceMode(true)}
+                  onFile={() => anyFileInputRef.current?.click()}
+                  onShareManga={() => setSharePickerMode("manga")}
+                  onSharePost={() => setSharePickerMode("post")}
+                  onGif={() => setGifPickerOpen(true)}
+                  onSticker={() => setStickerPickerOpen(true)}
+                />
+                <input ref={photoVideoInputRef} type="file" accept="image/*,video/*" onChange={handlePhotoVideoPicked} className="hidden" />
+                <input ref={anyFileInputRef} type="file" onChange={handleAnyFilePicked} className="hidden" />
                 <div
                   className="flex items-end gap-2 p-3"
                   style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
                 >
-                  <button
-                    type="button"
-                    onClick={() => setEmojiOpen((o) => !o)}
-                    className="btn-ghost shrink-0 px-2.5"
-                    aria-label="Add emoji"
-                  >
-                    <Smile className="h-4 w-4" />
-                  </button>
-                  <textarea
-                    ref={textareaRef}
-                    value={text}
-                    onChange={handleTextareaInput}
-                    onKeyDown={handleKeyDown}
-                    rows={1}
-                    placeholder="Type a message..."
-                    className="input-base flex-1 resize-none overflow-y-auto"
-                    style={{ maxHeight: MAX_TEXTAREA_HEIGHT }}
-                  />
-                  <button
-                    type="button"
-                    onClick={handleSend}
-                    disabled={sending || !text.trim()}
-                    className="btn-primary shrink-0"
-                    aria-label="Send message"
-                  >
-                    <Send className="h-4 w-4" />
-                  </button>
+                  {voiceMode ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setVoiceMode(false)}
+                        aria-label="Cancel voice message"
+                        className="btn-ghost shrink-0 px-2.5"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                      <VoiceRecorder maxSeconds={profile?.isPlatinum ? 600 : 120} onSend={handleVoiceSend} />
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setAttachmentTrayOpen((o) => !o)}
+                        className="btn-ghost shrink-0 px-2.5"
+                        aria-label="Add attachment"
+                      >
+                        <Paperclip className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEmojiOpen((o) => !o)}
+                        className="btn-ghost shrink-0 px-2.5"
+                        aria-label="Add emoji"
+                      >
+                        <Smile className="h-4 w-4" />
+                      </button>
+                      <textarea
+                        ref={textareaRef}
+                        value={text}
+                        onChange={handleTextareaInput}
+                        onKeyDown={handleKeyDown}
+                        rows={1}
+                        placeholder="Type a message..."
+                        className="input-base flex-1 resize-none overflow-y-auto"
+                        style={{ maxHeight: MAX_TEXTAREA_HEIGHT }}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSend}
+                        disabled={sending || !text.trim()}
+                        className="btn-primary shrink-0"
+                        aria-label="Send message"
+                      >
+                        <Send className="h-4 w-4" />
+                      </button>
+                    </>
+                  )}
                 </div>
                 </div>
               )}
             </>
+          )}
+
+          <InAppCamera open={cameraOpen} onClose={() => setCameraOpen(false)} onCapture={handleCameraCapture} />
+          <GifPicker open={gifPickerOpen} onClose={() => setGifPickerOpen(false)} onSelect={handleGifSelected} />
+          <StickerPicker open={stickerPickerOpen} onClose={() => setStickerPickerOpen(false)} onSelect={handleStickerSelected} />
+          {sharePickerMode && (
+            <SharePickerModal
+              open
+              mode={sharePickerMode}
+              onClose={() => setSharePickerMode(null)}
+              onSelect={handleShareSelected}
+            />
           )}
         </div>
       </div>
@@ -1857,6 +2243,21 @@ export default function MessagesClient() {
             </div>
           )}
         </Modal>
+      )}
+
+      {/* DM Feature Overhaul (Part F). */}
+      {selected && (
+        <DMSettingsPanel
+          open={dmSettingsOpen}
+          onClose={() => setDmSettingsOpen(false)}
+          conversation={selected}
+          otherUid={isGroupThread ? undefined : otherUid}
+          otherName={isGroupThread ? undefined : otherName}
+          onDeleteConversation={() => {
+            setDmSettingsOpen(false);
+            if (selectedId) handleHideConversation(selectedId);
+          }}
+        />
       )}
     </div>
   );

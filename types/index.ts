@@ -129,6 +129,22 @@ export interface UserProfile {
    * recorded as anonymous (see lib/profileVisits.ts's recordVisit) rather than attributed. Has
    * no effect on visits made by free accounts, which are always attributed regardless. */
   hideProfileVisits?: boolean;
+  /** DM overhaul (Platinum-exclusive): this account's own default message-bubble style/color,
+   * applied to every message THEY send, everywhere it renders — a group chat naturally ends up
+   * with each member's bubbles looking different, styled by their own preference rather than the
+   * viewer's. `universalBubble: false` means `bubbleColor`/`bubbleStyle` only apply as this
+   * account's default for brand-new conversations; a specific conversation's own
+   * participantColors.{uid} (set from that chat's own DM settings) still overrides it either way. */
+  dmPreferences?: {
+    /** 1-10, matching globals.css's .bubble-style-N classes. */
+    bubbleStyle?: number;
+    bubbleColor?: string;
+    universalBubble?: boolean;
+  };
+  /** DM overhaul (Part B, "My Uploads" tab): this account's own uploaded wallpaper images
+   * (Cloudinary URLs, under wallpapers/{uid}/), most-recently-added last. Kept on the profile
+   * rather than a subcollection since it's a short, simple list with no per-item metadata. */
+  uploadedWallpapers?: string[];
   /** Per-notification-category push preferences (Sprint "Polish-2" Part 6) — a key absent from
    * this object defaults to "on", so an account that predates this feature (or hasn't touched
    * Settings yet) still gets every push it would have before. In-app notifications (the bell/
@@ -829,6 +845,51 @@ export interface Conversation {
    * back to empty on the next new message, so the conversation naturally reappears for whoever
    * hid it instead of staying hidden forever once there's new activity. */
   hiddenFor?: string[];
+
+  /* ---- DM overhaul: wallpaper (Platinum-set, seen by everyone) ---- */
+  wallpaperUrl?: string;
+  wallpaperType?: "color" | "gradient" | "image";
+  wallpaperBlur?: boolean;
+  /** uid of the Platinum member who set the current wallpaper — shown as "Wallpaper set by
+   * [Name] 💎" in the DM settings panel. */
+  wallpaperSetBy?: string;
+
+  /** DM overhaul: private per-viewer nicknames, keyed nicknames[viewerUid][targetUid] — a group
+   * has more than one possible "contact" to nickname, so a flat map keyed by viewer alone isn't
+   * enough once "Message sender name in group chats" is in scope, not just a 1:1's thread header.
+   * nicknames[viewerUid] is only ever written/read by that same viewer, so one person's nickname
+   * for someone never leaks to anyone else, including that person themselves. */
+  nicknames?: Record<string, Record<string, string>>;
+
+  /** DM overhaul: a chat-specific bubble color override, keyed by the uid it applies to — takes
+   * priority over that uid's own users/{uid}.dmPreferences.bubbleColor (their universal default)
+   * for messages in THIS conversation only. */
+  participantColors?: Record<string, string>;
+  /** DM overhaul: the bubble-SHAPE equivalent of participantColors above — the spec for bubble
+   * styles only ever describes a universal users/{uid}.dmPreferences.bubbleStyle, but
+   * BubbleStylePicker's own "This chat only" toggle needs somewhere real to write when the
+   * viewer picks that option, so this mirrors participantColors' shape for consistency. */
+  participantBubbleStyles?: Record<string, number>;
+
+  /** DM overhaul: auto-delete messages sent after this is turned on, `duration` after they're
+   * sent — see lib/dms.ts's disappearing-message helpers. */
+  disappearingMessages?: {
+    enabled: boolean;
+    /** Milliseconds. */
+    duration: number;
+  };
+
+  /** DM overhaul: per-participant archive state — archiving only affects your OWN conversation
+   * list, the same "private to the viewer" shape as `hiddenFor`/`nicknames` above. A new message
+   * un-archives for everyone it was archived for (see sendDM). */
+  archivedBy?: Record<string, boolean>;
+
+  /** DM overhaul (DM Settings panel): per-participant mute state — "until" is an ISO timestamp
+   * for a timed mute, or the literal string "forever". Purely a private, per-viewer display
+   * preference today (this app has no DM push notifications yet to actually suppress — see
+   * lib/dms.ts's sendDM, which never calls createNotification for a plain new message); the
+   * sidebar dims/mutes the unread indicator for a muted conversation regardless. */
+  mutedBy?: Record<string, { until: string | "forever" }>;
 }
 
 /** One emoji's worth of reactions on a message — every uid who reacted with that emoji. */
@@ -844,6 +905,8 @@ export interface MessageReplyTo {
   senderName: string;
   preview: string;
 }
+
+export type DMMediaType = "image" | "video" | "voice" | "file" | "gif" | "sticker" | "manga" | "post";
 
 export interface DMMessage {
   id: string;
@@ -861,6 +924,34 @@ export interface DMMessage {
   deletedFor?: string[];
   reactions?: MessageReaction[];
   replyTo?: MessageReplyTo;
+
+  /* ---- DM overhaul: media messages ---- */
+  mediaType?: DMMediaType;
+  /** Cloudinary secure_url for image/video/voice/file/sticker; the GIF's own url for `gif`. */
+  mediaUrl?: string;
+  /** Voice notes only, in seconds. */
+  mediaDuration?: number;
+  /** File messages only — original filename and byte size, so the bubble can show something
+   * more useful than a bare Cloudinary url. */
+  mediaFileName?: string;
+  mediaSize?: number;
+  /** Video/image messages only — Cloudinary poster frame / the media's own natural dimensions,
+   * so the bubble can reserve the right aspect ratio before the asset loads. */
+  mediaWidth?: number;
+  mediaHeight?: number;
+  /** "Share Manga"/"Share Post" messages only — enough to render a rich preview card without a
+   * lookup; tapping still deep-links via the ids below. */
+  sharedMangaId?: string;
+  sharedMangaTitle?: string;
+  sharedMangaCoverURL?: string;
+  sharedPostId?: string;
+  sharedPostAuthorName?: string;
+  sharedPostPreviewText?: string;
+  sharedPostMediaUrl?: string;
+
+  /** DM overhaul: disappearing messages — set at send-time from the conversation's own
+   * disappearingMessages setting; a message with no expiresAt never disappears. */
+  expiresAt?: string;
 }
 
 /* ---------------------------- Creator feed ---------------------------- */

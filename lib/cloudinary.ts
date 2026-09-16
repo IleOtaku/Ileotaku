@@ -37,6 +37,74 @@ interface CloudinaryApiResponse {
   error?: { message: string };
 }
 
+/** DM Feature Overhaul (Part A): a File OR a raw Blob (MediaRecorder's voice-note output has no
+ * File wrapper) uploaded via XHR with progress, to any Cloudinary resource-type endpoint —
+ * shared by uploadVideo below, plus the DM composer's voice-message and any-file-type uploads.
+ * Cloudinary treats audio the same as video for upload purposes (there's no separate /audio/
+ * endpoint), and `/raw/upload` accepts literally anything for the "📁 File" attachment type. */
+function uploadToCloudinary(
+  file: File | Blob,
+  folder: string,
+  resourceType: "image" | "video" | "raw",
+  onProgress?: (percent: number) => void,
+  filename?: string
+): Promise<CloudinaryUploadResult> {
+  assertConfigured();
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    form.append("file", file, filename);
+    form.append("upload_preset", UPLOAD_PRESET!);
+    form.append("folder", folder);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/${resourceType}/upload`);
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) {
+        onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
+
+    xhr.onload = () => {
+      let data: CloudinaryApiResponse;
+      try {
+        data = JSON.parse(xhr.responseText) as CloudinaryApiResponse;
+      } catch {
+        reject(new Error("Upload failed. Please try again."));
+        return;
+      }
+      if (xhr.status >= 200 && xhr.status < 300 && data.secure_url) {
+        resolve({ secureUrl: data.secure_url, publicId: data.public_id });
+      } else {
+        reject(new Error(data.error?.message ?? "Upload failed. Please try again."));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Upload failed. Please try again."));
+
+    xhr.send(form);
+  });
+}
+
+/** DM Feature Overhaul (Part A): a voice-note recording (MediaRecorder's Blob output) or any
+ * other file type — "📁 File — any file type up to 25MB" — via Cloudinary's raw/video endpoints.
+ * Kept separate from uploadImage/uploadVideo above (which stay File-only, matching every existing
+ * call site) rather than widening their signatures. */
+export function uploadVoiceNote(blob: Blob, folder: string, onProgress?: (percent: number) => void) {
+  return uploadToCloudinary(blob, folder, "video", onProgress, "voice-message.webm");
+}
+
+export function uploadAnyFile(file: File, folder: string, onProgress?: (percent: number) => void) {
+  return uploadToCloudinary(file, folder, "raw", onProgress, file.name);
+}
+
+/** Same as uploadImage below, but with upload-progress reporting — for the DM composer's image
+ * attachments, which the feature spec wants "Shows upload progress in the message bubble" for
+ * (the original uploadImage has no progress event and stays as-is for its many existing callers,
+ * none of which show a progress bar). */
+export function uploadImageWithProgress(file: File, folder: string, onProgress?: (percent: number) => void) {
+  return uploadToCloudinary(file, folder, "image", onProgress, file.name);
+}
+
 /** Uploads an image file to Cloudinary under `folder` via its unsigned-preset REST endpoint. */
 export async function uploadImage(file: File, folder: string): Promise<CloudinaryUploadResult> {
   assertConfigured();

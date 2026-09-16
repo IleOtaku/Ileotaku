@@ -458,11 +458,37 @@ service cloud.firestore {
       // an array diff here; a crafted direct SDK call could bypass that app-level check the same
       // way a crafted call already could for e.g. `chats`' create above. Tightening that further
       // is a real improvement to make later, not a regression this introduces.
+      // DM Feature Overhaul: every new per-conversation field, added as its own OR branch rather
+      // than folded into the list above, so each one's trust level stays explicit.
+      //   - archivedBy/nicknames/mutedBy: same "any current participant, whole-field trust" level
+      //     this rule already gives hiddenFor above — none of these are restricted to only
+      //     changing the caller's own key within the map, matching this file's existing posture
+      //     for this class of per-viewer preference field rather than inventing new per-key rules
+      //     nothing else here has either.
+      //   - disappearingMessages: no Platinum gate — the feature spec never asks for one, unlike
+      //     wallpaper/bubble styling below.
+      //   - wallpaper*/participantColors/participantBubbleStyles: "Only Platinum users can set
+      //     wallpaper, bubble styles, colors" — enforced here via a real server-side isPlatinum
+      //     check on the CALLER's own user doc, not just by the picker UIs hiding themselves from
+      //     free accounts client-side.
       allow update: if isSignedIn() && request.auth.uid in resource.data.participants
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
-          ["lastMessage", "lastMessageAt", "lastSenderId", "unreadCounts",
-           "name", "description", "photoURL", "participants", "participantNames",
-           "participantPhotos", "adminUids", "hiddenFor"]);
+        && (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+            ["lastMessage", "lastMessageAt", "lastSenderId", "unreadCounts",
+             "name", "description", "photoURL", "participants", "participantNames",
+             "participantPhotos", "adminUids", "hiddenFor"])
+          || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["archivedBy"])
+          || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["nicknames"])
+          || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["mutedBy"])
+          || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["disappearingMessages"])
+          || (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isPlatinum == true
+            && (
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+                ["wallpaperUrl", "wallpaperType", "wallpaperBlur", "wallpaperSetBy"])
+              || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["participantColors"])
+              || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["participantBubbleStyles"])
+            ))
+        );
       // The group's creator only (deleteGroup in lib/dms.ts) — a 1:1 conversation is never
       // deleted, only left implicitly by no longer being messaged.
       allow delete: if isSignedIn() && resource.data.creatorUid == request.auth.uid;
