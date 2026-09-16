@@ -16,6 +16,7 @@ import {
   MoreHorizontal,
   Paperclip,
   Pencil,
+  Phone,
   Plus,
   Reply,
   Search,
@@ -42,6 +43,8 @@ import DMSettingsPanel from "./DMSettingsPanel";
 import GifPicker from "./GifPicker";
 import GroupInfoPanel from "./GroupInfoPanel";
 import InAppCamera from "./InAppCamera";
+import { useActiveCall } from "@/hooks/useActiveCall";
+import { newCallId, WebRTCCall } from "@/lib/webrtc";
 import SharePickerModal, { type SharedManga, type SharedPost } from "./SharePickerModal";
 import StickerPicker from "./StickerPicker";
 import VoiceRecorder from "./VoiceRecorder";
@@ -503,6 +506,24 @@ export default function MessagesClient() {
     }, 300);
     return () => clearTimeout(timer);
   }, [composeQuery, composeOpen, user]);
+
+  // PART 5 — voice calls: initiates a call from the open thread's own phone icon (1:1 only).
+  async function handleStartCall(targetUid: string, targetName: string, targetPhoto: string | undefined) {
+    if (!user) return;
+    if (useActiveCall.getState().callId) {
+      toast.error("You're already on a call.");
+      return;
+    }
+    const callId = newCallId();
+    const call = new WebRTCCall(callId);
+    useActiveCall.getState().start(callId, call, { uid: targetUid, displayName: targetName, photoURL: targetPhoto }, "outgoing", "ringing");
+    try {
+      await call.startCall(user.uid, targetUid);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't start the call — check your microphone permissions.");
+      useActiveCall.getState().reset();
+    }
+  }
 
   async function handleStartConversation(targetUid: string) {
     if (!user || targetUid === user.uid) return;
@@ -1307,6 +1328,17 @@ export default function MessagesClient() {
                           })
                         }
                       />
+                    )}
+                    {/* PART 5 — voice calls: direct conversations only, not groups yet. */}
+                    {otherUid && !blockingMe && (
+                      <button
+                        type="button"
+                        onClick={() => handleStartCall(otherUid, otherName, otherPhoto)}
+                        aria-label="Voice call"
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted hover:bg-bg4 hover:text-text"
+                      >
+                        <Phone className="h-4 w-4" />
+                      </button>
                     )}
                   </>
                 )}

@@ -740,6 +740,11 @@ export enum NotificationType {
   /** Beta feedback: a birthday feature — see lib/birthday.ts. Sent both to the birthday person
    * themselves and to their followers, on the day their `birthday` (MM-DD) matches. */
   BIRTHDAY = "BIRTHDAY",
+  /** PART 5 — voice calls (lib/webrtc.ts). Sent to the callee when a call starts ringing, so it
+   * shows up in their notification bell even if IncomingCallListener's live query hasn't (yet,
+   * or ever, if they weren't signed in on any tab) surfaced the actual full-screen incoming-call
+   * UI — a fallback trail, not the primary "phone is ringing" experience. */
+  INCOMING_CALL = "INCOMING_CALL",
 }
 
 /** Named `AppNotification` (not `Notification`) to avoid colliding with the DOM Notification API. */

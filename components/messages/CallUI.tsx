@@ -1,0 +1,194 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import toast from "react-hot-toast";
+import { Maximize2, Mic, MicOff, Phone, PhoneOff, Volume2, VolumeX } from "lucide-react";
+import { Avatar } from "@/components/ui/Avatar";
+import { useActiveCall } from "@/hooks/useActiveCall";
+
+function formatDuration(totalSeconds: number): string {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+/**
+ * PART 5 — Voice calls. Renders either a full-screen incoming-call overlay (ringing, not yet
+ * answered), a full-screen active-call UI, or — once minimized — a small floating pip, all driven
+ * by the single global useActiveCall store IncomingCallListener/the DM thread's call button
+ * populate. Mounted by IncomingCallListener, which already gates rendering this on `callId`
+ * being set, so this component itself never has to re-check that.
+ */
+export default function CallUI() {
+  const { call, peer, direction, status, minimized, remoteStream, muted, setStatus, setRemoteStream, setMuted, minimize, restore, reset } =
+    useActiveCall();
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [speakerOn, setSpeakerOn] = useState(true);
+  const [seconds, setSeconds] = useState(0);
+  const connectedAtRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!call) return;
+    call.onRemoteStream((stream) => setRemoteStream(stream));
+    call.onStatusChange((s) => setStatus(s));
+    call.onCallEnded(() => {
+      toast("Call ended.");
+      reset();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [call]);
+
+  useEffect(() => {
+    if (audioRef.current && remoteStream) audioRef.current.srcObject = remoteStream;
+  }, [remoteStream]);
+
+  useEffect(() => {
+    if (status === "active" && connectedAtRef.current === null) connectedAtRef.current = Date.now();
+    if (status !== "active") return;
+    const interval = setInterval(() => {
+      if (connectedAtRef.current) setSeconds(Math.floor((Date.now() - connectedAtRef.current) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [status]);
+
+  if (!call || !peer) return null;
+
+  async function handleAccept() {
+    if (!call) return;
+    try {
+      await call.answerCall(useActiveCall.getState().callId ?? "");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't answer this call.");
+      reset();
+    }
+  }
+
+  async function handleDecline() {
+    await call?.declineCall();
+    reset();
+  }
+
+  async function handleEnd() {
+    await call?.endCall();
+    reset();
+  }
+
+  function handleToggleMute() {
+    if (!call) return;
+    setMuted(call.toggleMute());
+  }
+
+  // ---- Minimized pip ----
+  if (minimized) {
+    return (
+      <button
+        type="button"
+        onClick={restore}
+        className="glass fixed bottom-24 right-4 z-[200] flex items-center gap-2 rounded-full px-3 py-2 shadow-2xl sm:bottom-6"
+      >
+        <Avatar uid={peer.uid} photoURL={peer.photoURL} displayName={peer.displayName} size={28} />
+        <span className="font-noto text-xs font-semibold text-text">{formatDuration(seconds)}</span>
+        <Maximize2 className="h-3.5 w-3.5 text-muted" />
+      </button>
+    );
+  }
+
+  // ---- Incoming, not yet answered ----
+  if (status === "ringing" && direction === "incoming") {
+    return (
+      <div className="fixed inset-0 z-[200] flex flex-col items-center justify-center gap-6 bg-bg/98 backdrop-blur">
+        <p className="font-noto text-sm uppercase tracking-wide text-muted">Voice Call</p>
+        <div className="relative">
+          <span className="absolute inset-0 -m-4 animate-ping rounded-full bg-clay/30" />
+          <Avatar uid={peer.uid} photoURL={peer.photoURL} displayName={peer.displayName} size={112} />
+        </div>
+        <p className="font-cinzel text-2xl text-text">{peer.displayName}</p>
+        <div className="mt-6 flex items-center gap-10">
+          <button
+            type="button"
+            onClick={handleDecline}
+            aria-label="Decline"
+            className="flex h-16 w-16 items-center justify-center rounded-full bg-red-600 text-ivory shadow-lg transition-transform hover:scale-105"
+          >
+            <PhoneOff className="h-6 w-6" />
+          </button>
+          <button
+            type="button"
+            onClick={handleAccept}
+            aria-label="Accept"
+            className="flex h-16 w-16 items-center justify-center rounded-full bg-green-600 text-ivory shadow-lg transition-transform hover:scale-105"
+          >
+            <Phone className="h-6 w-6" />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- Outgoing, still ringing ----
+  if (status === "ringing" && direction === "outgoing") {
+    return (
+      <div className="fixed inset-0 z-[200] flex flex-col items-center justify-center gap-6 bg-bg/98 backdrop-blur">
+        <Avatar uid={peer.uid} photoURL={peer.photoURL} displayName={peer.displayName} size={112} />
+        <p className="font-cinzel text-2xl text-text">{peer.displayName}</p>
+        <p className="font-noto text-sm text-muted">Calling...</p>
+        <button
+          type="button"
+          onClick={handleEnd}
+          aria-label="Cancel call"
+          className="mt-6 flex h-16 w-16 items-center justify-center rounded-full bg-red-600 text-ivory shadow-lg transition-transform hover:scale-105"
+        >
+          <PhoneOff className="h-6 w-6" />
+        </button>
+      </div>
+    );
+  }
+
+  // ---- Active call ----
+  return (
+    <div className="fixed inset-0 z-[200] flex flex-col items-center justify-center gap-4 bg-bg/98 backdrop-blur">
+      <audio ref={audioRef} autoPlay muted={!speakerOn} />
+      <Avatar uid={peer.uid} photoURL={peer.photoURL} displayName={peer.displayName} size={112} />
+      <p className="font-cinzel text-2xl text-text">{peer.displayName}</p>
+      <p className="font-noto text-sm text-muted">
+        {status === "active" ? formatDuration(seconds) : status === "declined" ? "Declined" : "Reconnecting..."}
+      </p>
+
+      <button
+        type="button"
+        onClick={minimize}
+        aria-label="Minimize call"
+        className="absolute right-4 top-4 rounded-full p-2 text-muted hover:bg-bg3 hover:text-text"
+      >
+        <Maximize2 className="h-5 w-5 rotate-180" />
+      </button>
+
+      <div className="mt-8 flex items-center gap-6">
+        <button
+          type="button"
+          onClick={handleToggleMute}
+          aria-label={muted ? "Unmute" : "Mute"}
+          className={`flex h-12 w-12 items-center justify-center rounded-full ${muted ? "bg-clay text-ivory" : "bg-bg3 text-text"}`}
+        >
+          {muted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+        </button>
+        <button
+          type="button"
+          onClick={() => setSpeakerOn((s) => !s)}
+          aria-label={speakerOn ? "Turn speaker off" : "Turn speaker on"}
+          className={`flex h-12 w-12 items-center justify-center rounded-full ${!speakerOn ? "bg-clay text-ivory" : "bg-bg3 text-text"}`}
+        >
+          {speakerOn ? <Volume2 className="h-5 w-5" /> : <VolumeX className="h-5 w-5" />}
+        </button>
+        <button
+          type="button"
+          onClick={handleEnd}
+          aria-label="End call"
+          className="flex h-16 w-16 items-center justify-center rounded-full bg-red-600 text-ivory shadow-lg transition-transform hover:scale-105"
+        >
+          <PhoneOff className="h-6 w-6" />
+        </button>
+      </div>
+    </div>
+  );
+}

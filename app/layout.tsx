@@ -11,6 +11,7 @@ import NotificationPrompt from "@/components/layout/NotificationPrompt";
 import Preloader from "@/components/layout/Preloader";
 import ServiceWorkerRegister from "@/components/layout/ServiceWorkerRegister";
 import SiteChrome from "@/components/layout/SiteChrome";
+import IncomingCallListener from "@/components/messages/IncomingCallListener";
 import { FeedAudioProvider } from "@/lib/audioContext";
 import "./globals.css";
 
@@ -106,6 +107,7 @@ export default function RootLayout({
               </MaintenanceGate>
               <InstallPrompt />
               <NotificationPrompt />
+              <IncomingCallListener />
             </FeedAudioProvider>
           </AuthProvider>
         </ErrorBoundary>

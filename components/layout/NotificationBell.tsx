@@ -22,6 +22,7 @@ import {
   Megaphone,
   MessageCircle,
   PartyPopper,
+  Phone,
   RefreshCw,
   Trophy,
   Unlock,
@@ -67,6 +68,7 @@ const TYPE_ICON: Record<NotificationType, LucideIcon> = {
   [NotificationType.RESTRICTION_LIFTED]: Unlock,
   [NotificationType.PROFILE_VISIT]: Eye,
   [NotificationType.BIRTHDAY]: Cake,
+  [NotificationType.INCOMING_CALL]: Phone,
 };
 
 type GroupLabel = "Today" | "This Week" | "Earlier";

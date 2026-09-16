@@ -771,6 +771,31 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
 
+    // ---------------------------- PART 5: voice calls ----------------------------
+    // Only the two participants may ever read/write a call doc or its signaling subcollections.
+    // IncomingCallListener's own query (where calleeUid == the querying user's own uid) matches
+    // this rule's second OR-branch exactly, which is what lets Firestore prove the query safe
+    // without needing every possible result proven individually (see joinGroupViaInvite's own
+    // rule comment in the conversations match block above for the general reason this matters).
+    match /calls/{callId} {
+      allow read: if isSignedIn() && (request.auth.uid == resource.data.callerUid || request.auth.uid == resource.data.calleeUid);
+      allow create: if isSignedIn() && request.auth.uid == request.resource.data.callerUid;
+      allow update: if isSignedIn() && (request.auth.uid == resource.data.callerUid || request.auth.uid == resource.data.calleeUid);
+
+      match /callerCandidates/{candidateId} {
+        allow read, create: if isSignedIn()
+          && (request.auth.uid == get(/databases/$(database)/documents/calls/$(callId)).data.callerUid
+            || request.auth.uid == get(/databases/$(database)/documents/calls/$(callId)).data.calleeUid);
+        allow delete: if isSignedIn() && request.auth.uid == get(/databases/$(database)/documents/calls/$(callId)).data.callerUid;
+      }
+      match /calleeCandidates/{candidateId} {
+        allow read, create: if isSignedIn()
+          && (request.auth.uid == get(/databases/$(database)/documents/calls/$(callId)).data.callerUid
+            || request.auth.uid == get(/databases/$(database)/documents/calls/$(callId)).data.calleeUid);
+        allow delete: if isSignedIn() && request.auth.uid == get(/databases/$(database)/documents/calls/$(callId)).data.calleeUid;
+      }
+    }
+
     // ---------------------------- typing indicators (Part 10) ----------------------------
     // One doc per conversation, a map of participant uid -> timestamp (or null once they stop).
     // Not scoped to actual conversation membership — a get() on the conversation doc on every
