@@ -17,6 +17,7 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { getCreatorWorks, getUserProfile, subscribeToCreatorWorks, updateUserPrefs } from "@/lib/firestore";
 import CreatorFeedTab from "@/components/creator/CreatorFeedTab";
+import CreatorStickerPacksTab from "@/components/creator/CreatorStickerPacksTab";
 import CreatorStoriesTab from "@/components/creator/CreatorStoriesTab";
 import WorkCard from "@/components/creator/WorkCard";
 import UploadModal from "@/components/creator/UploadModal";
@@ -79,7 +80,7 @@ const GUIDELINES = [
   },
 ];
 
-type TabValue = "works" | "feed" | "stories" | "earnings" | "guidelines";
+type TabValue = "works" | "feed" | "stories" | "earnings" | "stickers" | "guidelines";
 
 function StatCard({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
   return (
@@ -315,6 +316,8 @@ export default function CreatorDashboardClient() {
                 { label: "Feed", value: "feed" },
                 { label: "Stories", value: "stories" },
                 { label: "Earnings", value: "earnings" },
+                // PART 6 — sticker packs: Platinum-only, per spec.
+                ...(profile?.isPlatinum ? [{ label: "Sticker Packs", value: "stickers" }] : []),
                 { label: "Guidelines", value: "guidelines" },
               ]}
               value={tab}
@@ -381,6 +384,10 @@ export default function CreatorDashboardClient() {
                     preferred payout method.
                   </p>
                 </div>
+              )}
+
+              {tab === "stickers" && profile?.isPlatinum && (
+                <CreatorStickerPacksTab creatorUid={user.uid} creatorName={profile.displayName} />
               )}
 
               {tab === "guidelines" && (

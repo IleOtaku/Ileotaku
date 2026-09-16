@@ -24,6 +24,7 @@ import {
   Settings,
   ShieldOff,
   Smile,
+  Star,
   Trash2,
   Users,
   X,
@@ -44,6 +45,7 @@ import GifPicker from "./GifPicker";
 import GroupInfoPanel from "./GroupInfoPanel";
 import InAppCamera from "./InAppCamera";
 import { useActiveCall } from "@/hooks/useActiveCall";
+import { saveSticker } from "@/lib/stickers";
 import { newCallId, WebRTCCall } from "@/lib/webrtc";
 import SharePickerModal, { type SharedManga, type SharedPost } from "./SharePickerModal";
 import StickerPicker from "./StickerPicker";
@@ -954,6 +956,14 @@ export default function MessagesClient() {
     }
   }
 
+  // PART 6 — sticker packs: "Long press on received sticker → 'Save Sticker' option."
+  async function handleSaveSticker(stickerUrl: string) {
+    closeMenu();
+    if (!user) return;
+    await saveSticker(user.uid, stickerUrl);
+    toast.success("Sticker saved!");
+  }
+
   // `otherName` (the derived thread-header value below) isn't in scope this early in the
   // component — this small helper exists just so handleReply above can label a reply's
   // "senderName" without duplicating that lookup.
@@ -1632,6 +1642,17 @@ export default function MessagesClient() {
                               >
                                 <Copy className="h-4 w-4" /> Copy
                               </button>
+                              {/* PART 6 — sticker packs: "Long press on received sticker →
+                                  'Save Sticker' option." */}
+                              {m.mediaType === "sticker" && m.mediaUrl && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveSticker(m.mediaUrl!)}
+                                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-left font-noto text-sm text-text hover:bg-bg4"
+                                >
+                                  <Star className="h-4 w-4" /> Save Sticker
+                                </button>
+                              )}
                               {isOwn && (
                                 <button
                                   type="button"

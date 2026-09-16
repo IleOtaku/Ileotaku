@@ -127,6 +127,15 @@ service cloud.firestore {
         allow update, delete: if isOwner(uid) || isAdmin();
       }
 
+      // PART 6: which sticker packs `uid` owns (addFreePackToUser/purchasePack), and stickers
+      // they've individually saved (long-press "Save Sticker") — both private to the owner.
+      match /stickerPacks/{packId} {
+        allow read, write: if isOwner(uid);
+      }
+      match /savedStickers/{stickerId} {
+        allow read, write: if isOwner(uid);
+      }
+
       // Coin ledger. Some entries are written on behalf of a DIFFERENT uid (tipCreator credits
       // the recipient's transactions from the sender's session), so create stays open to any
       // signed-in user; the ledger itself is otherwise read-only from the client once written.
@@ -749,6 +758,35 @@ service cloud.firestore {
           || !("uploadedBy" in resource.data)
           || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["usageCount"]));
       allow delete: if isSignedIn() && (resource.data.uploadedBy == request.auth.uid || isAdmin());
+    }
+
+    // ---------------------------- PART 6: sticker packs ----------------------------
+    // Public read (the Sticker Store browses without requiring sign-in first, same as
+    // creatorFeed/sounds above) — write is admin-only for official packs, or the submitting
+    // creator's own pending pack (submitStickerPack in lib/stickers.ts always writes
+    // isOfficial:false + status:"pending"; only an admin can ever flip status to "approved").
+    match /stickerPacks/{packId} {
+      allow read: if true;
+      allow create: if isSignedIn()
+        && (isAdmin()
+          || (request.resource.data.creatorUid == request.auth.uid
+            && request.resource.data.isOfficial == false
+            && request.resource.data.status == "pending"));
+      // Any signed-in user may bump `downloads` (addFreePackToUser/purchasePack) — same narrow
+      // one-field carve-out shape used throughout this file for that kind of counter.
+      allow update: if isAdmin()
+        || (isSignedIn() && resource.data.creatorUid == request.auth.uid)
+        || (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["downloads"]));
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.creatorUid == request.auth.uid);
+
+      match /stickers/{stickerId} {
+        allow read: if isSignedIn()
+          && (get(/databases/$(database)/documents/stickerPacks/$(packId)).data.price == 0
+            || exists(/databases/$(database)/documents/users/$(request.auth.uid)/stickerPacks/$(packId))
+            || isAdmin());
+        allow write: if isSignedIn()
+          && (isAdmin() || get(/databases/$(database)/documents/stickerPacks/$(packId)).data.creatorUid == request.auth.uid);
+      }
     }
 
     // ---------------------------- online status (Sprint Final, Part 9) ----------------------------

@@ -103,7 +103,13 @@ export default function DMMediaContent({ message: m, isOwn }: DMMediaContentProp
       );
 
     case "sticker":
-      return <p className="text-6xl leading-none">{m.mediaUrl}</p>;
+      // PART 6 — sticker packs: mediaUrl is now a real image URL (a pack's sticker), not the
+      // literal emoji-glyph string the original curated-glyph picker sent — rendered as an
+      // image, same shape as the gif case above, rather than giant text.
+      return (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img loading="lazy" src={m.mediaUrl} alt="" className="mb-1 h-32 w-32 object-contain" />
+      );
 
     case "video":
       return (

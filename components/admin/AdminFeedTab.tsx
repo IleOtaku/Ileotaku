@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import { Eye, Flame, Rocket, Trash2, Video, XCircle } from "lucide-react";
 import { Skeleton } from "@/components/ui";
+import AdminStickerPacksSection from "./AdminStickerPacksSection";
 import { adminClearBoost, deletePost, getAllPostsForAdmin } from "@/lib/creatorFeed";
 import { formatTime } from "@/lib/utils";
 import type { CreatorPost } from "@/types";
@@ -104,6 +105,7 @@ export default function AdminFeedTab() {
 
   return (
     <div className="flex flex-col gap-6">
+      <AdminStickerPacksSection />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div className="rounded-xl border border-bg4 bg-bg2 p-4">
           <p className="font-noto text-xs text-muted">Total posts</p>

@@ -10,6 +10,11 @@ const EXPLORE_LINKS = [
   { label: "Explore", href: "/explore" },
   { label: "New Releases", href: "/explore#new-releases" },
   { label: "Pricing", href: "/pricing" },
+  // Beta feedback (PART 9) asked for this under a "Community" column — the footer's grid is a
+  // fixed 4 columns (brand + 3 link lists) with none currently named that, so a 5th column would
+  // break the layout; Explore is the closest existing fit for a store other users' content lives
+  // in.
+  { label: "Sticker Store", href: "/stickers" },
 ];
 
 const CREATOR_LINKS = [

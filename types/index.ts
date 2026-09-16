@@ -1254,6 +1254,39 @@ export interface Sound {
   createdAt: string;
 }
 
+/* ---------------------------- PART 6: Sticker packs ---------------------------- */
+
+export type StickerPackStatus = "pending" | "approved" | "rejected";
+
+export interface StickerPack {
+  id: string;
+  name: string;
+  description: string;
+  artist: string;
+  coverStickerUrl: string;
+  /** Exactly 3 (or fewer, for a creator pack with under 3 stickers) preview thumbnails shown on
+   * the Sticker Store's pack card, before the full pack is opened/owned. */
+  previewUrls: string[];
+  stickerCount: number;
+  /** 0 = free; otherwise the coin price. */
+  price: number;
+  isOfficial: boolean;
+  createdAt: string;
+  downloads: number;
+  /** Creator-submitted packs only (absent on official packs) — set by CreatorStickerPacksTab's
+   * upload flow, reviewed via the admin Sticker Packs queue. */
+  creatorUid?: string;
+  creatorName?: string;
+  status?: StickerPackStatus;
+}
+
+export interface StickerItem {
+  id: string;
+  url: string;
+  keywords: string[];
+  order: number;
+}
+
 /* ---------------------------- Offline reading ---------------------------- */
 
 export interface DownloadedChapterMeta {
