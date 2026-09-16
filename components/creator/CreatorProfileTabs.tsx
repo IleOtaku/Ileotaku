@@ -6,6 +6,7 @@ import CreatorPostsViewer from "@/components/creator/CreatorPostsViewer";
 import PostGridCard from "@/components/creator/PostGridCard";
 import PublishedWorkCard from "@/components/creator/PublishedWorkCard";
 import { EmptyState, Tabs } from "@/components/ui";
+import { formatBirthday } from "@/lib/birthday";
 import type { CreatorPost, PublishedSeries, UserProfile } from "@/types";
 
 type ProfileTab = "posts" | "works" | "about";
@@ -106,11 +107,16 @@ export default function CreatorProfileTabs({
               </div>
             </div>
 
-            {(creator.country || social?.twitter || social?.instagram || social?.website) && (
+            {(creator.country || formatBirthday(creator.birthday) || social?.twitter || social?.instagram || social?.website) && (
               <div className="flex flex-col gap-3 rounded-2xl border border-bg4 bg-bg2 p-5">
                 {creator.country && (
                   <div className="flex items-center gap-2 font-noto text-sm text-text">
                     <MapPin className="h-4 w-4 text-muted" /> {creator.country}
+                  </div>
+                )}
+                {formatBirthday(creator.birthday) && (
+                  <div className="flex items-center gap-2 font-noto text-sm text-text">
+                    🎂 Birthday: {formatBirthday(creator.birthday)}
                   </div>
                 )}
                 {social?.twitter && (

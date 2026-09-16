@@ -172,6 +172,22 @@ export interface UserProfile {
    * goes out (now + 14 days) — null until then. */
   scheduledDeletionAt?: string | null;
 
+  /** Beta feedback: a birthday feature. Stored as "MM-DD" ONLY — deliberately no year, so a
+   * public profile can show "🎂 Birthday: March 15" without ever revealing age. Optional; absent
+   * or null means the user never set one (null is the explicit "I cleared it" value EditProfile-
+   * Modal writes, since Firestore's updateDoc rejects a literal `undefined`). See lib/birthday.ts
+   * for the today-matching/notification logic. */
+  birthday?: string | null;
+
+  /** Per-creator settings that aren't specific to any one work — kept as its own nested object
+   * (rather than flat top-level fields) so it reads as one clearly-creator-only bundle. */
+  creatorSettings?: {
+    /** Beta feedback: "downloaded videos should have our own unique watermark." Default ON
+     * (absent/undefined reads as true) so a creator who never visits this setting is still
+     * protected; an explicit `false` opts out for a creator who applies their own watermark. */
+    videoWatermark?: boolean;
+  };
+
   createdAt: string;
   updatedAt: string;
 }
@@ -721,6 +737,9 @@ export enum NotificationType {
   APPEAL_DENIED = "APPEAL_DENIED",
   RESTRICTION_LIFTED = "RESTRICTION_LIFTED",
   PROFILE_VISIT = "PROFILE_VISIT",
+  /** Beta feedback: a birthday feature — see lib/birthday.ts. Sent both to the birthday person
+   * themselves and to their followers, on the day their `birthday` (MM-DD) matches. */
+  BIRTHDAY = "BIRTHDAY",
 }
 
 /** Named `AppNotification` (not `Notification`) to avoid colliding with the DOM Notification API. */
@@ -1012,6 +1031,11 @@ export interface CreatorPost {
    * `verifiedType` (authoritative) sits alongside the legacy `isPublisher` fallback. */
   verifiedType?: "creator" | "publisher" | null;
   isAdmin?: boolean;
+  /** Beta feedback: a birthday feature — "shows in: profile header, comments, feed posts, DMs,
+   * search results." Denormalized "MM-DD" (same convention as the other badge fields on this
+   * post) so the feed card can compute isBirthdayToday() at render time with no extra lookup —
+   * it naturally stops showing the day after, without ever needing to be un-set. */
+  authorBirthday?: string | null;
   /** Beta feedback: "Creators should be able to stop people from downloading their videos, pics,
    * or posts by toggling it in profile settings." Denormalized from the author's profile at post
    * time (same convention as isVerified/isPlatinum above) — FeedShareSheet hides its Download
@@ -1201,7 +1225,9 @@ export interface ListenSession {
 
 /* ---------------------------- Sounds ---------------------------- */
 
-export type SoundCategory = "African Beats" | "Intense" | "Romantic" | "Chill" | "Epic";
+/** "Manga Vibes" added per beta feedback — instrumental tracks suited to reading, seeded via
+ * scripts/seed-sounds.js. */
+export type SoundCategory = "African Beats" | "Manga Vibes" | "Intense" | "Romantic" | "Chill" | "Epic";
 export type SoundSource = "library" | "creator" | "spotify";
 
 export interface Sound {

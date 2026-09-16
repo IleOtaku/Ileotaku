@@ -10,6 +10,7 @@ import {
   Ban,
   Bell,
   BookOpen,
+  Cake,
   CheckCircle2,
   Coins as CoinsIcon,
   Dices,
@@ -65,6 +66,7 @@ const TYPE_ICON: Record<NotificationType, LucideIcon> = {
   [NotificationType.APPEAL_DENIED]: Ban,
   [NotificationType.RESTRICTION_LIFTED]: Unlock,
   [NotificationType.PROFILE_VISIT]: Eye,
+  [NotificationType.BIRTHDAY]: Cake,
 };
 
 type GroupLabel = "Today" | "This Week" | "Earlier";

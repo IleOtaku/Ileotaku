@@ -159,6 +159,7 @@ export default function PostComposer({ onPosted }: PostComposerProps) {
       verifiedType: profile!.verifiedType,
       isAdmin: profile!.isAdmin,
       disableDownloads: profile!.disableDownloads,
+      birthday: profile!.birthday,
     };
   }
 

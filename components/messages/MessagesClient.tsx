@@ -36,9 +36,11 @@ import BlockButton from "@/components/social/BlockButton";
 import { Modal, Skeleton } from "@/components/ui";
 import { Avatar } from "@/components/ui/Avatar";
 import { PlatinumBadge } from "@/components/ui/Badges";
+import { BirthdayBadge } from "@/components/ui/BirthdayBadge";
 import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import LinkPreviewCard from "@/components/ui/LinkPreviewCard";
 import MentionText, { extractFirstUrl } from "@/components/ui/MentionText";
+import { isBirthdayToday } from "@/lib/birthday";
 import AttachmentTray from "./AttachmentTray";
 import DMMediaContent from "./DMMediaContent";
 import DMSettingsPanel from "./DMSettingsPanel";
@@ -1237,6 +1239,7 @@ export default function MessagesClient() {
                       <span className="flex min-w-0 items-center gap-1">
                         <span className="truncate font-syne text-sm font-semibold text-text">{name}</span>
                         {!isGroup && <VerificationBadge user={otherParticipantProfiles.get(other)} size={12} />}
+                        {!isGroup && <BirthdayBadge birthday={otherParticipantProfiles.get(other)?.birthday} size={12} />}
                       </span>
                       <span className="shrink-0 font-noto text-[10px] text-muted">
                         {formatPostTimestamp(c.lastMessageAt)}
@@ -1408,6 +1411,7 @@ export default function MessagesClient() {
                         <span className="truncate">{displayName}</span>
                         <VerificationBadge user={otherProfile} size={14} />
                         <PlatinumBadge isPlatinum={otherProfile?.isPlatinum} className="h-3.5 w-3.5" />
+                        <BirthdayBadge birthday={otherProfile?.birthday} size={14} />
                         {otherProfile?.handle && (
                           <span className="ml-1 font-noto text-xs font-normal text-muted">@{otherProfile.handle}</span>
                         )}
@@ -1518,6 +1522,14 @@ export default function MessagesClient() {
               >
                 {selected?.wallpaperUrl && selected.wallpaperBlur && (
                   <div className="pointer-events-none absolute inset-0 bg-bg/40" style={{ backdropFilter: "blur(8px)" }} />
+                )}
+                {/* Beta feedback: a birthday feature — "If you open a DM with someone on their
+                    birthday: show a subtle banner at top of chat." Uses the nickname-aware
+                    `displayName` (not the raw otherName) so it reads naturally either way. */}
+                {!isGroupThread && isBirthdayToday(otherProfile?.birthday) && (
+                  <div className="relative z-10 mb-3 flex items-center justify-center gap-1.5 rounded-full bg-gradient-to-r from-gold/20 to-clay/20 px-3 py-1.5 text-center font-noto text-[11px] text-text">
+                    🎂 Today is {displayName}&apos;s birthday!
+                  </div>
                 )}
                 {/* DM Feature Overhaul (Part H): "Disappearing messages are on..." banner. */}
                 {selected?.disappearingMessages?.enabled && (
@@ -2323,6 +2335,7 @@ export default function MessagesClient() {
                       <span className="flex min-w-0 flex-1 items-center gap-1 truncate font-noto text-sm text-text">
                         <span className="truncate">{uid === user.uid ? "You" : name}</span>
                         <VerificationBadge user={participantProfiles.get(uid)} size={13} />
+                        <BirthdayBadge birthday={participantProfiles.get(uid)?.birthday} size={13} />
                       </span>
                       {isMemberAdmin && <span className="font-noto text-[10px] font-semibold text-gold">Admin</span>}
                       {isGroupAdmin && uid !== user.uid && (

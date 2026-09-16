@@ -21,6 +21,7 @@ import FollowButton from "@/components/social/FollowButton";
 import ReportButton from "@/components/social/ReportButton";
 import { Avatar } from "@/components/ui/Avatar";
 import { PlatinumBadge } from "@/components/ui/Badges";
+import { BirthdayBadge } from "@/components/ui/BirthdayBadge";
 import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import MentionText from "@/components/ui/MentionText";
 import { useAuth } from "@/hooks/useAuth";
@@ -445,6 +446,7 @@ function TikTokFeedItem({ post, isSaved, onDeleted }: TikTokFeedItemProps) {
               <span className="truncate">{post.displayName}</span>
               <VerificationBadge user={post} size={14} />
               <PlatinumBadge isPlatinum={post.isPlatinum} className="h-3.5 w-3.5" />
+              <BirthdayBadge birthday={post.authorBirthday} size={14} />
             </Link>
             <span className="shrink-0 font-noto text-xs text-ivory/60">· {formatPostTimestamp(post.createdAt)}</span>
             {!isOwnPost && !isFollowing && (

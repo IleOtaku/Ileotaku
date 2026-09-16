@@ -62,6 +62,8 @@ export interface CreatorPostBadges {
   /** Beta feedback: creator-side "disable downloads" toggle, denormalized at post time so
    * FeedShareSheet can hide its Download button without a per-post profile lookup. */
   disableDownloads?: boolean;
+  /** Beta feedback: a birthday feature — see CreatorPost.authorBirthday's own doc comment. */
+  birthday?: string | null;
 }
 
 export interface FeedPage {
@@ -211,6 +213,11 @@ type ScoreInput = Pick<
   | "isFoundingCreator"
   | "isPlatinum"
   | "mediaType"
+  // Beta feedback (feed ranking by verification tier): the tier-specific fields
+  // calculateForYouScore's verificationBoost term needs, beyond the flat isVerified it already had.
+  | "isFounder"
+  | "isAdmin"
+  | "verifiedType"
 >;
 
 /** Per-viewer signals calculateForYouScore can't derive from the post document alone — see the
@@ -263,11 +270,33 @@ export function calculateForYouScore(post: ScoreInput, userContext?: ForYouUserC
     (post.profileVisitsFromPost ?? 0) * 10;
 
   const qualityScore =
-    (post.isVerified ? 15 : 0) +
     (post.isFoundingCreator ? 10 : 0) +
-    (post.isPlatinum ? 5 : 0) +
     (post.mediaType === "video" ? 8 : 0) +
     (post.mediaType === "image" || post.mediaType === "images" ? 4 : 0);
+
+  // Beta feedback: feed ranking by verification tier — "verified users always get engagements...
+  // Gold verified every user sees his posts, purple is seen by majority too, blue by their
+  // followers and a small % outside that, white by their followers and a little % outside that,
+  // then unverified gets pushed to mostly the following page only." A literal
+  // audience-percentage simulation isn't something this scoring model can express (it ranks a
+  // shared candidate pool, it doesn't independently decide each viewer's odds of seeing a post),
+  // so this applies the spirit of the ask as a straightforward ranking boost matching the
+  // fixed-tier priority order already established in lib/verification.ts's getVerificationBadge —
+  // absorbing the old flat isVerified/isPlatinum bonuses qualityScore used to add on its own,
+  // rather than double-counting them here too.
+  const verificationBoost = post.isFounder
+    ? 50 // Founder — highest reach
+    : post.isAdmin
+      ? 30 // Admin
+      : post.verifiedType === "publisher"
+        ? 25 // Verified Publisher
+        : post.verifiedType === "creator"
+          ? 20 // Verified Creator
+          : post.isVerified
+            ? 10 // General verified
+            : 0; // Unverified
+
+  const platinumBoost = post.isPlatinum ? 8 : 0;
 
   const relationshipScore = (userContext?.followsAuthor ? 25 : 0) + (userContext?.hasInteractedBefore ? 10 : 0);
 
@@ -279,7 +308,12 @@ export function calculateForYouScore(post: ScoreInput, userContext?: ForYouUserC
     post.boostLevel > 0 && !!post.boostExpiresAt && new Date(post.boostExpiresAt).getTime() > Date.now();
   const boostMultiplier = boostActive ? BOOST_TIERS[post.boostLevel as 1 | 2 | 3].multiplier : 1;
 
-  return Math.round(((engagementScore + qualityScore + relationshipScore + recencyBonus) / decay) * boostMultiplier);
+  const baseScore =
+    ((engagementScore + qualityScore + relationshipScore + recencyBonus + verificationBoost + platinumBoost) /
+      decay) *
+    boostMultiplier;
+
+  return Math.round(baseScore);
 }
 
 /* ---------------------------- Video upload ---------------------------- */
@@ -428,6 +462,7 @@ export async function createPost(input: CreatePostInput): Promise<string> {
       verifiedType: badges.verifiedType ?? null,
       isAdmin: badges.isAdmin ?? false,
       disableDownloads: badges.disableDownloads ?? false,
+      authorBirthday: badges.birthday ?? null,
       ...(sound
         ? {
             soundId: sound.id,

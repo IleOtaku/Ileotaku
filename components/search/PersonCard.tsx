@@ -7,6 +7,7 @@ import FollowButton from "@/components/social/FollowButton";
 import MessageButton from "@/components/social/MessageButton";
 import { Avatar } from "@/components/ui/Avatar";
 import { PlatinumBadge } from "@/components/ui/Badges";
+import { BirthdayBadge } from "@/components/ui/BirthdayBadge";
 import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import { getCreatorStats } from "@/lib/firestore";
 import { truncate } from "@/lib/utils";
@@ -53,6 +54,7 @@ export default function PersonCard({ person }: PersonCardProps) {
               </span>
             )}
             <PlatinumBadge isPlatinum={person.isPlatinum} className="h-4 w-4" />
+            <BirthdayBadge birthday={person.birthday} size={16} />
           </Link>
           {person.handle && <p className="font-noto text-xs text-muted">@{person.handle}</p>}
           {person.bio && (

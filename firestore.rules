@@ -761,6 +761,16 @@ service cloud.firestore {
       allow write: if isOwner(uid);
     }
 
+    // ---------------------------- birthday feature ----------------------------
+    // One dedup marker per uid, holding only the last full date its birthday notification fan-out
+    // ran — see lib/birthday.ts's notifyBirthdayIfNotAlready for why this has to be writable by
+    // ANY signed-in user rather than just uid's own owner: it's whichever viewer's home feed
+    // happens to load first that day that triggers the fan-out, not the birthday person
+    // themselves (they may not even be online). Contains no personal data beyond a date.
+    match /birthdayNotified/{uid} {
+      allow read, write: if isSignedIn();
+    }
+
     // ---------------------------- typing indicators (Part 10) ----------------------------
     // One doc per conversation, a map of participant uid -> timestamp (or null once they stop).
     // Not scoped to actual conversation membership — a get() on the conversation doc on every

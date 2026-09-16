@@ -15,7 +15,9 @@ import FollowListModal from "@/components/social/FollowListModal";
 import NowPlayingCard from "@/components/spotify/NowPlayingCard";
 import { Skeleton, Tabs } from "@/components/ui";
 import { PlatinumBadge } from "@/components/ui/Badges";
+import { BirthdayBadge } from "@/components/ui/BirthdayBadge";
 import { VerificationBadge } from "@/components/ui/VerificationBadge";
+import { formatBirthday } from "@/lib/birthday";
 
 // Sprint 10 perf audit: this page's own First Load JS pulled in all five tab bodies plus both
 // modals even though only one tab (and no modal) is ever visible on first paint — dynamically
@@ -264,12 +266,16 @@ export default function ProfileClient() {
               ) : (
                 <span className="badge-free">Free</span>
               )}
+              <BirthdayBadge birthday={profile?.birthday} size={20} />
             </div>
             {profile?.handle && <p className="font-noto text-sm text-muted">@{profile.handle}</p>}
             {isPlatinum && profile?.platinumTagline && (
               <p className="mt-0.5 font-noto text-xs font-semibold text-plat2">{profile.platinumTagline}</p>
             )}
             {profile?.bio && <p className="mt-1 max-w-md font-noto text-xs text-muted">{profile.bio}</p>}
+            {formatBirthday(profile?.birthday) && (
+              <p className="mt-1 font-noto text-xs text-muted">🎂 Birthday: {formatBirthday(profile?.birthday)}</p>
+            )}
           </div>
         </div>
 

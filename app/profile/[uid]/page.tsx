@@ -12,7 +12,9 @@ import NowPlayingCard from "@/components/spotify/NowPlayingCard";
 import { getCoverGradient } from "@/lib/coverStyles";
 import AvatarLightbox from "@/components/ui/AvatarLightbox";
 import { PlatinumBadge } from "@/components/ui/Badges";
+import { BirthdayBadge } from "@/components/ui/BirthdayBadge";
 import { VerificationBadge } from "@/components/ui/VerificationBadge";
+import { formatBirthday } from "@/lib/birthday";
 import { getUserProfile } from "@/lib/firestore";
 import type { UserProfile } from "@/types";
 
@@ -77,6 +79,7 @@ export default async function PublicProfilePage({ params }: PublicProfilePagePro
             <VerificationBadge user={profile} size={20} />
             <PlatinumBadge isPlatinum={profile.isPlatinum} className="h-5 w-5" />
             {profile.isPlatinum && <span className="badge-plat">Platinum</span>}
+            <BirthdayBadge birthday={profile.birthday} size={20} />
           </div>
           {profile.handle && <p className="font-noto text-sm text-muted">@{profile.handle}</p>}
           {profile.isPlatinum && profile.platinumTagline && (
@@ -100,6 +103,11 @@ export default async function PublicProfilePage({ params }: PublicProfilePagePro
       {profile.bio && (
         <p className="mt-6 max-w-2xl text-center font-noto text-sm text-muted sm:text-left">
           {profile.bio}
+        </p>
+      )}
+      {formatBirthday(profile.birthday) && (
+        <p className="mt-2 text-center font-noto text-sm text-muted sm:text-left">
+          🎂 Birthday: {formatBirthday(profile.birthday)}
         </p>
       )}
 

@@ -21,6 +21,7 @@ import BoostModal from "./BoostModal";
 import EditingAppBadge from "./EditingAppBadge";
 import { Avatar } from "@/components/ui/Avatar";
 import { PlatinumBadge } from "@/components/ui/Badges";
+import { BirthdayBadge } from "@/components/ui/BirthdayBadge";
 import MentionText from "@/components/ui/MentionText";
 import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import { getOptimizedImageUrl, getVideoThumbnail } from "@/lib/cloudinary";
@@ -281,6 +282,7 @@ function FeedPostCard({ post, onDeleted }: FeedPostCardProps) {
                 </span>
               )}
               <PlatinumBadge isPlatinum={post.isPlatinum} className="h-4 w-4" />
+              <BirthdayBadge birthday={post.authorBirthday} size={16} />
             </div>
             <div className="mt-0.5 flex flex-wrap items-center gap-1.5 font-noto text-xs text-muted">
               <span className="rounded-full bg-bg3 px-2 py-0.5 text-[11px] font-semibold text-clay2">

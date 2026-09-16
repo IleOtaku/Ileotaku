@@ -19,6 +19,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { proxyImg } from "@/lib/manga-api";
 import { timeOfDayGreeting } from "@/lib/utils";
 import type { PublishedSeries } from "@/types";
+import BirthdayBanner from "./BirthdayBanner";
 import ContinueReadingRow from "./ContinueReadingRow";
 import CreatorUpdatesSection from "./CreatorUpdatesSection";
 import LatestFromFollowingSection from "./LatestFromFollowingSection";
@@ -111,6 +112,8 @@ export default function HomeClient({ trendingSlot, africanOriginals }: HomeClien
         </h1>
         <p className="mt-1 font-noto text-sm text-muted">Here&apos;s what&apos;s waiting for you today.</p>
       </Reveal>
+
+      <BirthdayBanner />
 
       <section className="mt-10">
         <div className="mb-4 flex items-center justify-between">

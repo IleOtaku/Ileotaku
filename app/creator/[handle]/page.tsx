@@ -4,6 +4,7 @@ import { Sparkles } from "lucide-react";
 import { getCoverGradient } from "@/lib/coverStyles";
 import AvatarLightbox from "@/components/ui/AvatarLightbox";
 import { PlatinumBadge } from "@/components/ui/Badges";
+import { BirthdayBadge } from "@/components/ui/BirthdayBadge";
 import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import { getUserByHandle } from "@/lib/firestore";
 import { getPostsByCreator } from "@/lib/creatorFeed";
@@ -107,6 +108,7 @@ export default async function CreatorProfilePage({ params }: CreatorProfilePageP
                 <h1 className="font-cinzel text-2xl text-text">{creator.displayName}</h1>
                 <VerificationBadge user={creator} size={20} />
                 <PlatinumBadge isPlatinum={creator.isPlatinum} className="h-5 w-5" />
+                <BirthdayBadge birthday={creator.birthday} size={20} />
               </div>
               {creator.handle && <p className="font-noto text-sm text-muted">@{creator.handle}</p>}
               {creator.isPlatinum && creator.platinumTagline && (
