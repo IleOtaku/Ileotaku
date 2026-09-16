@@ -31,7 +31,7 @@ function soundHelixUrl(track) {
 }
 
 const TRACKS = [
-  // African Beats (8)
+  // African Beats (13 — beta feedback asked for 5 more on top of the original 8)
   { title: "Djembe Sunrise", artist: "Kevin MacLeod", duration: 187, category: "African Beats", track: 1 },
   { title: "Savanna Pulse", artist: "Scott Holmes", duration: 203, category: "African Beats", track: 2 },
   { title: "Kalimba Dreams", artist: "Ikson", duration: 165, category: "African Beats", track: 3 },
@@ -40,6 +40,17 @@ const TRACKS = [
   { title: "Marimba Sunset", artist: "Ketsa", duration: 196, category: "African Beats", track: 6 },
   { title: "Lagos Nights", artist: "Komiku", duration: 182, category: "African Beats", track: 7 },
   { title: "Sahara Wind", artist: "Chad Crouch", duration: 210, category: "African Beats", track: 8 },
+  { title: "Amapiano Sundown", artist: "Scott Holmes", duration: 199, category: "African Beats", track: 9 },
+  { title: "Accra Market Groove", artist: "Jahzzar", duration: 177, category: "African Beats", track: 10 },
+  { title: "Nairobi Skyline", artist: "Ketsa", duration: 214, category: "African Beats", track: 11 },
+  { title: "Griot's Tale", artist: "Blue Dot Sessions", duration: 188, category: "African Beats", track: 12 },
+  { title: "Kente Rhythm", artist: "Komiku", duration: 205, category: "African Beats", track: 13 },
+  // Manga Vibes (5) — instrumental tracks suited to reading, per beta feedback's new category
+  { title: "Turning Pages", artist: "Chad Crouch", duration: 220, category: "Manga Vibes", track: 14 },
+  { title: "Quiet Chapter", artist: "Ketsa", duration: 195, category: "Manga Vibes", track: 15 },
+  { title: "Ink & Panels", artist: "Blue Dot Sessions", duration: 208, category: "Manga Vibes", track: 16 },
+  { title: "Midnight Read", artist: "Scott Holmes", duration: 183, category: "Manga Vibes", track: 1 },
+  { title: "Between the Lines", artist: "Komiku", duration: 231, category: "Manga Vibes", track: 2 },
   // Intense (3)
   { title: "Adrenaline Rush", artist: "Kevin MacLeod", duration: 158, category: "Intense", track: 9 },
   { title: "Dark Descent", artist: "Alexander Nakarada", duration: 201, category: "Intense", track: 10 },
@@ -59,10 +70,22 @@ const TRACKS = [
 ];
 
 async function main() {
+  // Idempotent: this script has already been run once for the original 20 tracks — re-running it
+  // to add the new African Beats/Manga Vibes tracks should never duplicate the ones already
+  // there, keyed by (title, category) since that's the only natural identity a seeded track has.
+  const existingSnap = await db.collection("sounds").where("source", "==", "library").get();
+  const existingKeys = new Set(existingSnap.docs.map((d) => `${d.data().title}::${d.data().category}`));
+
+  const toAdd = TRACKS.filter((t) => !existingKeys.has(`${t.title}::${t.category}`));
+  if (toAdd.length === 0) {
+    console.log("Nothing new to seed — every track already exists.");
+    return;
+  }
+
   const batch = db.batch();
   const now = new Date().toISOString();
 
-  TRACKS.forEach((t) => {
+  toAdd.forEach((t) => {
     const ref = db.collection("sounds").doc();
     batch.set(ref, {
       title: t.title,
@@ -77,7 +100,7 @@ async function main() {
   });
 
   await batch.commit();
-  console.log(`Seeded ${TRACKS.length} sounds into the "sounds" collection.`);
+  console.log(`Seeded ${toAdd.length} new sounds (${TRACKS.length - toAdd.length} already existed).`);
 }
 
 main()

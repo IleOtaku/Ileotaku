@@ -24,6 +24,7 @@ const ALLOWED_TYPES = ["audio/mpeg", "audio/wav", "audio/x-wav", "audio/ogg"];
  * Trending Sounds cards so a category always reads the same color everywhere it appears. */
 export const SOUND_CATEGORY_COLORS: Record<SoundCategory, string> = {
   "African Beats": "bg-clay/15 text-clay2",
+  "Manga Vibes": "bg-plat/15 text-plat2",
   Intense: "bg-red-500/15 text-red-400",
   Romantic: "bg-pink-500/15 text-pink-400",
   Chill: "bg-green/15 text-green2",

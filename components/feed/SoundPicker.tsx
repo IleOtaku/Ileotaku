@@ -16,7 +16,6 @@ import {
 } from "lucide-react";
 import { Modal } from "@/components/ui";
 import { useAuth } from "@/hooks/useAuth";
-import { getUserProfile } from "@/lib/firestore";
 import {
   deleteCreatorSound,
   getCreatorSounds,
@@ -24,14 +23,12 @@ import {
   searchSounds,
   uploadCreatorSound,
 } from "@/lib/sounds";
-import { connectSpotify, searchTracks, type SpotifySearchTrack } from "@/lib/spotify";
 import type { Sound, SoundCategory } from "@/types";
-
-type SpotifyTrack = SpotifySearchTrack;
 
 const CATEGORIES: (SoundCategory | "All")[] = [
   "All",
   "African Beats",
+  "Manga Vibes",
   "Intense",
   "Romantic",
   "Chill",
@@ -51,11 +48,18 @@ export interface SoundPickerProps {
   onSelect: (sound: Sound | null) => void;
 }
 
-type PickerTab = "library" | "mySounds" | "spotify";
+type PickerTab = "library" | "mySounds";
 
-/** Sound-selection modal opened from the post composer's "🎵 Add Sound" button. Three tabs:
- * the shared library, the signed-in creator's own uploads, and a Spotify 30-second-preview
- * search. Each tab's "Select" hands a Sound-shaped object back to the caller via onSelect. */
+/** Sound-selection modal opened from the post composer's "🎵 Add Sound" button. Two tabs: the
+ * shared library and the signed-in creator's own uploads. Each tab's "Select" hands a
+ * Sound-shaped object back to the caller via onSelect.
+ *
+ * Beta feedback: "The select button for spotify sounds still doesnt work. The songs say no
+ * preview available" — Spotify deprecated `preview_url` for virtually every third-party app in
+ * Nov 2024, so this tab's core feature (a 30-second preview) was permanently broken by Spotify's
+ * own API, not a bug here. Rather than leave a Spotify tab whose search never has anything
+ * playable to offer, it's removed outright — the Now Playing feature on profiles (a different,
+ * still-working integration) is untouched. */
 export default function SoundPicker({ open, onClose, selected, onSelect }: SoundPickerProps) {
   const { user } = useAuth();
   const [tab, setTab] = useState<PickerTab>("library");
@@ -71,13 +75,6 @@ export default function SoundPicker({ open, onClose, selected, onSelect }: Sound
   const [mySoundsLoading, setMySoundsLoading] = useState(true);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // ---- Spotify tab state ----
-  const [spotifyConnected, setSpotifyConnected] = useState(false);
-  const [spotifyQuery, setSpotifyQuery] = useState("");
-  const [spotifyResults, setSpotifyResults] = useState<SpotifyTrack[]>([]);
-  const [spotifySearching, setSpotifySearching] = useState(false);
-  const [spotifyError, setSpotifyError] = useState<string | null>(null);
 
   // ---- Shared audio preview ----
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -97,11 +94,6 @@ export default function SoundPicker({ open, onClose, selected, onSelect }: Sound
     getCreatorSounds(user.uid)
       .then(setMySounds)
       .finally(() => setMySoundsLoading(false));
-  }, [open, user]);
-
-  useEffect(() => {
-    if (!open || !user) return;
-    getUserProfile(user.uid).then((p) => setSpotifyConnected(p?.spotifyConnected === true));
   }, [open, user]);
 
   // Stop any preview and reset picker-local UI state whenever the modal closes.
@@ -192,51 +184,6 @@ export default function SoundPicker({ open, onClose, selected, onSelect }: Sound
     }
   }
 
-  function handleConnectSpotify() {
-    if (!user) return;
-    // Navigates away to Spotify's consent screen — nothing to await here, the
-    // /auth/spotify/callback page finishes the flow and returns to Settings.
-    connectSpotify(user.uid);
-  }
-
-  async function handleSpotifySearch(e: React.FormEvent) {
-    e.preventDefault();
-    if (!user) return;
-    const q = spotifyQuery.trim();
-    if (!q) return;
-    setSpotifySearching(true);
-    setSpotifyError(null);
-    try {
-      const tracks = await searchTracks(user.uid, q);
-      setSpotifyResults(tracks);
-      if (tracks.length === 0) setSpotifyError(null);
-    } catch {
-      setSpotifyError("Spotify search is unavailable right now.");
-      setSpotifyResults([]);
-    } finally {
-      setSpotifySearching(false);
-    }
-  }
-
-  function handleSelectSpotifyTrack(track: SpotifyTrack) {
-    if (!track.previewUrl) {
-      toast.error("This track has no 30-second preview available.");
-      return;
-    }
-    const asSound: Sound = {
-      id: `spotify:${track.id}`,
-      title: track.name,
-      artist: track.artist,
-      duration: track.duration,
-      url: track.previewUrl,
-      category: "Chill",
-      source: "spotify",
-      usageCount: 0,
-      createdAt: new Date().toISOString(),
-    };
-    handleSelectSound(asSound);
-  }
-
   function SoundCard({
     sound,
     onDelete,
@@ -321,7 +268,6 @@ export default function SoundPicker({ open, onClose, selected, onSelect }: Sound
               [
                 { value: "library", label: "Library" },
                 { value: "mySounds", label: "My Sounds" },
-                { value: "spotify", label: "Spotify" },
               ] as { value: PickerTab; label: string }[]
             ).map((t) => (
               <button
@@ -396,6 +342,9 @@ export default function SoundPicker({ open, onClose, selected, onSelect }: Sound
 
           {tab === "mySounds" && (
             <div className="flex flex-col gap-3">
+              <p className="rounded-lg border border-dashed border-muted2 bg-bg3 p-2.5 text-center font-noto text-[11px] text-muted">
+                🎧 Spotify integration coming soon.
+              </p>
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -441,88 +390,6 @@ export default function SoundPicker({ open, onClose, selected, onSelect }: Sound
                     <SoundCard key={s.id} sound={s} onDelete={() => handleDeleteSound(s)} />
                   ))}
                 </div>
-              )}
-            </div>
-          )}
-
-          {tab === "spotify" && (
-            <div className="flex flex-col gap-3">
-              {!spotifyConnected ? (
-                <div className="flex flex-col items-center gap-3 py-10 text-center">
-                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-green/15 text-2xl">
-                    🎧
-                  </span>
-                  <p className="font-syne text-sm font-semibold text-text">
-                    Connect Spotify to search tracks
-                  </p>
-                  <button type="button" onClick={handleConnectSpotify} className="btn-primary text-sm">
-                    Connect Spotify
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <form onSubmit={handleSpotifySearch} className="relative">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-                    <input
-                      value={spotifyQuery}
-                      onChange={(e) => setSpotifyQuery(e.target.value)}
-                      placeholder="Search Spotify tracks..."
-                      className="input-base pl-9"
-                    />
-                  </form>
-
-                  <p className="rounded-lg border border-dashed border-muted2 bg-bg3 p-2.5 font-noto text-[11px] text-muted">
-                    30-second preview via Spotify. Full track requires Spotify.
-                  </p>
-
-                  {spotifySearching ? (
-                    <div className="flex justify-center py-8">
-                      <Loader2 className="h-5 w-5 animate-spin text-muted" />
-                    </div>
-                  ) : spotifyError ? (
-                    <p className="py-8 text-center font-noto text-sm text-clay2">{spotifyError}</p>
-                  ) : spotifyResults.length === 0 ? (
-                    <p className="py-8 text-center font-noto text-sm text-muted">
-                      Search for a track to preview it here.
-                    </p>
-                  ) : (
-                    <div className="flex flex-col gap-2">
-                      {spotifyResults.map((track) => (
-                        <div
-                          key={track.id}
-                          className="flex items-center gap-3 rounded-xl border border-bg4 bg-bg2 p-3"
-                        >
-                          <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-bg3">
-                            {track.albumArt ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
-            loading="lazy" src={track.albumArt} alt="" className="h-full w-full object-cover" />
-                            ) : (
-                              <Music className="h-4 w-4 text-muted" />
-                            )}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate font-syne text-sm font-semibold text-text">
-                              {track.name}
-                            </p>
-                            <p className="truncate font-noto text-xs text-muted">
-                              {track.artist} · {formatDuration(track.duration)}
-                              {!track.previewUrl && " · No preview"}
-                            </p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleSelectSpotifyTrack(track)}
-                            disabled={!track.previewUrl}
-                            className="btn-primary shrink-0 px-3 py-1.5 text-xs disabled:opacity-40"
-                          >
-                            Select
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </>
               )}
             </div>
           )}
