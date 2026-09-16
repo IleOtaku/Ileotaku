@@ -12,23 +12,18 @@ import {
   Clock,
   Copy,
   ImagePlus,
-  Link2,
   Loader2,
-  LogOut,
   MoreHorizontal,
   Paperclip,
   Pencil,
   Plus,
-  RefreshCw,
   Reply,
   Search,
   Send,
   Settings,
   ShieldOff,
-  Shield,
   Smile,
   Trash2,
-  UserPlus,
   Users,
   X,
 } from "lucide-react";
@@ -45,6 +40,7 @@ import AttachmentTray from "./AttachmentTray";
 import DMMediaContent from "./DMMediaContent";
 import DMSettingsPanel from "./DMSettingsPanel";
 import GifPicker from "./GifPicker";
+import GroupInfoPanel from "./GroupInfoPanel";
 import InAppCamera from "./InAppCamera";
 import SharePickerModal, { type SharedManga, type SharedPost } from "./SharePickerModal";
 import StickerPicker from "./StickerPicker";
@@ -53,20 +49,14 @@ import { useAuth } from "@/hooks/useAuth";
 import { getBlockedUsers, isBlockedBy } from "@/lib/blocking";
 import { uploadAnyFile, uploadImage, uploadImageWithProgress, uploadVideo, uploadVoiceNote } from "@/lib/cloudinary";
 import {
-  addMembersToGroup,
   addReaction,
   archiveConversation,
   clearConversationForUser,
   createGroup,
-  deleteGroup,
   deleteMessage,
   editMessage,
   hideConversationForUser,
-  leaveGroup,
-  makeGroupAdmin,
   markDMRead,
-  regenerateInviteCode,
-  removeMemberFromGroup,
   removeReaction,
   sendDM,
   setTyping,
@@ -75,7 +65,6 @@ import {
   subscribeToConversations,
   subscribeToTyping,
   unarchiveConversation,
-  updateGroupInfo,
   type SendDMOptions,
 } from "@/lib/dms";
 import { getUserProfile, searchUsers } from "@/lib/firestore";
@@ -225,26 +214,19 @@ export default function MessagesClient() {
   const [creatingGroupSubmitting, setCreatingGroupSubmitting] = useState(false);
 
   // Group info slide-in panel (open group name/photo in the thread header) and its own
-  // sub-states: adding members reuses the same search UI as compose.
+  // WhatsApp-style Group Info redesign: this now opens GroupInfoPanel, a dedicated component
+  // that owns essentially all of its own member/settings/media state internally.
   const [groupInfoOpen, setGroupInfoOpen] = useState(false);
   // Beta feedback: "...and also a clear conversation button" — a small menu on the open thread's
   // own header, distinct from the sidebar row's hide/delete-conversation icon.
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
-  const [addingMembers, setAddingMembers] = useState(false);
-  const [memberActionUid, setMemberActionUid] = useState<string | null>(null);
-  const [groupInfoBusy, setGroupInfoBusy] = useState(false);
-  // Beta feedback: "Groups should have invite via link."
-  const [inviteBusy, setInviteBusy] = useState(false);
-  const [inviteCopied, setInviteCopied] = useState(false);
   // 5-tier verification overhaul: the group roster only denormalizes participantNames/Photos
   // (strings) onto the Conversation doc, not verification data — fetched on demand instead of a
   // full schema/write-path change, since a group's member list is small and only loaded while its
-  // own info panel is actually open.
+  // own info panel is actually open. Still fetched here (rather than inside GroupInfoPanel
+  // itself) since MessagesClient already had this exact effect and pattern established.
   const [participantProfiles, setParticipantProfiles] = useState<Map<string, UserProfile>>(new Map());
-  const [editingGroupName, setEditingGroupName] = useState(false);
-  const [groupNameDraft, setGroupNameDraft] = useState("");
-  const groupPhotoInputRef = useRef<HTMLInputElement>(null);
 
   // @mention dropdown in the message input — only ever active in a group thread.
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -305,12 +287,11 @@ export default function MessagesClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversations, user]);
 
-  // Closes the group info panel (and its own add-members sub-flow) whenever the open
-  // conversation changes, so switching threads never leaves a stale panel open on the new one.
+  // Closes the group info panel whenever the open conversation changes, so switching threads
+  // never leaves a stale panel open on the new one — GroupInfoPanel resets its own internal
+  // sub-flow state (add-members, member-action menu, etc.) on its own `open` prop instead.
   useEffect(() => {
     setGroupInfoOpen(false);
-    setAddingMembers(false);
-    setMemberActionUid(null);
     setGroupMemberUids(new Set());
     setGroupMemberProfiles(new Map());
     setHeaderMenuOpen(false);
@@ -502,10 +483,11 @@ export default function MessagesClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversations, user]);
 
-  // Compose modal search — small debounce so we're not re-querying on every keystroke. Also
-  // backs the group info panel's "Add Members" search (its own input reuses composeQuery).
+  // Compose modal search — small debounce so we're not re-querying on every keystroke.
+  // GroupInfoPanel (the group info redesign) now runs its own independent add-members search
+  // rather than sharing this state.
   useEffect(() => {
-    if (!composeOpen && !(groupInfoOpen && addingMembers)) return;
+    if (!composeOpen) return;
     const term = composeQuery.trim();
     if (!term) {
       setComposeResults([]);
@@ -520,7 +502,7 @@ export default function MessagesClient() {
         .finally(() => setComposeSearching(false));
     }, 300);
     return () => clearTimeout(timer);
-  }, [composeQuery, composeOpen, groupInfoOpen, addingMembers, user]);
+  }, [composeQuery, composeOpen, user]);
 
   async function handleStartConversation(targetUid: string) {
     if (!user || targetUid === user.uid) return;
@@ -624,82 +606,6 @@ export default function MessagesClient() {
     };
   }, [groupInfoOpen, groupParticipantsKey]);
 
-  async function handleAddMembersToOpenGroup() {
-    if (!user || !selectedGroup || groupMemberUids.size === 0) return;
-    setGroupInfoBusy(true);
-    try {
-      await addMembersToGroup(selectedGroup.id, user.uid, Array.from(groupMemberUids));
-      setAddingMembers(false);
-      setGroupMemberUids(new Set());
-      setGroupMemberProfiles(new Map());
-      setComposeQuery("");
-      setComposeResults([]);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't add members.");
-    } finally {
-      setGroupInfoBusy(false);
-    }
-  }
-
-  async function handleRemoveMember(targetUid: string) {
-    if (!user || !selectedGroup) return;
-    setMemberActionUid(null);
-    try {
-      await removeMemberFromGroup(selectedGroup.id, user.uid, targetUid);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't remove that member.");
-    }
-  }
-
-  async function handleMakeAdmin(targetUid: string) {
-    if (!user || !selectedGroup) return;
-    setMemberActionUid(null);
-    try {
-      await makeGroupAdmin(selectedGroup.id, user.uid, targetUid);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't promote that member.");
-    }
-  }
-
-  function inviteLinkFor(code: string): string {
-    return typeof window !== "undefined" ? `${window.location.origin}/invite/${code}` : `/invite/${code}`;
-  }
-
-  async function handleCopyInviteLink() {
-    if (!selectedGroup?.inviteCode) return;
-    try {
-      await navigator.clipboard.writeText(inviteLinkFor(selectedGroup.inviteCode));
-      setInviteCopied(true);
-      setTimeout(() => setInviteCopied(false), 2000);
-    } catch {
-      toast.error("Couldn't copy the link.");
-    }
-  }
-
-  async function handleResetInviteLink() {
-    if (!user || !selectedGroup || inviteBusy) return;
-    setInviteBusy(true);
-    try {
-      await regenerateInviteCode(selectedGroup.id, user.uid);
-      toast.success("Invite link reset — the old link no longer works.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't reset the invite link.");
-    } finally {
-      setInviteBusy(false);
-    }
-  }
-
-  async function handleLeaveGroup() {
-    if (!user || !selectedGroup) return;
-    try {
-      await leaveGroup(selectedGroup.id, user.uid);
-      setGroupInfoOpen(false);
-      setSelectedId(null);
-    } catch {
-      toast.error("Couldn't leave the group.");
-    }
-  }
-
   // Beta feedback: "Allow us to delete people we no longer chat [with]" — hides the conversation
   // from this user's own sidebar only (see hideConversationForUser's doc comment); the other
   // participant's view and every message are untouched, and it reappears the next time anyone
@@ -728,45 +634,6 @@ export default function MessagesClient() {
       toast.error("Couldn't clear this conversation.");
     } finally {
       setClearing(false);
-    }
-  }
-
-  async function handleDeleteGroup() {
-    if (!user || !selectedGroup) return;
-    try {
-      await deleteGroup(selectedGroup.id, user.uid);
-      setGroupInfoOpen(false);
-      setSelectedId(null);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't delete the group.");
-    }
-  }
-
-  async function handleSaveGroupName() {
-    if (!user || !selectedGroup || !groupNameDraft.trim()) return;
-    setGroupInfoBusy(true);
-    try {
-      await updateGroupInfo(selectedGroup.id, user.uid, { name: groupNameDraft });
-      setEditingGroupName(false);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't rename the group.");
-    } finally {
-      setGroupInfoBusy(false);
-    }
-  }
-
-  async function handleChangeGroupPhoto(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file || !user || !selectedGroup) return;
-    setGroupInfoBusy(true);
-    try {
-      const uploaded = await uploadImage(file, `group-photos/${user.uid}`);
-      await updateGroupInfo(selectedGroup.id, user.uid, { photoURL: uploaded.secureUrl });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't update the group photo.");
-    } finally {
-      setGroupInfoBusy(false);
-      e.target.value = "";
     }
   }
 
@@ -2149,257 +2016,16 @@ export default function MessagesClient() {
       </Modal>
 
       {selectedGroup && (
-        <Modal open={groupInfoOpen} onClose={() => setGroupInfoOpen(false)} title="Group info">
-          {addingMembers ? (
-            <div className="flex flex-col gap-3">
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-                <input
-                  autoFocus
-                  value={composeQuery}
-                  onChange={(e) => setComposeQuery(e.target.value)}
-                  placeholder="Search people..."
-                  className="input-base w-full pl-9"
-                />
-              </div>
-              <div className="flex max-h-64 flex-col gap-1 overflow-y-auto">
-                {composeResults
-                  .filter((u) => !selectedGroup.participants.includes(u.uid))
-                  .map((u) => {
-                    const picked = groupMemberUids.has(u.uid);
-                    return (
-                      <button
-                        key={u.uid}
-                        type="button"
-                        onClick={() => toggleGroupMember(u)}
-                        className="flex items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-bg3"
-                      >
-                        <Avatar uid={u.uid} photoURL={u.photoURL} displayName={u.displayName} size={40} />
-                        <span className="min-w-0 flex-1 truncate font-syne text-sm font-semibold text-text">{u.displayName}</span>
-                        {picked && <Check className="h-4 w-4 shrink-0 text-clay" />}
-                      </button>
-                    );
-                  })}
-              </div>
-              <div className="flex justify-end gap-2">
-                <button type="button" onClick={() => setAddingMembers(false)} className="btn-ghost">
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleAddMembersToOpenGroup}
-                  disabled={groupMemberUids.size === 0 || groupInfoBusy}
-                  className="btn-primary"
-                >
-                  {groupInfoBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Add"}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-col items-center gap-2 text-center">
-                <button
-                  type="button"
-                  onClick={() => isGroupAdmin && groupPhotoInputRef.current?.click()}
-                  disabled={!isGroupAdmin || groupInfoBusy}
-                  className="relative"
-                  aria-label={isGroupAdmin ? "Change group photo" : "Group photo"}
-                >
-                  {selectedGroup.photoURL ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img loading="lazy" src={selectedGroup.photoURL} alt="" className="h-20 w-20 rounded-full object-cover" />
-                  ) : (
-                    <div
-                      className="flex h-20 w-20 items-center justify-center rounded-full font-cinzel text-xl font-bold text-white"
-                      style={{ background: stringToColor(selectedGroup.name ?? "Group") }}
-                    >
-                      {initials(selectedGroup.name ?? "Group")}
-                    </div>
-                  )}
-                  {isGroupAdmin && (
-                    <span className="absolute -right-1 -bottom-1 flex h-6 w-6 items-center justify-center rounded-full border-2 border-bg2 bg-clay text-ivory">
-                      <ImagePlus className="h-3 w-3" />
-                    </span>
-                  )}
-                </button>
-                <input ref={groupPhotoInputRef} type="file" accept="image/*" onChange={handleChangeGroupPhoto} className="hidden" />
-
-                {editingGroupName ? (
-                  <div className="flex items-center gap-2">
-                    <input
-                      autoFocus
-                      value={groupNameDraft}
-                      onChange={(e) => setGroupNameDraft(e.target.value)}
-                      className="input-base text-center"
-                    />
-                    <button type="button" onClick={handleSaveGroupName} disabled={groupInfoBusy} aria-label="Save name">
-                      <Check className="h-4 w-4 text-gold" />
-                    </button>
-                    <button type="button" onClick={() => setEditingGroupName(false)} aria-label="Cancel">
-                      <X className="h-4 w-4 text-muted" />
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!isGroupAdmin) return;
-                      setGroupNameDraft(selectedGroup.name ?? "");
-                      setEditingGroupName(true);
-                    }}
-                    className="font-cinzel text-lg text-text"
-                  >
-                    {selectedGroup.name}
-                  </button>
-                )}
-                {selectedGroup.description && (
-                  <p className="font-noto text-xs text-muted">{selectedGroup.description}</p>
-                )}
-                <p className="font-noto text-xs text-muted">{selectedGroup.participants.length} members</p>
-              </div>
-
-              {selectedGroup.inviteCode ? (
-                <div>
-                  <p className="mb-2 flex items-center gap-1.5 font-syne text-xs font-semibold uppercase tracking-wide text-muted">
-                    <Link2 className="h-3.5 w-3.5" /> Invite via link
-                  </p>
-                  <div className="flex items-center gap-2 rounded-xl border border-bg4 bg-bg p-2">
-                    <p className="min-w-0 flex-1 truncate font-noto text-xs text-muted">
-                      {inviteLinkFor(selectedGroup.inviteCode)}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={handleCopyInviteLink}
-                      aria-label="Copy invite link"
-                      className="shrink-0 rounded-full bg-bg3 p-1.5 text-muted hover:text-text"
-                    >
-                      {inviteCopied ? <Check className="h-3.5 w-3.5 text-green2" /> : <Copy className="h-3.5 w-3.5" />}
-                    </button>
-                    {isGroupAdmin && (
-                      <button
-                        type="button"
-                        onClick={handleResetInviteLink}
-                        disabled={inviteBusy}
-                        aria-label="Reset invite link"
-                        className="shrink-0 rounded-full bg-bg3 p-1.5 text-muted hover:text-text"
-                      >
-                        <RefreshCw className={`h-3.5 w-3.5 ${inviteBusy ? "animate-spin" : ""}`} />
-                      </button>
-                    )}
-                  </div>
-                  <p className="mt-1 font-noto text-[10px] text-muted">
-                    Anyone with this link can join {isGroupAdmin ? "— reset it to revoke old links." : "."}
-                  </p>
-                </div>
-              ) : (
-                // Groups created before invite links existed have no code yet — any admin can
-                // mint the first one on demand rather than this staying permanently unavailable.
-                isGroupAdmin && (
-                  <button
-                    type="button"
-                    onClick={handleResetInviteLink}
-                    disabled={inviteBusy}
-                    className="btn-ghost flex items-center justify-center gap-2 text-sm"
-                  >
-                    {inviteBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
-                    Create invite link
-                  </button>
-                )
-              )}
-
-              <div className="flex items-center justify-between">
-                <p className="font-syne text-xs font-semibold uppercase tracking-wide text-muted">Members</p>
-                {isGroupAdmin && (
-                  <button
-                    type="button"
-                    onClick={() => setAddingMembers(true)}
-                    className="flex items-center gap-1 font-noto text-xs font-semibold text-gold hover:underline"
-                  >
-                    <UserPlus className="h-3.5 w-3.5" /> Add
-                  </button>
-                )}
-              </div>
-              <div className="flex flex-col gap-1">
-                {selectedGroup.participants.map((uid) => {
-                  const name = selectedGroup.participantNames?.[uid] ?? "Reader";
-                  const photo = selectedGroup.participantPhotos?.[uid];
-                  const isMemberAdmin = (selectedGroup.adminUids ?? []).includes(uid);
-                  return (
-                    <div key={uid} className="flex items-center gap-3 rounded-lg px-1 py-1.5">
-                      <div className="relative shrink-0">
-                        <Avatar uid={uid} photoURL={photo} displayName={name} size={32} />
-                        {statusByUid[uid]?.isOnline && (
-                          <span className="absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full border-2 border-bg2 bg-gold" />
-                        )}
-                      </div>
-                      <span className="flex min-w-0 flex-1 items-center gap-1 truncate font-noto text-sm text-text">
-                        <span className="truncate">{uid === user.uid ? "You" : name}</span>
-                        <VerificationBadge user={participantProfiles.get(uid)} size={13} />
-                        <BirthdayBadge birthday={participantProfiles.get(uid)?.birthday} size={13} />
-                      </span>
-                      {isMemberAdmin && <span className="font-noto text-[10px] font-semibold text-gold">Admin</span>}
-                      {isGroupAdmin && uid !== user.uid && (
-                        <div className="relative">
-                          <button
-                            type="button"
-                            onClick={() => setMemberActionUid(memberActionUid === uid ? null : uid)}
-                            aria-label="Member options"
-                            className="text-muted hover:text-text"
-                          >
-                            <MoreHorizontal className="h-4 w-4" />
-                          </button>
-                          {memberActionUid === uid && (
-                            <>
-                              <div className="fixed inset-0 z-40" onClick={() => setMemberActionUid(null)} />
-                              <div className="glass absolute right-0 z-50 mt-1 w-44 overflow-hidden rounded-lg p-1">
-                                {!isMemberAdmin && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleMakeAdmin(uid)}
-                                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-text hover:bg-bg4"
-                                  >
-                                    <Shield className="h-3.5 w-3.5" /> Make Admin
-                                  </button>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveMember(uid)}
-                                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-clay2 hover:bg-bg4"
-                                >
-                                  <X className="h-3.5 w-3.5" /> Remove from Group
-                                </button>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="flex flex-col gap-2 border-t border-bg4 pt-3">
-                {selectedGroup.creatorUid === user.uid ? (
-                  <button
-                    type="button"
-                    onClick={handleDeleteGroup}
-                    className="flex items-center justify-center gap-2 rounded-lg py-2 font-noto text-sm font-semibold text-clay2 hover:bg-bg3"
-                  >
-                    <Trash2 className="h-4 w-4" /> Delete Group
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={handleLeaveGroup}
-                    className="flex items-center justify-center gap-2 rounded-lg py-2 font-noto text-sm font-semibold text-clay2 hover:bg-bg3"
-                  >
-                    <LogOut className="h-4 w-4" /> Leave Group
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-        </Modal>
+        <GroupInfoPanel
+          open={groupInfoOpen}
+          onClose={() => setGroupInfoOpen(false)}
+          conversation={selectedGroup}
+          participantProfiles={participantProfiles}
+          onInsertAllMention={() => {
+            insertMention("all");
+            setGroupInfoOpen(false);
+          }}
+        />
       )}
 
       {/* DM Feature Overhaul (Part F). */}

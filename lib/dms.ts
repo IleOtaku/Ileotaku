@@ -528,6 +528,29 @@ export async function deleteGroup(conversationId: string, creatorUid: string): P
   }
 }
 
+/** WhatsApp-style Group Info redesign: "Media & Files" section. Fetches the most recent `cap`
+ * messages (ordered by createdAt, no mediaType filter — an equality/`in` filter combined with an
+ * orderBy on a different field needs a composite index; this avoids that entirely) and filters to
+ * image/video ones client-side, capped to the newest 12 by default. A conversation's message
+ * history isn't large enough for "scan the last few hundred" to be a real cost. */
+export async function getConversationMedia(conversationId: string, take = 12): Promise<DMMessage[]> {
+  try {
+    const q = query(
+      collection(db, CONVERSATIONS, conversationId, "messages"),
+      orderBy("createdAt", "desc"),
+      limit(200)
+    );
+    const snap = await getDocs(q);
+    const media = snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }) as DMMessage)
+      .filter((m) => m.mediaType === "image" || m.mediaType === "video");
+    return media.slice(0, take);
+  } catch (error) {
+    await logError(error, { operation: "getConversationMedia", conversationId });
+    return [];
+  }
+}
+
 export function subscribeToConversation(
   conversationId: string,
   callback: (messages: DMMessage[]) => void,
