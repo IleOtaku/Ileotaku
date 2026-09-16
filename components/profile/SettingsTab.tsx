@@ -236,6 +236,17 @@ export default function SettingsTab() {
     }
   }
 
+  /** PART 8 — video watermarking toggle. */
+  async function handleVideoWatermark(value: boolean) {
+    if (!user || !profile?.isCreator) return;
+    try {
+      await updateUserPrefs(user.uid, { creatorSettings: { ...profile.creatorSettings, videoWatermark: value } });
+      await refreshProfile();
+    } catch {
+      toast.error("Couldn't save your setting.");
+    }
+  }
+
   async function updateNotifPref(key: keyof NotificationCategoryPreferences, value: boolean) {
     if (!user) return;
     try {
@@ -748,6 +759,18 @@ export default function SettingsTab() {
             <p className="font-noto text-[11px] text-muted">
               Hides the Download button in the share sheet for everyone but you, on every post you
               share to the feed from now on.
+            </p>
+
+            {/* PART 8 — video watermarking. Default ON (absent reads as true — see
+                creatorSettings.videoWatermark's own doc comment in types/index.ts). */}
+            <Toggle
+              checked={profile?.creatorSettings?.videoWatermark !== false}
+              onChange={handleVideoWatermark}
+              label="Add ÍléOtaku watermark to my videos"
+            />
+            <p className="font-noto text-[11px] text-muted">
+              Stamps a small ÍléOtaku mark onto every feed video you upload from now on. Turn this
+              off if you already add your own watermark.
             </p>
           </div>
         </section>

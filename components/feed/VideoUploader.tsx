@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import toast from "react-hot-toast";
 import { Loader2, Video, X } from "lucide-react";
 import { uploadPostVideo, type UploadedVideo } from "@/lib/creatorFeed";
+import { addWatermarkToVideo } from "@/lib/videoWatermark";
 import { useAuth } from "@/hooks/useAuth";
 
 export interface VideoUploaderProps {
@@ -16,11 +17,17 @@ export interface VideoUploaderProps {
  * duration} back to the composer once done. Shows a local <video> preview immediately (from an
  * object URL) so the creator sees their clip while the upload is still in flight. */
 export default function VideoUploader({ value, onChange }: VideoUploaderProps) {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [localPreview, setLocalPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
+  // PART 8 — video watermarking: "Adding ÍléOtaku watermark... 45%" vs the plain upload-percent
+  // label, so a creator can tell which of the two (sequential) phases is actually in progress.
+  const [watermarking, setWatermarking] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Default ON — an absent creatorSettings.videoWatermark (every account before this setting
+  // existed) reads as "watermark on", matching the type's own doc comment in types/index.ts.
+  const watermarkEnabled = profile?.creatorSettings?.videoWatermark !== false;
 
   async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -32,7 +39,22 @@ export default function VideoUploader({ value, onChange }: VideoUploaderProps) {
     setUploading(true);
     setProgress(0);
     try {
-      const uploaded = await uploadPostVideo(user.uid, file, setProgress);
+      let fileToUpload: File = file;
+      if (watermarkEnabled) {
+        setWatermarking(true);
+        try {
+          const watermarked = await addWatermarkToVideo(file, "ÍléOtaku", setProgress);
+          fileToUpload = new File([watermarked], file.name.replace(/\.[^.]+$/, ".webm"), { type: "video/webm" });
+        } catch {
+          // Best-effort — a watermarking failure (an unsupported browser, mainly) shouldn't block
+          // the post itself; falls back to uploading the original, unwatermarked file.
+          toast.error("Couldn't add a watermark — uploading the original video instead.");
+        } finally {
+          setWatermarking(false);
+        }
+      }
+      setProgress(0);
+      const uploaded = await uploadPostVideo(user.uid, fileToUpload, setProgress);
       onChange(uploaded);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't upload this video.");
@@ -64,7 +86,9 @@ export default function VideoUploader({ value, onChange }: VideoUploaderProps) {
         {uploading && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/60">
             <Loader2 className="h-6 w-6 animate-spin text-ivory" />
-            <span className="font-noto text-xs text-ivory">Uploading… {progress}%</span>
+            <span className="font-noto text-xs text-ivory">
+              {watermarking ? `Adding ÍléOtaku watermark... ${progress}%` : `Uploading… ${progress}%`}
+            </span>
           </div>
         )}
         {!uploading && (
@@ -82,7 +106,7 @@ export default function VideoUploader({ value, onChange }: VideoUploaderProps) {
   }
 
   return (
-    <>
+    <div className="flex flex-col items-start gap-1.5">
       <button
         type="button"
         onClick={() => fileInputRef.current?.click()}
@@ -90,6 +114,9 @@ export default function VideoUploader({ value, onChange }: VideoUploaderProps) {
       >
         <Video className="h-4 w-4" /> Add video
       </button>
+      {watermarkEnabled && (
+        <p className="font-noto text-[11px] text-muted">A watermark is added to protect your content.</p>
+      )}
       <input
         ref={fileInputRef}
         type="file"
@@ -97,6 +124,6 @@ export default function VideoUploader({ value, onChange }: VideoUploaderProps) {
         onChange={handleFileSelected}
         className="hidden"
       />
-    </>
+    </div>
   );
 }

@@ -15,6 +15,7 @@ import {
   WifiOff,
 } from "lucide-react";
 import PlatinumGate from "@/components/monetisation/PlatinumGate";
+import { Tooltip } from "@/components/ui/Tooltip";
 import DownloadChapterButton from "./DownloadChapterButton";
 import { useChatUnread } from "@/hooks/useChatUnread";
 import { isChapterDownloaded } from "@/lib/offlineReader";
@@ -173,15 +174,17 @@ export default function ReaderToolbar({
       </div>
 
       <div className="flex items-center gap-1.5">
-        <button
-          type="button"
-          onClick={onPrev}
-          disabled={!canPrev}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-bg3 hover:text-clay2 disabled:pointer-events-none disabled:opacity-30"
-          aria-label="Previous chapter"
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </button>
+        <Tooltip content="Previous chapter">
+          <button
+            type="button"
+            onClick={onPrev}
+            disabled={!canPrev}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-bg3 hover:text-clay2 disabled:pointer-events-none disabled:opacity-30"
+            aria-label="Previous chapter"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+        </Tooltip>
 
         {/* Desktop/tablet: compact native select. Mobile: a tappable button opening a full
             bottom-sheet picker instead — a native <select> is too small a tap target and its
@@ -217,15 +220,17 @@ export default function ReaderToolbar({
           onSelect={onChapterIndexChange}
         />
 
-        <button
-          type="button"
-          onClick={onNext}
-          disabled={!canNext}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-bg3 hover:text-clay2 disabled:pointer-events-none disabled:opacity-30"
-          aria-label="Next chapter"
-        >
-          <ChevronRight className="h-4 w-4" />
-        </button>
+        <Tooltip content="Next chapter">
+          <button
+            type="button"
+            onClick={onNext}
+            disabled={!canNext}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-bg3 hover:text-clay2 disabled:pointer-events-none disabled:opacity-30"
+            aria-label="Next chapter"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </Tooltip>
       </div>
 
       <div className="flex items-center gap-1.5">
@@ -238,14 +243,16 @@ export default function ReaderToolbar({
         </button>
 
         <div className="relative">
-          <button
-            type="button"
-            onClick={() => setThemeMenuOpen((o) => !o)}
-            aria-label="Reading theme"
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-muted2 bg-bg3 text-muted transition-colors hover:border-clay hover:text-clay2"
-          >
-            <Palette className="h-3.5 w-3.5" />
-          </button>
+          <Tooltip content="Reading theme">
+            <button
+              type="button"
+              onClick={() => setThemeMenuOpen((o) => !o)}
+              aria-label="Reading theme"
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-muted2 bg-bg3 text-muted transition-colors hover:border-clay hover:text-clay2"
+            >
+              <Palette className="h-3.5 w-3.5" />
+            </button>
+          </Tooltip>
           {themeMenuOpen && (
             <div className="glass absolute right-0 z-10 mt-1 w-44 overflow-hidden rounded-lg p-1.5">
               {THEME_SWATCHES.map((t) => {

@@ -1,3 +1,4 @@
+import { Tooltip } from "@/components/ui/Tooltip";
 import { getVerificationBadge } from "@/lib/verification";
 
 export interface VerificationBadgeUser {
@@ -27,24 +28,26 @@ export function VerificationBadge({
   if (!badge) return null;
 
   return (
-    <span title={badge.label} className="inline-flex items-center shrink-0">
-      <svg width={size} height={size} viewBox="0 0 24 24" fill={badge.color}>
-        <path
-          d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-          stroke={badge.color}
-          strokeWidth="2"
-          fill="none"
-          strokeLinecap="round"
-        />
-        <path
-          d="M9 12l2 2 4-4"
-          stroke={badge.color}
-          strokeWidth="2.5"
-          fill="none"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    </span>
+    <Tooltip content={badge.label}>
+      <span className="inline-flex items-center shrink-0">
+        <svg width={size} height={size} viewBox="0 0 24 24" fill={badge.color}>
+          <path
+            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+            stroke={badge.color}
+            strokeWidth="2"
+            fill="none"
+            strokeLinecap="round"
+          />
+          <path
+            d="M9 12l2 2 4-4"
+            stroke={badge.color}
+            strokeWidth="2.5"
+            fill="none"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </span>
+    </Tooltip>
   );
 }

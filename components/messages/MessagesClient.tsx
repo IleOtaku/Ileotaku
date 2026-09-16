@@ -37,6 +37,7 @@ import { BirthdayBadge } from "@/components/ui/BirthdayBadge";
 import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import LinkPreviewCard from "@/components/ui/LinkPreviewCard";
 import MentionText, { extractFirstUrl } from "@/components/ui/MentionText";
+import { Tooltip } from "@/components/ui/Tooltip";
 import { isBirthdayToday } from "@/lib/birthday";
 import AttachmentTray from "./AttachmentTray";
 import DMMediaContent from "./DMMediaContent";
@@ -1356,9 +1357,11 @@ export default function MessagesClient() {
                 {/* DM Feature Overhaul (Part H): "Show a timer icon in thread header when
                     disappearing messages is active." */}
                 {selected?.disappearingMessages?.enabled && (
-                  <span title="Disappearing messages are on" className="shrink-0 text-muted">
-                    <Clock className="h-4 w-4" />
-                  </span>
+                  <Tooltip content="Disappearing messages are on">
+                    <span className="shrink-0 text-muted">
+                      <Clock className="h-4 w-4" />
+                    </span>
+                  </Tooltip>
                 )}
 
                 <div className="relative shrink-0">

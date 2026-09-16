@@ -1,4 +1,5 @@
 import { Gem } from "lucide-react";
+import { Tooltip } from "@/components/ui/Tooltip";
 
 /**
  * Platinum SUBSCRIPTION membership badge — a platinum-colored gem, replacing the old yellow ⭐
@@ -19,11 +20,13 @@ export function PlatinumBadge({
 }) {
   if (!isPlatinum) return null;
   return (
-    <span className="inline-flex shrink-0" title="Platinum Member">
-      <Gem
-        className={`${className} shrink-0 fill-plat/20 text-plat`}
-        style={{ filter: "drop-shadow(0 0 3px #9ecfef99)" }}
-      />
-    </span>
+    <Tooltip content="Platinum Member">
+      <span className="inline-flex shrink-0">
+        <Gem
+          className={`${className} shrink-0 fill-plat/20 text-plat`}
+          style={{ filter: "drop-shadow(0 0 3px #9ecfef99)" }}
+        />
+      </span>
+    </Tooltip>
   );
 }
