@@ -23,9 +23,23 @@ import { logError } from "./errorLogger";
 import { createNotification } from "./notifications";
 import { NotificationType } from "@/types";
 
+// Beta feedback bug: "we can't hear each other on calls." STUN-only ICE (the two entries below)
+// only lets two peers connect directly when at least one side is behind a NAT type that allows
+// hole-punching — it fails outright for symmetric NAT, common on cellular/mobile-carrier and
+// some corporate networks. In that case signaling still completes (the call visibly "connects")
+// but no media ever flows, because there's no relay path once direct P2P fails. A TURN server is
+// the standard fix — it relays media when a direct path can't be found. This project doesn't have
+// its own TURN credentials (that needs a paid/free-tier account with a provider like Twilio,
+// Xirsys, or a self-hosted coturn instance), so this falls back to Open Relay Project's public,
+// no-signup-required demo TURN server (openrelay.metered.ca) — rate-limited and not meant for
+// heavy production load, but it's a real fix for calls that currently fail silently, and needs no
+// new credentials to add. Swap in a dedicated TURN provider's credentials here if usage grows.
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun1.l.google.com:19302" },
+  { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
+  { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
+  { urls: "turn:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" },
 ];
 
 export type CallStatus = "ringing" | "active" | "ended" | "declined";

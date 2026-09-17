@@ -45,13 +45,20 @@ function extractMeta(html: string, name: string): string | null {
   return null;
 }
 
+// Beta feedback bug (found during regression): a shared ÍléOtaku link's preview card showed the
+// literal text "Africa&#x27;s Manga Home" instead of an apostrophe. The old replace list only
+// covered `&#39;` (decimal) — Next.js's own metadata serialization emits the hex form `&#x27;`,
+// which fell straight through unescaped. Now handles both numeric forms generically instead of
+// enumerating each specific code point.
 function decodeHtmlEntities(s: string): string {
   return s
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)));
 }
 
 export async function GET(request: Request) {

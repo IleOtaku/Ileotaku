@@ -1440,8 +1440,7 @@ export default function MessagesClient() {
                   overlay sits on its own layer between the wallpaper and the actual message
                   content so bubbles stay crisp/readable regardless of the wallpaper. */}
               <div
-                ref={messagesContainerRef}
-                className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain p-4"
+                className="relative min-h-0 flex-1"
                 style={
                   selected?.wallpaperUrl
                     ? selected.wallpaperType === "image"
@@ -1450,9 +1449,21 @@ export default function MessagesClient() {
                     : undefined
                 }
               >
+                {/* Beta feedback bug: "the blur moves alongside chats, it should be static." The
+                    blur overlay used to be a child of the scrolling messages div itself — an
+                    absolutely-positioned descendant's containing block scrolls right along with
+                    that div's own content, so `inset-0` was anchored to the top of the whole
+                    scrollable history, not the visible viewport, and the overlay drifted out of
+                    view as soon as you scrolled. It now lives on this OUTER, non-scrolling
+                    wrapper instead, with the actual overflow-y-auto div nested inside it, so the
+                    overlay's containing block never moves. */}
                 {selected?.wallpaperUrl && selected.wallpaperBlur && (
                   <div className="pointer-events-none absolute inset-0 bg-bg/40" style={{ backdropFilter: "blur(8px)" }} />
                 )}
+                <div
+                  ref={messagesContainerRef}
+                  className="relative h-full overflow-y-auto overscroll-contain p-4"
+                >
                 {/* Beta feedback: a birthday feature — "If you open a DM with someone on their
                     birthday: show a subtle banner at top of chat." Uses the nickname-aware
                     `displayName` (not the raw otherName) so it reads naturally either way. */}
@@ -1740,6 +1751,7 @@ export default function MessagesClient() {
                   )}
                 </div>
               </div>
+            </div>
 
               {conversationBlocked ? (
                 <div className="flex shrink-0 flex-wrap items-center justify-center gap-2 border-t border-bg4 p-4 font-noto text-sm text-muted">
