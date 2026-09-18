@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
@@ -47,7 +47,7 @@ import GroupInfoPanel from "./GroupInfoPanel";
 import InAppCamera from "./InAppCamera";
 import { useActiveCall } from "@/hooks/useActiveCall";
 import { saveSticker } from "@/lib/stickers";
-import { newCallId, WebRTCCall } from "@/lib/webrtc";
+import { checkMicrophonePermission, newCallId, WebRTCCall } from "@/lib/webrtc";
 import SharePickerModal, { type SharedManga, type SharedPost } from "./SharePickerModal";
 import StickerPicker from "./StickerPicker";
 import VoiceRecorder from "./VoiceRecorder";
@@ -515,6 +515,12 @@ export default function MessagesClient() {
     if (!user) return;
     if (useActiveCall.getState().callId) {
       toast.error("You're already on a call.");
+      return;
+    }
+    // Beta feedback bug: "we can't hear each other on calls" — checked up front so a mic the
+    // browser already knows is blocked never gets as far as showing a ringing/calling screen.
+    if ((await checkMicrophonePermission()) === "denied") {
+      toast.error("Please enable microphone access in your browser settings to make a call.");
       return;
     }
     const callId = newCallId();
@@ -1512,15 +1518,28 @@ export default function MessagesClient() {
                     const senderPrefs = isOwn ? profile?.dmPreferences : senderProfiles.get(m.senderId)?.dmPreferences;
                     const bubbleStyleNum = selected?.participantBubbleStyles?.[m.senderId] ?? senderPrefs?.bubbleStyle;
                     const bubbleColor = selected?.participantColors?.[m.senderId] ?? senderPrefs?.bubbleColor;
+                    // Beta feedback bug: "bubble styles all look the same" — the `message-bubble`
+                    // class here has nothing to do with layout; it exists so globals.css's
+                    // `.message-bubble.bubble-style-N` selectors have something to match (see the
+                    // comment there for why a bare `.bubble-style-N` selector alone wasn't enough).
                     const bubbleShape = bubbleStyleNum
-                      ? `bubble-style-${bubbleStyleNum} ${!isOwn ? "other" : ""} ${bubbleColor ? "" : isOwn ? "bg-clay text-ivory" : "bg-bg3 text-text"}`
+                      ? `message-bubble bubble-style-${bubbleStyleNum} ${!isOwn ? "other" : ""} ${bubbleColor ? "" : isOwn ? "bg-clay text-ivory" : "bg-bg3 text-text"}`
                       : isOwn
-                        ? "rounded-tl-2xl rounded-bl-2xl rounded-tr-sm bg-clay text-ivory"
-                        : "rounded-tr-2xl rounded-br-2xl rounded-tl-sm bg-bg3 text-text";
+                        ? "message-bubble rounded-tl-2xl rounded-bl-2xl rounded-tr-sm bg-clay text-ivory"
+                        : "message-bubble rounded-tr-2xl rounded-br-2xl rounded-tl-sm bg-bg3 text-text";
                     // `background` (not backgroundColor) so a gradient string works here too, not
                     // just a plain hex color — both are valid values for the shorthand.
+                    // Styles 6 and 10 draw NO fill (outline / underline only), so the usual
+                    // contrastTextColor-against-the-fill text color would be wrong — it'd put dark
+                    // text on the near-black chat background. For those the chosen color becomes the
+                    // text/outline color itself. `--bubble-color` feeds style 9's glow.
+                    const isOutlineStyle = bubbleStyleNum === 6 || bubbleStyleNum === 10;
                     const bubbleInlineStyle = bubbleColor
-                      ? { background: bubbleColor, color: contrastTextColor(bubbleColor) }
+                      ? ({
+                          background: bubbleColor,
+                          color: isOutlineStyle && bubbleColor.startsWith("#") ? bubbleColor : contrastTextColor(bubbleColor),
+                          "--bubble-color": bubbleColor.startsWith("#") ? bubbleColor : undefined,
+                        } as CSSProperties)
                       : undefined;
 
                     // DM Feature Overhaul (Part E): a group sender's name is nickname-able too —

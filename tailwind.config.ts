@@ -2,6 +2,34 @@ import type { Config } from "tailwindcss";
 
 const config: Config = {
   darkMode: "class",
+  // Beta feedback bug: "bubble styles all look the same" — every one of the 10
+  // `.bubble-style-N` rules in globals.css (see the `@layer components` block there) was being
+  // silently dropped from the production build. Root cause, confirmed by running `npx
+  // tailwindcss` directly and diffing its raw output: Tailwind v3 treats classes declared inside
+  // an `@layer` block the same as its own generated utilities for purging purposes — it only
+  // keeps a class if the LITERAL, complete string appears somewhere in a content-scanned file.
+  // MessagesClient.tsx and BubbleStylePicker.tsx only ever build the class via string
+  // interpolation (`` `bubble-style-${bubbleStyleNum}` ``), so the literal strings "bubble-style-1"
+  // through "bubble-style-10" never appear anywhere in the scanned source, and Tailwind correctly
+  // (by its own rules) concluded they were unused and stripped every one of them — verified by
+  // grepping the compiled CSS for each one individually; only the two that happen to be paired
+  // with a `.other` compound selector partially survived, everything else was gone outright. The
+  // `other` class (from `${!isOwn ? "other" : ""}`) is the same story. Safelisting is the
+  // standard, documented fix for any class name Tailwind can't discover via static analysis.
+  safelist: [
+    "bubble-style-1",
+    "bubble-style-2",
+    "bubble-style-3",
+    "bubble-style-4",
+    "bubble-style-5",
+    "bubble-style-6",
+    "bubble-style-7",
+    "bubble-style-8",
+    "bubble-style-9",
+    "bubble-style-10",
+    "other",
+    "message-bubble",
+  ],
   content: [
     "./pages/**/*.{js,ts,jsx,tsx,mdx}",
     "./components/**/*.{js,ts,jsx,tsx,mdx}",

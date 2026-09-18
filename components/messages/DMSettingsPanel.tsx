@@ -172,7 +172,7 @@ export default function DMSettingsPanel({
                 <h3 className="mb-2 font-syne text-xs font-semibold uppercase tracking-wide text-muted">Your Bubble Style</h3>
                 <div className="flex items-center gap-3 rounded-xl border border-bg4 bg-bg p-3">
                   <span
-                    className={`h-8 w-14 shrink-0 bg-clay bubble-style-${profile?.dmPreferences?.bubbleStyle ?? 1}`}
+                    className={`message-bubble h-8 w-14 shrink-0 bg-clay bubble-style-${profile?.dmPreferences?.bubbleStyle ?? 1}`}
                     style={profile?.dmPreferences?.bubbleColor ? { background: profile.dmPreferences.bubbleColor } : undefined}
                   />
                   <p className="flex-1 font-noto text-xs text-text">Style {profile?.dmPreferences?.bubbleStyle ?? 1}</p>

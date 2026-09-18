@@ -240,25 +240,29 @@ export function getOptimizedImageUrl(url: string, width?: number, quality: numbe
   return url.replace(marker, `${marker}${transforms.join(",")}/`);
 }
 
-/** Cloudinary auto-generates a poster frame for any uploaded video at `so_auto` (a special
- * "smart" offset, distinct from a fixed timestamp) when the same public_id is requested through
- * the /image/upload delivery path instead of /video/upload — this swaps a video's own secure_url
- * into that thumbnail form. Returns the url unchanged if it isn't a Cloudinary video url.
+/** Cloudinary auto-generates a poster frame for any uploaded video simply by requesting its own
+ * `/video/upload/` URL with an IMAGE file extension instead of the original video one (Cloudinary
+ * detects the mismatch and returns a still frame) — this swaps a video's own secure_url into that
+ * thumbnail form, optionally with `so_auto` (a "smart" frame offset) if it isn't already present.
+ * Returns the url unchanged if it isn't a Cloudinary video url.
  *
- * Beta feedback bug: "Videos and image preview on posts section of user profiles aren't showing
- * their previews. Just broken images." Root cause — this only ever inserted `so_auto` into the
- * existing `/video/upload/` path, never actually swapping it for `/image/upload/` the way the
- * comment above (and Cloudinary's own API) requires, and never changing the file extension either
- * — the result was a URL still pointing at the original .mp4/.mov file, which an `<img>` (and a
- * `<video poster>`) can't render as a still image. Every video post's poster has been broken since
- * this function was written; only became visible as an actual broken-image icon once
- * PostGridCard's `<img>` started rendering it directly (a `<video poster>` just silently shows no
- * poster instead, which is why this went unnoticed everywhere else). */
+ * Beta feedback bug (confirmed still broken on a later regression pass — profile posts grid
+ * showed broken images for every video post): a PRIOR fix here rewrote the path to
+ * `/image/upload/so_auto/...`, believing that switching resource type was Cloudinary's documented
+ * mechanism for deriving a still image from a video. It genuinely is not — that URL 404s (checked
+ * directly against this project's own Cloudinary account: `.../image/upload/so_auto/.../x.jpg` →
+ * 404). Cloudinary's actual documented behavior keeps the `/video/upload/` path exactly as-is and
+ * only swaps the file extension: `.../video/upload/so_auto/.../x.jpg` → 200, a real JPEG frame.
+ * Every video post's poster has been broken since the ORIGINAL (pre-`so_auto`) version of this
+ * function too, since that one changed neither the resource path's implicit type nor the
+ * extension — the fix now is to leave `/video/upload/` alone and just handle the extension +
+ * so_auto insertion. */
 export function getVideoThumbnail(videoUrl: string): string {
   if (!videoUrl || !videoUrl.includes("res.cloudinary.com") || !videoUrl.includes("/video/upload/")) {
     return videoUrl;
   }
-  return videoUrl
-    .replace("/video/upload/", "/image/upload/so_auto/")
-    .replace(/\.[a-zA-Z0-9]+(\?.*)?$/, ".jpg$1");
+  const withOffset = videoUrl.includes("/video/upload/so_")
+    ? videoUrl
+    : videoUrl.replace("/video/upload/", "/video/upload/so_auto/");
+  return withOffset.replace(/\.[a-zA-Z0-9]+(\?.*)?$/, ".jpg$1");
 }

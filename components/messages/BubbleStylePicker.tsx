@@ -96,7 +96,11 @@ export default function BubbleStylePicker({ open, onClose, conversationId }: Bub
               >
                 <span className="relative flex h-10 w-full items-center justify-center">
                   <span
-                    className={`bubble-style-${style} flex h-8 w-16 items-center justify-center bg-clay text-[10px] font-semibold text-ivory`}
+                    // The `message-bubble` class is required for globals.css's
+                    // `.message-bubble.bubble-style-N` selectors to match at all — see
+                    // MessagesClient.tsx's bubbleShape comment for why a bare `.bubble-style-N`
+                    // selector by itself isn't enough.
+                    className={`message-bubble bubble-style-${style} flex h-8 w-16 items-center justify-center bg-clay text-[10px] font-semibold text-ivory`}
                     style={currentColor ? { backgroundColor: currentColor } : undefined}
                   >
                     {saving === style && <Loader2 className="h-3 w-3 animate-spin" />}

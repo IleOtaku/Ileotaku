@@ -699,7 +699,7 @@ export default function SettingsTab() {
             {isPlatinum ? (
               <div className="flex items-center gap-3 rounded-lg border border-muted2 bg-bg3 px-3 py-2.5">
                 <span
-                  className={`h-7 w-12 shrink-0 bg-clay bubble-style-${profile?.dmPreferences?.bubbleStyle ?? 1}`}
+                  className={`message-bubble h-7 w-12 shrink-0 bg-clay bubble-style-${profile?.dmPreferences?.bubbleStyle ?? 1}`}
                   style={profile?.dmPreferences?.bubbleColor ? { background: profile.dmPreferences.bubbleColor } : undefined}
                 />
                 <span className="flex-1 font-noto text-xs text-text">Style {profile?.dmPreferences?.bubbleStyle ?? 1}</span>

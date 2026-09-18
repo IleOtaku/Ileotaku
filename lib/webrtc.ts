@@ -23,24 +23,43 @@ import { logError } from "./errorLogger";
 import { createNotification } from "./notifications";
 import { NotificationType } from "@/types";
 
-// Beta feedback bug: "we can't hear each other on calls." STUN-only ICE (the two entries below)
-// only lets two peers connect directly when at least one side is behind a NAT type that allows
-// hole-punching — it fails outright for symmetric NAT, common on cellular/mobile-carrier and
-// some corporate networks. In that case signaling still completes (the call visibly "connects")
-// but no media ever flows, because there's no relay path once direct P2P fails. A TURN server is
-// the standard fix — it relays media when a direct path can't be found. This project doesn't have
-// its own TURN credentials (that needs a paid/free-tier account with a provider like Twilio,
-// Xirsys, or a self-hosted coturn instance), so this falls back to Open Relay Project's public,
-// no-signup-required demo TURN server (openrelay.metered.ca) — rate-limited and not meant for
-// heavy production load, but it's a real fix for calls that currently fail silently, and needs no
-// new credentials to add. Swap in a dedicated TURN provider's credentials here if usage grows.
-const ICE_SERVERS: RTCIceServer[] = [
-  { urls: "stun:stun.l.google.com:19302" },
-  { urls: "stun:stun1.l.google.com:19302" },
-  { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
-  { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
-  { urls: "turn:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" },
-];
+// Beta feedback bug: "we can't hear each other on calls." STUN-only ICE only connects two peers
+// directly when at least one side's NAT allows hole-punching — it fails outright on symmetric NAT
+// (common on mobile carriers and some corporate networks). Signaling still completes (the call
+// visibly "connects") but no media flows, because there's no relay path. A TURN server relays media
+// when no direct path exists.
+//
+// The Open Relay Project's public demo TURN (the previous config) is rate-limited and unreliable, so
+// this now uses a Metered.ca account's TURN servers, credentialed through
+// NEXT_PUBLIC_TURN_USERNAME / NEXT_PUBLIC_TURN_CREDENTIAL (must be set in .env.local AND in
+// Vercel's env vars — NEXT_PUBLIC_ values are inlined at build time, so a redeploy is needed after
+// adding them). If they're not set, this falls back to the Open Relay demo server rather than
+// shipping a TURN config with undefined credentials (which the browser rejects outright).
+const TURN_USERNAME = process.env.NEXT_PUBLIC_TURN_USERNAME;
+const TURN_CREDENTIAL = process.env.NEXT_PUBLIC_TURN_CREDENTIAL;
+
+const TURN_SERVERS: RTCIceServer[] =
+  TURN_USERNAME && TURN_CREDENTIAL
+    ? [
+        "turn:a.relay.metered.ca:80",
+        "turn:a.relay.metered.ca:80?transport=tcp",
+        "turn:a.relay.metered.ca:443",
+        "turn:a.relay.metered.ca:443?transport=tcp",
+      ].map((urls) => ({ urls, username: TURN_USERNAME, credential: TURN_CREDENTIAL }))
+    : [
+        { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
+        { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
+        { urls: "turn:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" },
+      ];
+
+const ICE_CONFIG: RTCConfiguration = {
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+    ...TURN_SERVERS,
+  ],
+  iceCandidatePoolSize: 10,
+};
 
 export type CallStatus = "ringing" | "active" | "ended" | "declined";
 
@@ -64,6 +83,23 @@ export function newCallId(): string {
   return crypto.randomUUID();
 }
 
+/** Beta feedback bug: "we can't hear each other on calls" — checked before EVER showing the
+ * ringing/calling UI, so a call that can't possibly get a mic doesn't sit there pretending to
+ * connect. `navigator.permissions` isn't implemented for the "microphone" name in every browser
+ * (notably Safari), so a query failure is treated the same as "prompt" — getUserMedia's own
+ * native prompt is the fallback either way. Returns "denied" only when the browser is CERTAIN the
+ * permission was already refused; the call UI uses that to show a clear settings-page message
+ * instead of letting getUserMedia fail with a more cryptic error partway into call setup. */
+export async function checkMicrophonePermission(): Promise<"granted" | "denied" | "prompt"> {
+  try {
+    if (!navigator.permissions?.query) return "prompt";
+    const status = await navigator.permissions.query({ name: "microphone" as PermissionName });
+    return status.state;
+  } catch {
+    return "prompt";
+  }
+}
+
 export class WebRTCCall {
   private pc: RTCPeerConnection;
   private localStream: MediaStream | null = null;
@@ -74,22 +110,80 @@ export class WebRTCCall {
   private remoteStreamCallback: ((stream: MediaStream) => void) | null = null;
   private callEndedCallback: (() => void) | null = null;
   private statusCallback: ((status: CallStatus) => void) | null = null;
+  private micReadyCallback: (() => void) | null = null;
+  /** True once getUserMedia has resolved and the mic track is on the peer connection. */
+  micReady = false;
+  // ICE candidates from the other side that arrived before this side's remote description was
+  // set. addIceCandidate() throws InvalidStateError in that state, and the old code swallowed the
+  // error — silently dropping candidates (on the caller, the callee's candidates routinely land
+  // before the answer has been applied), which can leave ICE with no usable path and no audio.
+  private pendingCandidates: RTCIceCandidateInit[] = [];
+  private answerApplied = false;
 
   constructor(callId: string) {
     this.callId = callId;
-    this.pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    this.pc = new RTCPeerConnection(ICE_CONFIG);
     this.callDocRef = doc(db, "calls", callId);
+
+    // Beta feedback bug: "we can't hear each other on calls" — these three logs are the standard
+    // WebRTC diagnostic triad for exactly this symptom (call "connects" but no media flows).
+    // `iceConnectionState` is the one that matters most: "connected"/"completed" means a media
+    // path was actually found (direct or via TURN relay); "failed" means ICE negotiation never
+    // found ANY usable path — the case a STUN-only config hits on symmetric NAT. Left in
+    // permanently (not stripped after debugging) since they're only ever printed while a call is
+    // actually in progress, and they're the fastest way to tell "still misconfigured" apart from
+    // "found a path, so the bug is somewhere else" the next time this is reported.
+    this.pc.oniceconnectionstatechange = () => {
+      console.log("[webrtc] ICE connection state:", this.pc.iceConnectionState, "callId:", this.callId);
+    };
+    this.pc.onconnectionstatechange = () => {
+      console.log("[webrtc] connection state:", this.pc.connectionState, "callId:", this.callId);
+    };
+    this.pc.onsignalingstatechange = () => {
+      console.log("[webrtc] signaling state:", this.pc.signalingState, "callId:", this.callId);
+    };
   }
 
   private async openMic(): Promise<MediaStream> {
-    this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    this.localStream.getTracks().forEach((track) => this.pc.addTrack(track, this.localStream!));
-    return this.localStream;
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true },
+        video: false,
+      });
+    } catch (error) {
+      console.error("[webrtc] getUserMedia failed:", error);
+      throw error;
+    }
+    this.localStream = stream;
+    stream.getTracks().forEach((track) => this.pc.addTrack(track, stream));
+    this.micReady = true;
+    this.micReadyCallback?.();
+    return stream;
+  }
+
+  private async addRemoteCandidate(candidate: RTCIceCandidateInit): Promise<void> {
+    if (!this.pc.remoteDescription) {
+      this.pendingCandidates.push(candidate);
+      return;
+    }
+    try {
+      await this.pc.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (error) {
+      console.warn("[webrtc] addIceCandidate failed:", error);
+    }
+  }
+
+  private async flushPendingCandidates(): Promise<void> {
+    const queued = this.pendingCandidates;
+    this.pendingCandidates = [];
+    for (const candidate of queued) await this.addRemoteCandidate(candidate);
   }
 
   private wireRemoteStream() {
     const remoteStream = new MediaStream();
     this.pc.ontrack = (event) => {
+      console.log("[webrtc] remote track received:", event.track.kind);
       event.streams[0]?.getTracks().forEach((track) => remoteStream.addTrack(track));
       this.remoteStreamCallback?.(remoteStream);
     };
@@ -133,8 +227,14 @@ export class WebRTCCall {
         const data = snap.data() as CallDoc | undefined;
         if (!data) return;
         this.statusCallback?.(data.status);
-        if (data.status === "active" && data.answer && !this.pc.currentRemoteDescription) {
-          await this.pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+        if (data.status === "active" && data.answer && !this.answerApplied) {
+          this.answerApplied = true;
+          try {
+            await this.pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+            await this.flushPendingCandidates();
+          } catch (error) {
+            console.error("[webrtc] setRemoteDescription(answer) failed:", error);
+          }
         }
         if (data.status === "declined" || data.status === "ended") this.callEndedCallback?.();
       });
@@ -142,7 +242,7 @@ export class WebRTCCall {
       const calleeCandidates = collection(this.callDocRef, "calleeCandidates");
       this.unsubCandidates = onSnapshot(calleeCandidates, (snap) => {
         snap.docChanges().forEach((change) => {
-          if (change.type === "added") this.pc.addIceCandidate(new RTCIceCandidate(change.doc.data())).catch(() => {});
+          if (change.type === "added") void this.addRemoteCandidate(change.doc.data() as RTCIceCandidateInit);
         });
       });
 
@@ -170,6 +270,7 @@ export class WebRTCCall {
       };
 
       await this.pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+      await this.flushPendingCandidates();
       const answer = await this.pc.createAnswer();
       await this.pc.setLocalDescription(answer);
 
@@ -181,7 +282,7 @@ export class WebRTCCall {
       const callerCandidates = collection(this.callDocRef, "callerCandidates");
       this.unsubCandidates = onSnapshot(callerCandidates, (snap) => {
         snap.docChanges().forEach((change) => {
-          if (change.type === "added") this.pc.addIceCandidate(new RTCIceCandidate(change.doc.data())).catch(() => {});
+          if (change.type === "added") void this.addRemoteCandidate(change.doc.data() as RTCIceCandidateInit);
         });
       });
 
@@ -255,6 +356,13 @@ export class WebRTCCall {
 
   onRemoteStream(callback: (stream: MediaStream) => void): void {
     this.remoteStreamCallback = callback;
+  }
+
+  /** Fires once the mic is open (immediately if it already is) — drives the "Requesting
+   * microphone..." status on the caller's outgoing screen. */
+  onMicReady(callback: () => void): void {
+    this.micReadyCallback = callback;
+    if (this.micReady) callback();
   }
 
   onCallEnded(callback: () => void): void {

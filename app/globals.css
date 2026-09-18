@@ -355,65 +355,78 @@ body {
    * group thread can show up in different shapes/colors at once. The `.other` variant on
    * 3/5 mirrors the tail/blob asymmetry for a message rendered on the LEFT side of the thread
    * instead of the right. */
-  /* Beta feedback bug: "All bubble styles are the same and arent fine, redo it." Several of the
-   * original 10 shared an identical border-radius (1 and 9 were BOTH plain 18px, differing only
-   * in a `box-shadow: 0 0 Npx currentColor` glow that's easy to miss against a busy background),
-   * so cycling through them genuinely could look like nothing was changing. Every style below now
-   * has its own distinct radius/shape AND at least one other differentiator (padding, shadow
-   * depth, or border weight) so no two are a near-match. */
-  .bubble-style-1 {
-    border-radius: 18px;
+  /* Beta feedback bug: "All bubble styles are the same and arent fine, redo it" — still broken
+   * after a first attempt that only made the 10 styles more visually distinct from EACH OTHER.
+   * The actual root cause (found by running `npx tailwindcss` directly and diffing its raw
+   * output against this file): Tailwind v3 purges classes declared inside an `@layer` block the
+   * same way it purges its own generated utilities — a class only survives if the literal,
+   * complete string is found in a content-scanned file. MessagesClient.tsx and
+   * BubbleStylePicker.tsx only ever build this class via string interpolation
+   * (`` `bubble-style-${bubbleStyleNum}` ``), so the literal text "bubble-style-1" through
+   * "bubble-style-10" never appears anywhere Tailwind can see it, and every single one of these
+   * rules was being silently dropped from the compiled CSS — confirmed by grepping the actual
+   * built output, which had NONE of them. `tailwind.config.ts`'s new `safelist` entry is the real
+   * fix for that. The `.message-bubble` class (also added to the safelist) and `!important` here
+   * are defense-in-depth against the OTHER failure mode in the same bug report — a bare
+   * `.bubble-style-N` selector losing a specificity fight to some other rule — so a bubble is
+   * unambiguously styled by two classes (`message-bubble` + `bubble-style-N`) with a selector
+   * strong enough to always win. */
+  .message-bubble.bubble-style-1 {
+    border-radius: 18px !important;
   }
-  .bubble-style-2 {
-    border-radius: 2px;
-    border: 1px solid currentColor;
+  .message-bubble.bubble-style-2 {
+    border-radius: 2px !important;
   }
-  .bubble-style-3 {
-    border-radius: 22px 22px 2px 22px;
+  .message-bubble.bubble-style-3 {
+    border-radius: 18px 18px 4px 18px !important;
   }
-  .bubble-style-3.other {
-    border-radius: 22px 22px 22px 2px;
+  .message-bubble.bubble-style-3.other {
+    border-radius: 18px 18px 18px 4px !important;
   }
-  .bubble-style-4 {
-    border-radius: 999px;
-    padding-left: 22px;
-    padding-right: 22px;
+  .message-bubble.bubble-style-4 {
+    border-radius: 999px !important;
+    padding-left: 24px !important;
+    padding-right: 24px !important;
   }
-  .bubble-style-5 {
-    border-radius: 32px 6px 32px 6px;
+  .message-bubble.bubble-style-5 {
+    border-radius: 30px 8px 30px 8px !important;
   }
-  .bubble-style-5.other {
-    border-radius: 6px 32px 6px 32px;
+  .message-bubble.bubble-style-5.other {
+    border-radius: 8px 30px 8px 30px !important;
   }
-  .bubble-style-6 {
+  .message-bubble.bubble-style-6 {
     background: transparent !important;
-    border: 2px solid currentColor;
-    border-radius: 18px;
+    border: 2px solid currentColor !important;
+    border-radius: 12px !important;
   }
-  .bubble-style-7 {
-    background: rgba(255, 255, 255, 0.1) !important;
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 16px;
+  .message-bubble.bubble-style-7 {
+    background: rgba(255, 255, 255, 0.08) !important;
+    backdrop-filter: blur(12px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.15) !important;
+    border-radius: 16px !important;
   }
-  .bubble-style-8 {
-    border-radius: 6px;
-    border: 2px solid #000;
-    box-shadow: 4px 4px 0px #000;
+  /* The app is dark-only (near-black chat background), so the spec's pure-black border/shadow
+   * would be invisible against it and this style would collapse into a plain squared bubble —
+   * ivory (the app's own light color) gives the same hard-edged neo-brutalist look that stays
+   * visible. */
+  .message-bubble.bubble-style-8 {
+    border-radius: 4px !important;
+    border: 2.5px solid #f5ede0 !important;
+    box-shadow: 4px 4px 0px #f5ede0 !important;
   }
-  .bubble-style-9 {
-    border-radius: 26px;
-    padding-top: 10px;
-    padding-bottom: 10px;
+  /* `--bubble-color` is set inline by MessagesClient/pickers from the sender's chosen bubble
+   * color; the fallback is the default own-bubble clay. */
+  .message-bubble.bubble-style-9 {
+    border-radius: 18px !important;
     box-shadow:
-      0 0 14px currentColor,
-      0 0 28px currentColor;
+      0 0 12px var(--bubble-color, #c4622d),
+      0 0 24px var(--bubble-color, #c4622d) !important;
   }
-  .bubble-style-10 {
+  .message-bubble.bubble-style-10 {
     background: transparent !important;
-    border-radius: 0;
-    border-bottom: 2px solid currentColor;
-    padding-left: 4px;
-    padding-right: 4px;
+    border-radius: 0 !important;
+    border-bottom: 2px solid currentColor !important;
+    padding-left: 2px !important;
+    padding-right: 2px !important;
   }
 }

@@ -59,7 +59,11 @@ export default function CreatorProfileTabs({
               description={`${creator.displayName} hasn't shared an update yet — check back soon.`}
             />
           ) : (
-            <div className="mx-auto grid max-w-2xl grid-cols-3 gap-1.5 sm:gap-2">
+            // Beta feedback bug: "3 column grid on mobile too (like Instagram/TikTok profile
+            // grid)." Already 3 columns at every width — tightened the gap to match that
+            // reference (Instagram/TikTok grids sit edge-to-edge, not with visible breathing room
+            // between cells).
+            <div className="mx-auto grid max-w-2xl grid-cols-3 gap-0.5">
               {posts.map((post, i) => (
                 <PostGridCard key={post.id} post={post} onClick={() => setViewerIndex(i)} />
               ))}
