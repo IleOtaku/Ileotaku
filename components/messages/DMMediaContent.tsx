@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { AnimatePresence, motion } from "framer-motion";
-import { Download, File as FileIcon, Play, X } from "lucide-react";
+import { Download, File as FileIcon } from "lucide-react";
 import type { DMMessage } from "@/types";
+import DMVideoPlayer from "./DMVideoPlayer";
+import ImageViewer from "./ImageViewer";
 import VoiceMessageBubble from "./VoiceMessageBubble";
 
 export interface DMMediaContentProps {
@@ -24,7 +25,7 @@ function formatBytes(bytes?: number): string {
  * stays exactly as MessagesClient already renders it around this. Returns null for a plain text
  * message, so callers can render this unconditionally right before MentionText. */
 export default function DMMediaContent({ message: m, isOwn }: DMMediaContentProps) {
-  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
 
   if (m.sharedMangaId) {
     return (
@@ -64,37 +65,58 @@ export default function DMMediaContent({ message: m, isOwn }: DMMediaContentProp
   }
 
   switch (m.mediaType) {
-    case "image":
+    case "image": {
+      const urls = m.mediaUrls && m.mediaUrls.length > 0 ? m.mediaUrls : m.mediaUrl ? [m.mediaUrl] : [];
+      if (urls.length === 0) return null;
+      const open = (i: number) => setViewerIndex(i);
+
+      // One photo: as wide as the bubble allows, its own aspect ratio, never taller than 300px.
+      if (urls.length === 1) {
+        const ratio = m.mediaWidth && m.mediaHeight ? m.mediaWidth / m.mediaHeight : undefined;
+        return (
+          <>
+            <button
+              type="button"
+              onClick={() => open(0)}
+              aria-label="Open photo"
+              className={ratio ? "mb-1 block overflow-hidden rounded-xl" : "mb-1 block max-h-[300px] w-full overflow-hidden rounded-xl"}
+              // Explicit width (see DMVideoPlayer): full bubble width up to 340px, never taller than 300px.
+              style={ratio ? { aspectRatio: ratio, width: Math.round(Math.min(340, 300 * ratio)), maxWidth: "100%" } : undefined}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img loading="lazy" src={urls[0]} alt="" className={ratio ? "h-full w-full object-cover" : "max-h-[300px] w-full object-cover"} />
+            </button>
+            {viewerIndex !== null && <ImageViewer urls={urls} startIndex={viewerIndex} onClose={() => setViewerIndex(null)} />}
+          </>
+        );
+      }
+
+      // Several photos: a 2x2 grid (first four), each tappable; extras collapse into a "+N" tile.
+      const shown = urls.slice(0, 4);
+      const extra = urls.length - shown.length;
       return (
         <>
-          <button type="button" onClick={() => setLightboxOpen(true)} className="mb-1 block overflow-hidden rounded-xl">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img loading="lazy" src={m.mediaUrl} alt="" className="max-h-72 w-full object-cover" />
-          </button>
-          <AnimatePresence>
-            {lightboxOpen && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={() => setLightboxOpen(false)}
-                className="fixed inset-0 z-[210] flex items-center justify-center bg-black/95 p-4"
+          <div className="mb-1 grid grid-cols-2 gap-0.5 overflow-hidden rounded-xl" style={{ width: 300, maxWidth: "100%" }} data-testid="image-grid">
+            {shown.map((u, i) => (
+              <button
+                key={u + i}
+                type="button"
+                onClick={() => open(i)}
+                aria-label={`Open photo ${i + 1} of ${urls.length}`}
+                className={`relative overflow-hidden bg-black/20 ${shown.length === 3 && i === 0 ? "col-span-2 aspect-[2/1]" : "aspect-square"}`}
               >
-                <button
-                  type="button"
-                  onClick={() => setLightboxOpen(false)}
-                  aria-label="Close"
-                  className="absolute right-4 top-4 text-white"
-                >
-                  <X className="h-6 w-6" />
-                </button>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={m.mediaUrl} alt="" className="max-h-full max-w-full object-contain" style={{ touchAction: "pinch-zoom" }} />
-              </motion.div>
-            )}
-          </AnimatePresence>
+                <img loading="lazy" src={u} alt="" className="h-full w-full object-cover" />
+                {extra > 0 && i === shown.length - 1 && (
+                  <span className="absolute inset-0 flex items-center justify-center bg-black/55 font-syne text-lg font-bold text-white">+{extra + 1}</span>
+                )}
+              </button>
+            ))}
+          </div>
+          {viewerIndex !== null && <ImageViewer urls={urls} startIndex={viewerIndex} onClose={() => setViewerIndex(null)} />}
         </>
       );
+    }
 
     case "gif":
       return (
@@ -112,20 +134,10 @@ export default function DMMediaContent({ message: m, isOwn }: DMMediaContentProp
       );
 
     case "video":
-      return (
-        <div className="relative mb-1 overflow-hidden rounded-xl bg-black">
-          <video src={m.mediaUrl} controls className="max-h-72 w-full" />
-          {m.mediaDuration && (
-            <span className="pointer-events-none absolute bottom-1.5 right-1.5 flex items-center gap-1 rounded-full bg-black/60 px-1.5 py-0.5 font-noto text-[10px] text-white">
-              <Play className="h-2.5 w-2.5 fill-current" />
-              {Math.floor(m.mediaDuration / 60)}:{String(Math.floor(m.mediaDuration % 60)).padStart(2, "0")}
-            </span>
-          )}
-        </div>
-      );
+      return <DMVideoPlayer url={m.mediaUrl ?? ""} duration={m.mediaDuration} width={m.mediaWidth} height={m.mediaHeight} />;
 
     case "voice":
-      return <VoiceMessageBubble url={m.mediaUrl ?? ""} duration={m.mediaDuration ?? 0} isOwn={isOwn} />;
+      return <VoiceMessageBubble url={m.mediaUrl ?? ""} duration={m.mediaDuration ?? 0} isOwn={isOwn} waveform={m.mediaWaveform} />;
 
     case "file":
       return (

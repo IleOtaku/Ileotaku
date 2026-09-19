@@ -244,9 +244,9 @@ export class WebRTCCall {
 
       createNotification(
         remoteUid,
-        NotificationType.GROUP_ADDED, // no dedicated "incoming call" push category exists yet — see final report
-        "Incoming voice call",
-        "Someone is calling you on ÍléOtaku.",
+        NotificationType.INCOMING_CALL,
+        `📞 ${this.chat?.callerName ?? "Someone"} is calling you`,
+        "Open ÍléOtaku to answer.",
         "/messages"
       ).catch(() => {});
 
@@ -373,6 +373,12 @@ export class WebRTCCall {
     } catch {
       // Non-fatal — see doc comment above.
     }
+  }
+
+  /** Tears down a call that was never answered/started (e.g. the caller hung up while it was still
+   * ringing): closes the peer connection and any listeners so nothing is left dangling. */
+  dispose(): void {
+    this.cleanup();
   }
 
   private cleanup(): void {

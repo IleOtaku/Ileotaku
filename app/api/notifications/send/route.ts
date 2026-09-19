@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
  * the server environment — see .env.example / DEPLOY.md.
  */
 export async function POST(request: Request) {
-  const { token, title, body, url } = await request.json();
+  const { token, title, body, url, type } = await request.json();
 
   if (!token || !title) {
     return Response.json({ success: false, error: "Missing token or title." }, { status: 400 });
@@ -52,8 +52,12 @@ export async function POST(request: Request) {
     await messaging.send({
       token,
       notification: { title, body: body ?? "" },
-      data: { url: url ?? "/" },
+      data: { url: url ?? "/", ...(type ? { type: String(type) } : {}) },
+      // A ringing call is worthless a minute later: deliver at once and drop it if the device is
+      // unreachable rather than showing "incoming call" an hour after the caller gave up.
+      ...(type === "INCOMING_CALL" ? { android: { priority: "high" as const, ttl: 60_000 } } : {}),
       webpush: {
+        ...(type === "INCOMING_CALL" ? { headers: { Urgency: "high", TTL: "60" } } : {}),
         fcmOptions: { link: url || "https://ileotaku.vercel.app" },
         notification: {
           icon: "/icons/icon-192.png",

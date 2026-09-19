@@ -1,17 +1,21 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import toast from "react-hot-toast";
 import { Bell } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { getNotificationPermissionStatus, requestNotificationPermission } from "@/lib/fcm";
 
 const DISMISSED_UNTIL_KEY = "ileotaku-notif-prompt-dismissed-until";
+// On the Messages page the ask is different (messages and calls, not chapters), so dismissing it
+// elsewhere doesn't silence it here and vice versa.
+const DISMISSED_UNTIL_MESSAGES_KEY = "ileotaku-notif-prompt-messages-dismissed-until";
 const DISMISS_DAYS = 7;
 
-function dismissedRecently(): boolean {
+function dismissedRecently(key: string): boolean {
   try {
-    const until = localStorage.getItem(DISMISSED_UNTIL_KEY);
+    const until = localStorage.getItem(key);
     return until !== null && Date.now() < Number(until);
   } catch {
     return false;
@@ -29,6 +33,9 @@ export default function NotificationPrompt() {
   const { user, loading } = useAuth();
   const [visible, setVisible] = useState(false);
   const [requesting, setRequesting] = useState(false);
+  const pathname = usePathname();
+  const inMessages = pathname?.startsWith("/messages") ?? false;
+  const dismissKey = inMessages ? DISMISSED_UNTIL_MESSAGES_KEY : DISMISSED_UNTIL_KEY;
 
   useEffect(() => {
     if (loading || !user) {
@@ -36,14 +43,14 @@ export default function NotificationPrompt() {
       return;
     }
     if (getNotificationPermissionStatus() !== "default") return;
-    if (dismissedRecently()) return;
+    if (dismissedRecently(dismissKey)) return;
     setVisible(true);
-  }, [loading, user]);
+  }, [loading, user, dismissKey]);
 
   function dismiss() {
     setVisible(false);
     try {
-      localStorage.setItem(DISMISSED_UNTIL_KEY, String(Date.now() + DISMISS_DAYS * 24 * 60 * 60 * 1000));
+      localStorage.setItem(dismissKey, String(Date.now() + DISMISS_DAYS * 24 * 60 * 60 * 1000));
     } catch {
       // Non-fatal — worst case the banner reappears sooner than 7 days.
     }
@@ -77,7 +84,9 @@ export default function NotificationPrompt() {
         </span>
         <div className="min-w-0 flex-1">
           <p className="font-syne text-sm font-semibold text-text">
-            Enable notifications to know when creators post new chapters
+            {inMessages
+              ? "Turn on notifications so you never miss a message or a call"
+              : "Enable notifications to know when creators post new chapters"}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">

@@ -100,6 +100,9 @@ export interface UserProfile {
   /** Preset id for the profile cover banner's background — see COVER_STYLES in
    * components/profile/CoverStylePicker.tsx for the six available options. */
   coverStyle?: CoverStyleId;
+  /** Beta feedback: "add cover photo too, not just colors." A cropped image uploaded from the cover picker;
+   * when present it's shown instead of the `coverStyle` gradient. null/absent = use the gradient. */
+  coverPhotoURL?: string | null;
   /** Two-letter (or short) country/region label shown on the public creator profile's About tab. */
   country?: string;
   socialLinks?: SocialLinks;
@@ -760,6 +763,9 @@ export enum NotificationType {
    * or ever, if they weren't signed in on any tab) surfaced the actual full-screen incoming-call
    * UI — a fallback trail, not the primary "phone is ringing" experience. */
   INCOMING_CALL = "INCOMING_CALL",
+  /** Beta feedback: "push notifications to devices like WhatsApp" — a push-only heads-up (no bell
+   * entry) that a DM/group message arrived while the recipient wasn't caught up; see lib/dms.ts. */
+  NEW_MESSAGE = "NEW_MESSAGE",
 }
 
 /** Named `AppNotification` (not `Notification`) to avoid colliding with the DOM Notification API. */
@@ -985,7 +991,12 @@ export interface DMMessage {
   mediaType?: DMMediaType;
   /** Cloudinary secure_url for image/video/voice/file/sticker; the GIF's own url for `gif`. */
   mediaUrl?: string;
-  /** Voice notes only, in seconds. */
+  /** A photo message with SEVERAL images: all of their urls, in order (`mediaUrl` stays the first, so
+   * anything that only knows about one image keeps working). Rendered as a 2x2 grid. */
+  mediaUrls?: string[];
+  /** Voice notes only: ~40 loudness values (12..100) so the bubble can draw the real waveform. */
+  mediaWaveform?: number[];
+  /** Voice notes and videos only, in seconds. */
   mediaDuration?: number;
   /** File messages only — original filename and byte size, so the bubble can show something
    * more useful than a bare Cloudinary url. */

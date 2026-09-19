@@ -63,3 +63,15 @@ export const COVER_GRADIENTS: Record<CoverStyleId, string> = {
 export function getCoverGradient(id: CoverStyleId | undefined): string {
   return COVER_GRADIENTS[id ?? "default"] ?? COVER_GRADIENTS.default;
 }
+
+/** Inline style for a profile banner: the uploaded cover photo if there is one, otherwise the chosen
+ * gradient. One helper so /profile, /profile/[uid] and /creator/[handle] can never disagree. */
+export function getCoverBackgroundStyle(
+  coverStyle: CoverStyleId | undefined,
+  coverPhotoURL: string | null | undefined
+): { backgroundImage: string; backgroundSize?: string; backgroundPosition?: string } {
+  if (coverPhotoURL) {
+    return { backgroundImage: `url("${coverPhotoURL.replace(/"/g, "%22")}")`, backgroundSize: "cover", backgroundPosition: "center" };
+  }
+  return { backgroundImage: getCoverGradient(coverStyle) };
+}

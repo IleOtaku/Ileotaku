@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
+import { collection, getDoc, onSnapshot, query, where } from "firebase/firestore";
+import toast from "react-hot-toast";
 import { db } from "@/lib/firebase";
 import { getUserProfile } from "@/lib/firestore";
 import { WebRTCCall, type CallDoc } from "@/lib/webrtc";
@@ -23,6 +24,26 @@ export default function IncomingCallListener() {
     if (!user) return;
     const q = query(collection(db, "calls"), where("calleeUid", "==", user.uid), where("status", "==", "ringing"));
     const unsub = onSnapshot(q, (snap) => {
+      // A call that leaves the "ringing" set has either been answered (by us) or given up on. If the
+      // CALLER hung up (or it was declined elsewhere) while our incoming screen is still up, that screen
+      // has to go away — before this, it stayed on screen forever and could still be "answered".
+      snap.docChanges().forEach((change) => {
+        if (change.type !== "removed") return;
+        const current = useActiveCall.getState();
+        if (current.callId !== change.doc.id || current.direction !== "incoming" || current.status !== "ringing") return;
+        getDoc(change.doc.ref)
+          .then((latest) => {
+            const status = latest.data()?.status;
+            const stillOurs = useActiveCall.getState().callId === change.doc.id && useActiveCall.getState().status === "ringing";
+            // "active" means WE just answered it — leave that alone.
+            if (stillOurs && (!latest.exists() || status === "ended" || status === "declined")) {
+              toast(`Missed call from ${current.peer?.displayName ?? "someone"}`);
+              current.call?.dispose();
+              useActiveCall.getState().reset();
+            }
+          })
+          .catch(() => {});
+      });
       for (const docSnap of snap.docs) {
         const data = docSnap.data() as CallDoc;
         // Already tracking this exact call (e.g. this listener re-fired after a reconnect) —

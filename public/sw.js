@@ -155,11 +155,16 @@ self.addEventListener("push", (event) => {
   }
   const notification = payload.notification || payload || {};
   const title = notification.title || "ÍléOtaku";
+  const type = payload.data && payload.data.type;
+  const isCall = type === "INCOMING_CALL";
   const options = {
     body: notification.body || "",
     icon: "/icons/icon-192.png",
     badge: "/icons/icon-96.png",
     data: { url: (payload.data && payload.data.url) || notification.click_action || "/" },
+    // A call stays on screen until it's answered or dismissed (and buzzes) instead of vanishing after a
+    // few seconds like an ordinary notification; one tag so a second ring replaces the first.
+    ...(isCall ? { tag: "incoming-call", renotify: true, requireInteraction: true, vibrate: [300, 150, 300, 150, 300] } : {}),
   };
   event.waitUntil(self.registration.showNotification(title, options));
 });

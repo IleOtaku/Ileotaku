@@ -7,7 +7,7 @@ import toast from "react-hot-toast";
 import { updateProfile } from "firebase/auth";
 import { AnimatePresence, motion } from "framer-motion";
 import { Camera, Crown, LogOut, Palette, Pencil, X } from "lucide-react";
-import { getCoverGradient } from "@/lib/coverStyles";
+import { getCoverBackgroundStyle, getCoverGradient } from "@/lib/coverStyles";
 import ReadingStatsCard from "@/components/profile/ReadingStatsCard";
 import ProfileSidebar from "@/components/profile/ProfileSidebar";
 import ProfileVisitorsSection from "@/components/profile/ProfileVisitorsSection";
@@ -27,6 +27,7 @@ import { formatBirthday } from "@/lib/birthday";
 const EditProfileModal = dynamic(() => import("@/components/profile/EditProfileModal"), { ssr: false });
 const AchievementsTab = dynamic(() => import("@/components/profile/AchievementsTab"), { ssr: false });
 const CoverStylePicker = dynamic(() => import("@/components/profile/CoverStylePicker"), { ssr: false });
+const ImageCropModal = dynamic(() => import("@/components/ui/ImageCropModal"), { ssr: false });
 const HistoryTab = dynamic(() => import("@/components/profile/HistoryTab"), { ssr: false });
 const LibraryTab = dynamic(() => import("@/components/profile/LibraryTab"), { ssr: false });
 const ProfilePostsTab = dynamic(() => import("@/components/profile/ProfilePostsTab"), { ssr: false });
@@ -63,6 +64,7 @@ export default function ProfileClient() {
   const [editOpen, setEditOpen] = useState(false);
   const [coverPickerOpen, setCoverPickerOpen] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarCropFile, setAvatarCropFile] = useState<File | null>(null);
   const [avatarViewerOpen, setAvatarViewerOpen] = useState(false);
   const [followersOpen, setFollowersOpen] = useState(false);
   const [followingOpen, setFollowingOpen] = useState(false);
@@ -93,10 +95,23 @@ export default function ProfileClient() {
     }
   }, [tab, user, profile]);
 
-  async function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
+  // Beta feedback: "Add profile photo cropping, cuz right now when I upload a pfp it auto crops, I want to
+  // crop it manually." Picking a file now opens the crop step; only the cropped result is uploaded.
+  function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
     const input = e.target;
     const file = input.files?.[0];
+    // Reset so picking the SAME file again still fires onChange.
+    input.value = "";
     if (!file || !user) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please choose an image file.");
+      return;
+    }
+    setAvatarCropFile(file);
+  }
+
+  async function uploadAvatar(file: File) {
+    if (!user) return;
     setUploadingAvatar(true);
     try {
       const { secureUrl: photoURL } = await uploadImage(file, `avatars/${user.uid}`);
@@ -126,10 +141,6 @@ export default function ProfileClient() {
       toast.error("Couldn't update your avatar. Please try again.");
     } finally {
       setUploadingAvatar(false);
-      // Reset so picking the SAME file again still fires onChange — without this, a second
-      // attempt after a failed upload (or just re-testing) silently does nothing, since the
-      // input's value string hasn't changed from the browser's point of view.
-      input.value = "";
     }
   }
 
@@ -183,14 +194,18 @@ export default function ProfileClient() {
     <div className="relative mx-auto max-w-5xl px-4 pb-16 sm:px-6">
       <div
         className="relative h-[200px] w-full overflow-hidden rounded-2xl"
-        style={{
-          backgroundImage: [
-            "linear-gradient(rgba(232,221,208,0.06) 1px, transparent 1px)",
-            "linear-gradient(90deg, rgba(232,221,208,0.06) 1px, transparent 1px)",
-            getCoverGradient(profile?.coverStyle),
-          ].join(", "),
-          backgroundSize: "24px 24px, 24px 24px, 100% 100%",
-        }}
+        style={
+          profile?.coverPhotoURL
+            ? getCoverBackgroundStyle(profile.coverStyle, profile.coverPhotoURL)
+            : {
+                backgroundImage: [
+                  "linear-gradient(rgba(232,221,208,0.06) 1px, transparent 1px)",
+                  "linear-gradient(90deg, rgba(232,221,208,0.06) 1px, transparent 1px)",
+                  getCoverGradient(profile?.coverStyle),
+                ].join(", "),
+                backgroundSize: "24px 24px, 24px 24px, 100% 100%",
+              }
+        }
       >
         <div className="kente-bar absolute inset-x-0 top-0" />
         <div className="absolute right-4 top-4 flex items-center gap-2">
@@ -377,6 +392,18 @@ export default function ProfileClient() {
 
       <EditProfileModal open={editOpen} onClose={() => setEditOpen(false)} />
       <CoverStylePicker open={coverPickerOpen} onClose={() => setCoverPickerOpen(false)} />
+      <ImageCropModal
+        file={avatarCropFile}
+        aspect={1}
+        shape="round"
+        outputWidth={512}
+        title="Crop profile photo"
+        onCancel={() => setAvatarCropFile(null)}
+        onConfirm={async (cropped) => {
+          setAvatarCropFile(null);
+          await uploadAvatar(cropped);
+        }}
+      />
       <FollowListModal
         open={followersOpen}
         onClose={() => setFollowersOpen(false)}

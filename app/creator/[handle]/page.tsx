@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Sparkles } from "lucide-react";
-import { getCoverGradient } from "@/lib/coverStyles";
+import { getCoverBackgroundStyle } from "@/lib/coverStyles";
 import AvatarLightbox from "@/components/ui/AvatarLightbox";
 import { PlatinumBadge } from "@/components/ui/Badges";
 import { BirthdayBadge } from "@/components/ui/BirthdayBadge";
@@ -87,7 +87,7 @@ export default async function CreatorProfilePage({ params }: CreatorProfilePageP
     <div className="relative">
       <div
         className="relative h-48 w-full overflow-hidden bg-bg2 sm:h-64"
-        style={{ backgroundImage: getCoverGradient(creator.coverStyle) }}
+        style={getCoverBackgroundStyle(creator.coverStyle, creator.coverPhotoURL)}
       >
         <div className="kente-bar absolute inset-x-0 top-0" />
       </div>

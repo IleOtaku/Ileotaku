@@ -70,6 +70,7 @@ const TYPE_ICON: Record<NotificationType, LucideIcon> = {
   [NotificationType.PROFILE_VISIT]: Eye,
   [NotificationType.BIRTHDAY]: Cake,
   [NotificationType.INCOMING_CALL]: Phone,
+  [NotificationType.NEW_MESSAGE]: MessageCircle,
 };
 
 type GroupLabel = "Today" | "This Week" | "Earlier";

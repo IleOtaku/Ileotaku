@@ -68,7 +68,7 @@ export async function sendPushToUser(uid: string, type: NotificationType, title:
           const res = await fetch("/api/notifications/send", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ token, title, body, url }),
+            body: JSON.stringify({ token, title, body, url, type }),
           });
           const data = await res.json().catch(() => ({}));
           return { token, notRegistered: data?.notRegistered === true };

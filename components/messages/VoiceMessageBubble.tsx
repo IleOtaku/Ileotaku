@@ -2,81 +2,93 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Pause, Play } from "lucide-react";
+import { formatDuration, seededWaveform } from "@/lib/voiceRecorder";
 
 export interface VoiceMessageBubbleProps {
   url: string;
+  /** Total length in seconds, as measured when it was recorded. */
   duration: number;
   isOwn: boolean;
+  /** Loudness bars (12..100) saved with the message; older voice notes fall back to a seeded pattern. */
+  waveform?: number[];
 }
 
-// A fixed pseudo-random bar pattern (seeded by index, not Math.random on every render) — a real
-// waveform would need decoding the audio's actual amplitude data client-side, which is a much
-// bigger lift than this feature warrants; a stable-looking bar pattern that animates while
-// playing reads as "a voice message" just as well without it.
-const BAR_HEIGHTS = Array.from({ length: 28 }, (_, i) => 30 + ((i * 37) % 70));
-
-/** DM Feature Overhaul (Part A): "Shows as a waveform visualization (CSS bars, animated while
- * playing). Play/pause button, duration, playback progress bar." */
-export default function VoiceMessageBubble({ url, duration, isOwn }: VoiceMessageBubbleProps) {
+/** A voice message in the thread: [▶ Play] [waveform] [0:42].
+ * Tap play: the audio plays, the waveform fills left to right and the bars around the playhead
+ * bounce, and the time shows the current position. Tap again: pauses. When idle it shows the total
+ * length.
+ *
+ * MediaRecorder output has no duration header, so `audio.duration` is `Infinity` in most browsers —
+ * progress is therefore measured against the duration saved with the message, not the element's own
+ * (which is why the fill used to never move). */
+export default function VoiceMessageBubble({ url, duration, isOwn, waveform }: VoiceMessageBubbleProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
+  const [position, setPosition] = useState(0);
 
   useEffect(() => {
     const audio = new Audio(url);
+    audio.preload = "metadata";
     audioRef.current = audio;
     audio.addEventListener("timeupdate", () => {
-      if (audio.duration > 0) setProgress(audio.currentTime / audio.duration);
+      const total = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : duration;
+      setPosition(Math.min(audio.currentTime, total || audio.currentTime));
     });
     audio.addEventListener("ended", () => {
       setPlaying(false);
-      setProgress(0);
+      setPosition(0);
     });
+    audio.addEventListener("pause", () => setPlaying(false));
+    audio.addEventListener("error", () => setPlaying(false));
     return () => {
       audio.pause();
       audioRef.current = null;
     };
-  }, [url]);
+  }, [url, duration]);
 
   function toggle() {
     const audio = audioRef.current;
     if (!audio) return;
     if (playing) {
       audio.pause();
-      setPlaying(false);
     } else {
-      audio.play().catch(() => {});
-      setPlaying(true);
+      audio.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
     }
   }
 
-  const barColor = isOwn ? "bg-ivory/40" : "bg-muted2";
+  const bars = waveform && waveform.length > 0 ? waveform : seededWaveform(url.length * 977 + duration, 36);
+  const total = duration > 0 ? duration : position;
+  const progress = total > 0 ? position / total : 0;
+  const activeIndex = Math.floor(progress * bars.length);
+
+  const barColor = isOwn ? "bg-ivory/35" : "bg-muted2";
   const activeColor = isOwn ? "bg-ivory" : "bg-clay";
 
   return (
-    <div className="flex items-center gap-2.5">
+    <div className="flex min-w-[200px] items-center gap-2.5">
       <button
         type="button"
         onClick={toggle}
         aria-label={playing ? "Pause voice message" : "Play voice message"}
-        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${isOwn ? "bg-ivory/20" : "bg-clay/15"}`}
+        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${isOwn ? "bg-ivory/20" : "bg-clay/15"}`}
       >
-        {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+        {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
       </button>
-      <div className="flex h-6 flex-1 items-center gap-[2px]">
-        {BAR_HEIGHTS.map((h, i) => {
-          const isActive = i / BAR_HEIGHTS.length <= progress;
+      <div className="flex h-7 flex-1 items-center gap-[2px]" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)}>
+        {bars.map((h, i) => {
+          const isActive = i < activeIndex || (progress > 0 && i === activeIndex);
+          const nearHead = playing && Math.abs(i - activeIndex) <= 1;
           return (
             <span
               key={i}
-              className={`w-[2px] rounded-full transition-colors ${isActive ? activeColor : barColor} ${playing ? "animate-pulse" : ""}`}
-              style={{ height: `${h}%` }}
+              className={`w-[3px] shrink-0 rounded-full transition-all duration-150 ${isActive ? activeColor : barColor}`}
+              style={{ height: `${h}%`, transform: nearHead ? "scaleY(1.25)" : undefined }}
             />
           );
         })}
       </div>
-      <span className="shrink-0 font-noto text-[10px] opacity-70">
-        {Math.floor(duration / 60)}:{String(Math.floor(duration % 60)).padStart(2, "0")}
+      <span className="shrink-0 font-mono text-[10px] tabular-nums opacity-80" data-testid="voice-time">
+        {formatDuration(playing || position > 0 ? position : duration)}
       </span>
     </div>
   );

@@ -601,3 +601,62 @@ the spec's "was" values only match the image tiers.
 - **Tip coins are already credited to the creator's coin balance** when the tip is sent; the payout also pays tips in Naira. Decide whether tip coins should stop being credited, or tips should be left out of cash payouts, or you'll pay twice.
 - The transfer route takes the caller's identity from their verified ID token, not from the request body (`adminUid` in the spec would be forgeable), requires a Super Admin, and refuses to let the person who prepared a run approve it.
 - No retry for individually failed transfers yet (references are deterministic, so a plain re-send can't double-pay, but a failed creator needs a new reference). Handle via next month's adjustment for now.
+
+---
+
+# Voice-note rebuild, media preview before sending, DM polish, more feedback
+
+## Voice notes — root cause and rebuild
+The app was **already** recording entirely in memory and uploading only after the recording finished (verified last
+pass with a real 90-second headless run), so uploading-while-recording was not what cut recordings short. The real
+weakness was that *ending* a recording was coupled to detecting a pointer **release** (hold-to-record), which behaves
+differently on every phone (`touchend` on an unmounted button, `pointercancel` from a browser gesture, a context menu
+on long-press). The rebuild removes that coupling completely:
+
+- `lib/voiceRecorder.ts` — standalone `VoiceRecorder` class (start / stop / cancel, wall-clock timer, live level for the
+  waveform). A recording ends only via `stop()`, `cancel()` or reaching the length limit — never an input event.
+- `hooks/useVoiceNote.ts` + `components/messages/VoiceNoteBars.tsx` — idle → recording → **preview** → send. Press the
+  mic to start; releasing does nothing; tap Stop → preview (play/pause, real waveform, duration) → Send uploads.
+  Swipe left 80px+ (from the initial press *or* by dragging the recording bar), or tap the trash, to cancel.
+- The mic button now lives in the **input row** — `[Attach] [Input] [Emoji] [Mic | Send]` — and is removed from the
+  attachment tray. Mic shows when the field is empty, Send when it has text; never both.
+- Upload happens only on Send, behind an optimistic **"Sending... 45%"** bubble (`PendingBubble`), which becomes the real
+  message, or turns into Retry / Delete if the upload fails.
+- Limits unchanged: 1:30 for everyone, 10:00 for Platinum; reaching the limit stops into the preview (never auto-sends).
+
+## Media preview before sending
+`MediaPreviewModal`: photos (swipeable gallery, remove individual photos, add more, up to 10), video (muted autoplay,
+custom controls, duration), file (icon, name, type, size), and a caption for all of them. Camera captures go through it
+too. Several photos are sent as **one** message (`mediaUrls`) rendered as a 2×2 grid; caption goes on the first message.
+
+## Messages as received
+- Voice: `[▶] [real waveform] [0:42]`, bars fill and animate while playing, time shows position while playing and total
+  when idle. **Fixed a bug**: MediaRecorder audio has no duration header (`audio.duration` is `Infinity`), so the progress
+  fill never moved; it now measures against the saved duration.
+- Photos: single photo keeps its aspect ratio (max 300px tall); tap → fullscreen viewer with pinch-to-zoom, double-tap,
+  wheel/trackpad zoom, pan, swipe/arrow browsing. **Fixed a bug found while testing**: media boxes with only an
+  aspect-ratio collapsed to 0×0 inside a shrink-wrapped bubble, so inline video would not have rendered at all.
+- Video: poster + play button + duration badge (top-right); tap plays inline muted with **our own controls**
+  (play/pause, scrub, remaining time, unmute, fullscreen) instead of the browser's.
+
+## Other feedback fixed
+- **Profile photo cropping + cover photos** — `ImageCropModal` (drag, slider/wheel/pinch zoom, exact canvas crop);
+  avatar upload now opens the crop step; cover picker gained "Upload cover photo" (cropped 3:1) and "Remove photo".
+- **Calls**: a caller who cancelled a ringing call left the callee's incoming screen up forever (and answerable) — fixed;
+  unanswered outgoing calls now ring out after 45s and log "Missed voice call".
+- **Push notifications**: DMs sent **no push at all** — now the first unread message pings the recipient (muted
+  conversations excluded); call pushes use the real `INCOMING_CALL` type with the caller's name, high urgency and a
+  60-second TTL, and stay on screen until answered; the enable-notifications prompt now says "messages and calls" on
+  the Messages page.
+
+## Still open (with reasons)
+- **Hourly Platinum (₦200/h, 5h/week), verified-tier reach algorithm, AI enhancement for HD/2K/4K, group verification
+  pricing (₦1,000 / ₦1,500 / ₦2,000 per month)** — each is a product design or new billing system, not a
+  20-minute change; the group-verification pricing also contradicts the earlier "creator/publisher verification is
+  permanent" rule and needs a decision first.
+- **Call audio on real networks / "hear ourselves for 5 seconds"** — a genuine two-party call between two browsers
+  now passes end to end (ICE connected, audio flowing both directions with real signal energy, survives minimize/restore),
+  but that is host-to-host on one machine. Calls across carrier NATs still depend on the Metered TURN credentials being
+  added to Vercel, and the echo report can't be reproduced without two physical devices.
+- **"I still don't get notifications"** — the gaps found in code are fixed (above), but delivery to a specific device
+  can only be confirmed on that device after enabling notifications.

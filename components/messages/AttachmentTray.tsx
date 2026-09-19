@@ -1,13 +1,12 @@
 "use client";
 
-import { Camera, File, Film, Image as ImageIcon, Mic, Send, Smile, Sticker } from "lucide-react";
+import { Camera, File, Film, Image as ImageIcon, Send, Smile, Sticker } from "lucide-react";
 
 export interface AttachmentTrayProps {
   open: boolean;
   onClose: () => void;
   onCamera: () => void;
   onPhotoVideo: () => void;
-  onVoice: () => void;
   onFile: () => void;
   onShareManga: () => void;
   onSharePost: () => void;
@@ -18,7 +17,6 @@ export interface AttachmentTrayProps {
 const ITEMS = [
   { key: "camera", label: "Camera", icon: Camera, color: "bg-clay2" },
   { key: "photoVideo", label: "Photo/Video", icon: ImageIcon, color: "bg-purple-500" },
-  { key: "voice", label: "Voice", icon: Mic, color: "bg-red-500" },
   { key: "file", label: "File", icon: File, color: "bg-blue-500" },
   { key: "shareManga", label: "Share Manga", icon: Film, color: "bg-green-600" },
   { key: "sharePost", label: "Share Post", icon: Send, color: "bg-gold2" },
@@ -28,15 +26,13 @@ const ITEMS = [
 
 /** DM Feature Overhaul (Part A): the paperclip button's attachment tray — a grid of every
  * attachment type, each just raising its own callback; MessagesClient.tsx owns the actual
- * pickers/uploads/sendDM calls each one triggers. "Voice" here just reveals the composer's own
- * hold-to-record control (VoiceRecorder.tsx) rather than opening a modal, since recording is a
- * press-and-hold gesture, not a pick-and-confirm flow like the others. */
+ * pickers/uploads/sendDM calls each one triggers. (Voice recording is NOT here any more — the mic
+ * button lives in the message input row, next to Send, like WhatsApp/Telegram/iMessage.) */
 export default function AttachmentTray({
   open,
   onClose,
   onCamera,
   onPhotoVideo,
-  onVoice,
   onFile,
   onShareManga,
   onSharePost,
@@ -48,7 +44,6 @@ export default function AttachmentTray({
   const handlers: Record<(typeof ITEMS)[number]["key"], () => void> = {
     camera: onCamera,
     photoVideo: onPhotoVideo,
-    voice: onVoice,
     file: onFile,
     shareManga: onShareManga,
     sharePost: onSharePost,
@@ -66,7 +61,7 @@ export default function AttachmentTray({
             type="button"
             onClick={() => {
               handlers[key]();
-              if (key !== "voice") onClose();
+              onClose();
             }}
             className="flex flex-col items-center gap-1.5"
           >

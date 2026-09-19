@@ -7,6 +7,9 @@ import { Avatar } from "@/components/ui/Avatar";
 import { useActiveCall } from "@/hooks/useActiveCall";
 import { checkMicrophonePermission } from "@/lib/webrtc";
 
+/** How long an unanswered outgoing call rings before it's ended as "missed". */
+const RING_TIMEOUT_MS = 45_000;
+
 function formatDuration(totalSeconds: number): string {
   const m = Math.floor(totalSeconds / 60);
   const s = totalSeconds % 60;
@@ -42,6 +45,18 @@ export default function CallUI() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [call]);
+
+  // An outgoing call nobody picks up rings out after 45 seconds instead of ringing forever. Ending it
+  // through endCall() is also what logs "Missed voice call" into the conversation.
+  useEffect(() => {
+    if (!call || status !== "ringing" || direction !== "outgoing") return;
+    const timer = setTimeout(() => {
+      toast("No answer.");
+      call.endCall().finally(() => reset());
+    }, RING_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [call, status, direction]);
 
   // Attaches the remote stream to whichever <audio> element is currently mounted. Also used as
   // that element's callback ref (see `remoteAudio` below), because the minimized-pip branch returns

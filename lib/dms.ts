@@ -22,18 +22,18 @@ import {
 import { logError } from "./errorLogger";
 import { db } from "./firebase";
 import { getUserProfile, updateLastActive } from "./firestore";
-import { createNotification } from "./notifications";
+import { createNotification, sendPushToUser } from "./notifications";
 import { NotificationType, type Conversation, type DMMediaType, type DMMessage, type MessageReplyTo } from "@/types";
 
 /** DM overhaul: the conversation-list preview text for a media/share message with no caption
  * (a bare GIF, a shared manga, ...) — mirrors how every chat app shows "📷 Photo" etc. instead of
  * a blank last-message line. */
-function mediaPreviewLabel(options: { mediaType?: DMMediaType; sharedMangaId?: string; sharedPostId?: string } | undefined): string {
+function mediaPreviewLabel(options: { mediaType?: DMMediaType; mediaUrls?: string[]; sharedMangaId?: string; sharedPostId?: string } | undefined): string {
   if (options?.sharedMangaId) return "📖 Shared a manga";
   if (options?.sharedPostId) return "📤 Shared a post";
   switch (options?.mediaType) {
     case "image":
-      return "📷 Photo";
+      return options.mediaUrls && options.mediaUrls.length > 1 ? `📷 ${options.mediaUrls.length} photos` : "📷 Photo";
     case "video":
       return "🎥 Video";
     case "voice":
@@ -113,6 +113,10 @@ export interface SendDMOptions {
   replyTo?: MessageReplyTo;
   mediaType?: DMMediaType;
   mediaUrl?: string;
+  /** Several images in one message (mediaUrl is the first). */
+  mediaUrls?: string[];
+  /** Voice notes: loudness bars drawn by the bubble. */
+  mediaWaveform?: number[];
   mediaDuration?: number;
   mediaFileName?: string;
   mediaSize?: number;
@@ -187,6 +191,21 @@ export async function sendDM(
       ...(convo.archivedBy && Object.keys(convo.archivedBy).length > 0 ? { archivedBy: {} } : {}),
     });
     await updateLastActive(senderId);
+
+    // Beta feedback: "I called a friend and she didn't know till she opened the app. It should push
+    // notifications to devices like WhatsApp." A DM used to notify nobody unless the app was open.
+    // Push-only (no bell entry, which would double up with the unread badge), and only when the
+    // recipient was fully caught up: their FIRST unread message is what pings them, so a burst of
+    // ten messages is one notification, not ten. A conversation they've muted stays silent.
+    const senderLabel = convo.participantNames?.[senderId] ?? "New message";
+    const pushTitle = convo.type === "group" ? `${senderLabel} · ${convo.name ?? "Group"}` : senderLabel;
+    const pushBody = trimmed ? trimmed.slice(0, 120) : previewText;
+    for (const uid of recipientIds) {
+      if ((convo.unreadCounts?.[uid] ?? 0) > 0) continue;
+      const mute = convo.mutedBy?.[uid];
+      if (mute && (mute.until === "forever" || new Date(mute.until).getTime() > Date.now())) continue;
+      sendPushToUser(uid, NotificationType.NEW_MESSAGE, pushTitle, pushBody, "/messages").catch(() => {});
+    }
 
     // Group @mentions — best-effort, never let a notification failure fail the send itself.
     if (convo.type === "group") {

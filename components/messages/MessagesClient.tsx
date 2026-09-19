@@ -50,7 +50,11 @@ import { saveSticker } from "@/lib/stickers";
 import { checkMicrophonePermission, newCallId, WebRTCCall } from "@/lib/webrtc";
 import SharePickerModal, { type SharedManga, type SharedPost } from "./SharePickerModal";
 import StickerPicker from "./StickerPicker";
-import VoiceRecorder, { VOICE_MAX_SECONDS_FREE, VOICE_MAX_SECONDS_PLATINUM } from "./VoiceRecorder";
+import MediaPreviewModal, { type MediaPreviewResult } from "./MediaPreviewModal";
+import PendingBubble, { type PendingSend } from "./PendingBubble";
+import { VoiceMicButton, VoicePreviewBar, VoiceRecordingBar } from "./VoiceNoteBars";
+import { useVoiceNote, type VoiceDraft } from "@/hooks/useVoiceNote";
+import { VOICE_MAX_SECONDS_FREE, VOICE_MAX_SECONDS_PLATINUM } from "@/lib/voiceRecorder";
 import { useAuth } from "@/hooks/useAuth";
 import { getBlockedUsers, isBlockedBy } from "@/lib/blocking";
 import { uploadAnyFile, uploadImage, uploadImageWithProgress, uploadVideo, uploadVoiceNote } from "@/lib/cloudinary";
@@ -151,8 +155,11 @@ export default function MessagesClient() {
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
   const [stickerPickerOpen, setStickerPickerOpen] = useState(false);
   const [sharePickerMode, setSharePickerMode] = useState<"manga" | "post" | null>(null);
-  const [voiceMode, setVoiceMode] = useState(false);
-  const [mediaUploading, setMediaUploading] = useState<{ percent: number; label: string } | null>(null);
+  // Media goes preview -> pending bubble ("Sending... 45%") -> real message. `previewFiles` non-null
+  // means the preview modal is open; `pendingSends` are the uploads in flight or failed.
+  const [previewFiles, setPreviewFiles] = useState<File[] | null>(null);
+  const [previewKind, setPreviewKind] = useState<"media" | "file">("media");
+  const [pendingSends, setPendingSends] = useState<PendingSend[]>([]);
   const photoVideoInputRef = useRef<HTMLInputElement>(null);
   const anyFileInputRef = useRef<HTMLInputElement>(null);
   // DM Feature Overhaul (Part F): the slide-in DM Settings panel, opened from the header menu.
@@ -463,7 +470,7 @@ export default function MessagesClient() {
     // one element, so it can't leak into page scroll no matter where the box sits on screen.
     const el = messagesContainerRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages]);
+  }, [messages, pendingSends.length]);
 
   // Sidebar Spotify dots: poll every 60s rather than subscribing per-contact in real time —
   // this list can hold many conversations at once, and "roughly current" is enough for a dot.
@@ -752,43 +759,68 @@ export default function MessagesClient() {
     }
   }
 
-  // Beta feedback bug: "Some users can't send a photo or video and it reflects... it just sends
-  // without the video or photo." Couldn't reproduce a specific device/file combination, so per
-  // "if intermittent, add better error handling so it fails gracefully": this now (1) rejects a
-  // file whose type isn't recognizably image/video up front, with a clear message, rather than
-  // silently attempting an upload the wrong Cloudinary endpoint may or may not accept, and (2)
-  // never calls sendMediaMessage with an empty/missing secureUrl — previously, if a Cloudinary
-  // response somehow came back "successful" without a usable URL, that gap would have gone
-  // straight through as an empty-media message instead of surfacing an error.
-  async function handlePhotoVideoPicked(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file || !user || !selectedId || blockedFromSending()) return;
-    const isVideo = file.type.startsWith("video/");
-    const isImage = file.type.startsWith("image/");
-    if (!isVideo && !isImage) {
-      toast.error(
-        file.type === "image/heic" || file.type === "image/heif"
-          ? "HEIC photos aren't supported yet — try converting to JPEG first."
-          : "That file type isn't supported — pick a photo or video."
-      );
-      return;
-    }
-    setMediaUploading({ percent: 0, label: isVideo ? "Uploading video..." : "Uploading photo..." });
-    try {
-      const { secureUrl } = isVideo
-        ? await uploadVideo(file, `dms/${selectedId}`, (p) => setMediaUploading({ percent: p, label: "Uploading video..." }))
-        : await uploadImageWithProgress(file, `dms/${selectedId}`, (p) => setMediaUploading({ percent: p, label: "Uploading photo..." }));
-      if (!secureUrl) throw new Error("Upload returned no URL.");
-      await sendMediaMessage({ mediaType: isVideo ? "video" : "image", mediaUrl: secureUrl });
-    } catch {
-      toast.error("Couldn't upload that file. Please try again.");
-    } finally {
-      setMediaUploading(null);
-    }
+  /* ---------------- photos, videos, files, voice notes ----------------
+   * Beta feedback: "Once I record an audio or select a file, it shouldn't just send like that... It
+   * should show on my end like Telegram's, with the option to add a caption." Everything now goes
+   * through a preview first (MediaPreviewModal for photos/videos/files, the inline preview bar for
+   * voice notes); only "Send" starts an upload, and the upload shows up in the thread immediately as
+   * a "Sending... 45%" bubble that turns into the real message (or a Retry/Delete bubble on failure). */
+
+  function patchPending(id: string, patch: Partial<PendingSend>) {
+    setPendingSends((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
   }
 
-  async function handleAnyFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
+  function removePending(id: string) {
+    setPendingSends((prev) => {
+      const gone = prev.find((p) => p.id === id);
+      if (gone?.previewUrl) URL.revokeObjectURL(gone.previewUrl);
+      return prev.filter((p) => p.id !== id);
+    });
+  }
+
+  /** Runs `exec` (upload, then send) behind a pending bubble. Captures the conversation it was started
+   * in, so switching threads mid-upload still delivers to the right one. */
+  function enqueueSend(
+    spec: Pick<PendingSend, "kind" | "previewUrl" | "fileName" | "duration" | "waveform" | "count"> & {
+      exec: (onProgress: (percent: number) => void) => Promise<void>;
+    }
+  ) {
+    if (!selectedId) return;
+    const id = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const { exec, ...display } = spec;
+    const run = async () => {
+      patchPending(id, { status: "uploading", percent: 0 });
+      try {
+        await exec((percent) => patchPending(id, { percent }));
+        removePending(id);
+      } catch (error) {
+        console.error("[dm] media send failed:", error);
+        patchPending(id, { status: "failed" });
+      }
+    };
+    setPendingSends((prev) => [
+      ...prev,
+      { ...display, id, conversationId: selectedId, status: "uploading", percent: 0, retry: run, discard: () => removePending(id) },
+    ]);
+    void run();
+  }
+
+  function handlePhotoVideoPicked(e: React.ChangeEvent<HTMLInputElement>) {
+    const picked = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    if (picked.length === 0 || !user || !selectedId || blockedFromSending()) return;
+    const usable = picked.filter((f) => f.type.startsWith("image/") || f.type.startsWith("video/"));
+    if (usable.length === 0) {
+      const heic = picked.some((f) => f.type === "image/heic" || f.type === "image/heif");
+      toast.error(heic ? "HEIC photos aren't supported yet — try converting to JPEG first." : "That file type isn't supported — pick a photo or video.");
+      return;
+    }
+    if (usable.length < picked.length) toast(`${picked.length - usable.length} unsupported file(s) were skipped.`);
+    setPreviewKind("media");
+    setPreviewFiles(usable);
+  }
+
+  function handleAnyFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file || !user || !selectedId || blockedFromSending()) return;
@@ -796,45 +828,124 @@ export default function MessagesClient() {
       toast.error("Files must be under 25MB.");
       return;
     }
-    setMediaUploading({ percent: 0, label: "Uploading file..." });
-    try {
-      const { secureUrl } = await uploadAnyFile(file, `dms/${selectedId}`, (p) => setMediaUploading({ percent: p, label: "Uploading file..." }));
-      await sendMediaMessage({ mediaType: "file", mediaUrl: secureUrl, mediaFileName: file.name, mediaSize: file.size });
-    } catch {
-      toast.error("Couldn't upload that file.");
-    } finally {
-      setMediaUploading(null);
+    setPreviewKind("file");
+    setPreviewFiles([file]);
+  }
+
+  function handleCameraCapture(file: File) {
+    if (!user || !selectedId || blockedFromSending()) return;
+    setPreviewKind("media");
+    setPreviewFiles([file]);
+  }
+
+  /** "Send" in the preview modal: the first message carries the caption; photos go together as one
+   * message (a grid), each video and the file go as their own. */
+  function handlePreviewSend(result: MediaPreviewResult) {
+    const files = previewFiles;
+    const kind = previewKind;
+    setPreviewFiles(null);
+    if (!files || !user || !selectedId || blockedFromSending()) return;
+    const convo = selectedId;
+    const uid = user.uid;
+    const folder = `dms/${convo}`;
+    let caption: string | undefined = result.caption || undefined;
+    const takeCaption = () => {
+      const c = caption ?? "";
+      caption = undefined;
+      return c;
+    };
+
+    if (kind === "file") {
+      const file = files[0];
+      const text = takeCaption();
+      enqueueSend({
+        kind: "file",
+        fileName: file.name,
+        exec: async (onProgress) => {
+          const { secureUrl } = await uploadAnyFile(file, folder, onProgress);
+          if (!secureUrl) throw new Error("Upload returned no URL.");
+          await sendDM(convo, uid, text, { mediaType: "file", mediaUrl: secureUrl, mediaFileName: file.name, mediaSize: file.size });
+        },
+      });
+      return;
+    }
+
+    const images = result.items.filter((i) => i.kind === "image");
+    const videos = result.items.filter((i) => i.kind === "video");
+
+    if (images.length > 0) {
+      const text = takeCaption();
+      enqueueSend({
+        kind: "image",
+        count: images.length,
+        previewUrl: URL.createObjectURL(images[0].file),
+        exec: async (onProgress) => {
+          const urls: string[] = [];
+          for (let i = 0; i < images.length; i++) {
+            const { secureUrl } = await uploadImageWithProgress(images[i].file, folder, (p) => onProgress(((i + p / 100) / images.length) * 100));
+            if (!secureUrl) throw new Error("Upload returned no URL.");
+            urls.push(secureUrl);
+          }
+          await sendDM(convo, uid, text, {
+            mediaType: "image",
+            mediaUrl: urls[0],
+            ...(urls.length > 1 ? { mediaUrls: urls } : { mediaWidth: images[0].width, mediaHeight: images[0].height }),
+          });
+        },
+      });
+    }
+
+    for (const video of videos) {
+      const text = takeCaption();
+      enqueueSend({
+        kind: "video",
+        previewUrl: URL.createObjectURL(video.file),
+        exec: async (onProgress) => {
+          const { secureUrl } = await uploadVideo(video.file, folder, onProgress);
+          if (!secureUrl) throw new Error("Upload returned no URL.");
+          await sendDM(convo, uid, text, {
+            mediaType: "video",
+            mediaUrl: secureUrl,
+            mediaDuration: video.duration,
+            mediaWidth: video.width,
+            mediaHeight: video.height,
+          });
+        },
+      });
     }
   }
 
-  async function handleCameraCapture(file: File) {
-    if (!user || !selectedId || blockedFromSending()) return;
-    setMediaUploading({ percent: 0, label: "Uploading photo..." });
-    try {
-      const { secureUrl } = await uploadImageWithProgress(file, `dms/${selectedId}`, (p) => setMediaUploading({ percent: p, label: "Uploading photo..." }));
-      await sendMediaMessage({ mediaType: "image", mediaUrl: secureUrl });
-    } catch {
-      toast.error("Couldn't upload that photo.");
-    } finally {
-      setMediaUploading(null);
+  /** The voice preview's Send button: the recording is already finished and sitting in memory; this is
+   * the first moment anything touches the network. */
+  function handleVoiceDraftSend(draft: VoiceDraft) {
+    if (!user || !selectedId || blockedFromSending()) {
+      URL.revokeObjectURL(draft.url);
+      return;
     }
+    const convo = selectedId;
+    const uid = user.uid;
+    enqueueSend({
+      kind: "voice",
+      duration: draft.seconds,
+      waveform: draft.waveform,
+      previewUrl: draft.url,
+      exec: async (onProgress) => {
+        const { secureUrl } = await uploadVoiceNote(draft.blob, `dms/${convo}/voice`, onProgress);
+        if (!secureUrl) throw new Error("Upload returned no URL.");
+        await sendDM(convo, uid, "", {
+          mediaType: "voice",
+          mediaUrl: secureUrl,
+          mediaDuration: draft.seconds,
+          ...(draft.waveform.length > 0 ? { mediaWaveform: draft.waveform } : {}),
+        });
+      },
+    });
   }
 
-  async function handleVoiceSend(blob: Blob, durationSeconds: number) {
-    setVoiceMode(false);
-    if (!user || !selectedId || blockedFromSending()) return;
-    setMediaUploading({ percent: 0, label: "Uploading voice message..." });
-    try {
-      const { secureUrl } = await uploadVoiceNote(blob, `dms/${selectedId}/voice`, (p) =>
-        setMediaUploading({ percent: p, label: "Uploading voice message..." })
-      );
-      await sendMediaMessage({ mediaType: "voice", mediaUrl: secureUrl, mediaDuration: durationSeconds });
-    } catch {
-      toast.error("Couldn't send that voice message.");
-    } finally {
-      setMediaUploading(null);
-    }
-  }
+  const voice = useVoiceNote({
+    maxSeconds: profile?.isPlatinum ? VOICE_MAX_SECONDS_PLATINUM : VOICE_MAX_SECONDS_FREE,
+    onSend: handleVoiceDraftSend,
+  });
 
   function handleGifSelected(gif: TenorGif) {
     sendMediaMessage({ mediaType: "gif", mediaUrl: gif.fullUrl, mediaWidth: gif.width, mediaHeight: gif.height });
@@ -1765,6 +1876,11 @@ export default function MessagesClient() {
                       </div>
                     );
                   })}
+                  {pendingSends
+                    .filter((p) => p.conversationId === selectedId)
+                    .map((p) => (
+                      <PendingBubble key={p.id} send={p} />
+                    ))}
                   {typingUids.length > 0 && (
                     <div className="flex justify-start">
                       <div className="flex items-center gap-1 rounded-tr-2xl rounded-br-2xl rounded-tl-sm bg-bg3 px-4 py-3">
@@ -1876,50 +1992,44 @@ export default function MessagesClient() {
                     ))}
                   </div>
                 )}
-                {mediaUploading && (
-                  <div className="flex items-center gap-2 border-t border-bg4 bg-bg2 px-3 py-2">
-                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-clay" />
-                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-bg3">
-                      <div className="h-full bg-clay transition-all" style={{ width: `${mediaUploading.percent}%` }} />
-                    </div>
-                    <span className="shrink-0 font-noto text-[10px] text-muted">{mediaUploading.label}</span>
-                  </div>
-                )}
                 <AttachmentTray
                   open={attachmentTrayOpen}
                   onClose={() => setAttachmentTrayOpen(false)}
                   onCamera={() => setCameraOpen(true)}
                   onPhotoVideo={() => photoVideoInputRef.current?.click()}
-                  onVoice={() => setVoiceMode(true)}
                   onFile={() => anyFileInputRef.current?.click()}
                   onShareManga={() => setSharePickerMode("manga")}
                   onSharePost={() => setSharePickerMode("post")}
                   onGif={() => setGifPickerOpen(true)}
                   onSticker={() => setStickerPickerOpen(true)}
                 />
-                <input ref={photoVideoInputRef} type="file" accept="image/*,video/*" onChange={handlePhotoVideoPicked} className="hidden" />
+                <input ref={photoVideoInputRef} type="file" accept="image/*,video/*" multiple onChange={handlePhotoVideoPicked} className="hidden" />
                 <input ref={anyFileInputRef} type="file" onChange={handleAnyFilePicked} className="hidden" />
+                {voice.cancelledFlash && (
+                  <p className="px-4 pb-0.5 text-center font-noto text-xs text-muted" role="status">
+                    Recording cancelled
+                  </p>
+                )}
                 <div
                   className="flex items-end gap-2 p-3"
                   style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
                 >
-                  {voiceMode ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => setVoiceMode(false)}
-                        aria-label="Cancel voice message"
-                        className="btn-ghost shrink-0 px-2.5"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                      <VoiceRecorder
-                        maxSeconds={profile?.isPlatinum ? VOICE_MAX_SECONDS_PLATINUM : VOICE_MAX_SECONDS_FREE}
-                        onSend={handleVoiceSend}
-                      />
-                    </>
+                  {voice.state === "recording" ? (
+                    <VoiceRecordingBar
+                      seconds={voice.seconds}
+                      maxSeconds={voice.maxSeconds}
+                      levels={voice.levels}
+                      swipeDx={voice.swipeDx}
+                      onStop={voice.stopToPreview}
+                      onCancel={voice.cancelRecording}
+                      onBarPointerDown={voice.beginBarSwipe}
+                    />
+                  ) : voice.state === "preview" && voice.draft ? (
+                    <VoicePreviewBar draft={voice.draft} onCancel={voice.discardDraft} onSend={voice.sendDraft} />
                   ) : (
                     <>
+                      {/* [Attach] [Input] [Emoji] [Mic — or Send once there's text]. Exactly one of mic/send
+                          is ever shown. */}
                       <button
                         type="button"
                         onClick={() => setAttachmentTrayOpen((o) => !o)}
@@ -1928,6 +2038,16 @@ export default function MessagesClient() {
                       >
                         <Paperclip className="h-4 w-4" />
                       </button>
+                      <textarea
+                        ref={textareaRef}
+                        value={text}
+                        onChange={handleTextareaInput}
+                        onKeyDown={handleKeyDown}
+                        rows={1}
+                        placeholder="Type a message..."
+                        className="input-base min-w-0 flex-1 resize-none overflow-y-auto"
+                        style={{ maxHeight: MAX_TEXTAREA_HEIGHT }}
+                      />
                       <button
                         type="button"
                         onClick={() => setEmojiOpen((o) => !o)}
@@ -1936,25 +2056,19 @@ export default function MessagesClient() {
                       >
                         <Smile className="h-4 w-4" />
                       </button>
-                      <textarea
-                        ref={textareaRef}
-                        value={text}
-                        onChange={handleTextareaInput}
-                        onKeyDown={handleKeyDown}
-                        rows={1}
-                        placeholder="Type a message..."
-                        className="input-base flex-1 resize-none overflow-y-auto"
-                        style={{ maxHeight: MAX_TEXTAREA_HEIGHT }}
-                      />
-                      <button
-                        type="button"
-                        onClick={handleSend}
-                        disabled={sending || !text.trim()}
-                        className="btn-primary shrink-0"
-                        aria-label="Send message"
-                      >
-                        <Send className="h-4 w-4" />
-                      </button>
+                      {text.trim() ? (
+                        <button
+                          type="button"
+                          onClick={handleSend}
+                          disabled={sending}
+                          className="btn-primary flex h-10 w-10 shrink-0 items-center justify-center rounded-full p-0"
+                          aria-label="Send message"
+                        >
+                          <Send className="h-4 w-4" />
+                        </button>
+                      ) : (
+                        <VoiceMicButton onPointerDown={voice.startRecording} />
+                      )}
                     </>
                   )}
                 </div>
@@ -1963,6 +2077,7 @@ export default function MessagesClient() {
             </>
           )}
 
+          <MediaPreviewModal files={previewFiles} kind={previewKind} onCancel={() => setPreviewFiles(null)} onSend={handlePreviewSend} />
           <InAppCamera open={cameraOpen} onClose={() => setCameraOpen(false)} onCapture={handleCameraCapture} />
           <GifPicker open={gifPickerOpen} onClose={() => setGifPickerOpen(false)} onSelect={handleGifSelected} />
           <StickerPicker open={stickerPickerOpen} onClose={() => setStickerPickerOpen(false)} onSelect={handleStickerSelected} />

@@ -9,7 +9,7 @@ import MessageButton from "@/components/social/MessageButton";
 import ProfileVisitRecorder from "@/components/social/ProfileVisitRecorder";
 import ReportButton from "@/components/social/ReportButton";
 import NowPlayingCard from "@/components/spotify/NowPlayingCard";
-import { getCoverGradient } from "@/lib/coverStyles";
+import { getCoverBackgroundStyle } from "@/lib/coverStyles";
 import AvatarLightbox from "@/components/ui/AvatarLightbox";
 import { PlatinumBadge } from "@/components/ui/Badges";
 import { BirthdayBadge } from "@/components/ui/BirthdayBadge";
@@ -58,7 +58,7 @@ export default async function PublicProfilePage({ params }: PublicProfilePagePro
     <div className="relative">
       <div
         className="relative h-40 w-full overflow-hidden bg-bg2 sm:h-48"
-        style={{ backgroundImage: getCoverGradient(profile.coverStyle) }}
+        style={getCoverBackgroundStyle(profile.coverStyle, profile.coverPhotoURL)}
       >
         <div className="kente-bar absolute inset-x-0 top-0" />
       </div>
