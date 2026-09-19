@@ -97,7 +97,9 @@ function uploadToCloudinary(
  * the FIRST one's actual audio, no matter what was actually recorded afterward. A unique
  * filename per recording (timestamp + random suffix) gives every voice note its own public_id. */
 export function uploadVoiceNote(blob: Blob, folder: string, onProgress?: (percent: number) => void) {
-  const uniqueName = `voice-message-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.webm`;
+  // Extension follows what the browser actually recorded (Safari produces MP4/AAC, not WebM).
+  const ext = blob.type.includes("mp4") ? "m4a" : blob.type.includes("ogg") ? "ogg" : "webm";
+  const uniqueName = `voice-message-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
   return uploadToCloudinary(blob, folder, "video", onProgress, uniqueName);
 }
 

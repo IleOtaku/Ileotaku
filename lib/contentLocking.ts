@@ -26,6 +26,10 @@ const FREE_CHAPTER_COUNT = 7;
 
 export type EngagementTier = "low" | "medium" | "high" | "viral";
 
+/** Coin cost to unlock one chapter beyond the free ones, by engagement tier. The medium tier is
+ * normally an ad-gated unlock; `medium` here is the coin ALTERNATIVE to watching the ad. */
+export const CHAPTER_COIN_PRICES = { medium: 3, high: 8, viral: 15 } as const;
+
 export interface MangaStats {
   totalReads: number;
   engagementTier: EngagementTier;
@@ -112,7 +116,7 @@ export interface LockConfig {
   reason: LockReason;
   /** Only set when `reason === "ad"`. */
   adRequired?: boolean;
-  /** Only set when `reason === "coins"`. */
+  /** Set when `reason === "coins"`, and on `reason === "ad"` as the price of skipping the ad. */
   coinPrice?: number;
 }
 
@@ -149,11 +153,11 @@ export async function getLockConfig(
     case "low":
       return { locked: false, reason: "low_engagement" };
     case "medium":
-      return { locked: true, reason: "ad", adRequired: true };
+      return { locked: true, reason: "ad", adRequired: true, coinPrice: CHAPTER_COIN_PRICES.medium };
     case "high":
-      return { locked: true, reason: "coins", coinPrice: 10 };
+      return { locked: true, reason: "coins", coinPrice: CHAPTER_COIN_PRICES.high };
     case "viral":
-      return { locked: true, reason: "coins", coinPrice: 20 };
+      return { locked: true, reason: "coins", coinPrice: CHAPTER_COIN_PRICES.viral };
   }
 }
 

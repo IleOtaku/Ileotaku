@@ -8,6 +8,11 @@ export interface VerificationBadgeUser {
   verifiedType?: string | null;
   /** Legacy fallback — see getVerificationBadge's own doc comment. */
   isPublisher?: boolean;
+  /** With verificationExpiresAt: lets a lapsed paid "white" badge hide itself on any surface that
+   * has the full profile (posts/comments carry only denormalized fields, so they show whatever the
+   * author's flag was at write time). */
+  isPlatinum?: boolean;
+  verificationExpiresAt?: string | null;
 }
 
 /**

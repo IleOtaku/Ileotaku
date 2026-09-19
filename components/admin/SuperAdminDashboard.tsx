@@ -23,6 +23,7 @@ const AdminReportsTab = dynamic(() => import("./AdminReportsTab"), { ssr: false 
 const AdminWorksTab = dynamic(() => import("./AdminWorksTab"), { ssr: false });
 const AdminVerificationTab = dynamic(() => import("./AdminVerificationTab"), { ssr: false });
 const UsersTable = dynamic(() => import("./UsersTable"), { ssr: false });
+const PendingPayoutCard = dynamic(() => import("./PendingPayoutCard"), { ssr: false });
 
 type SuperAdminTab =
   | "overview"
@@ -129,11 +130,16 @@ export default function SuperAdminDashboard({ adminName, isSuperAdmin = true }: 
 
         <div className="mt-8">
           {tab === "overview" && (
-            <AdminOverviewTab
-              canManageAdmins={isSuperAdmin}
-              canSendAnnouncements={isSuperAdmin}
-              onNavigateToAnnouncements={() => setTab("announcements")}
-            />
+            <>
+              {/* Creator payouts an accountant has submitted — Super Admin only; renders nothing
+                  when there's nothing waiting on approval. */}
+              {isSuperAdmin && <PendingPayoutCard />}
+              <AdminOverviewTab
+                canManageAdmins={isSuperAdmin}
+                canSendAnnouncements={isSuperAdmin}
+                onNavigateToAnnouncements={() => setTab("announcements")}
+              />
+            </>
           )}
 
           {tab === "users" &&

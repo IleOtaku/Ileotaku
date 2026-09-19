@@ -227,7 +227,7 @@ function generateInviteCode(): string {
  * someone added)." A plain message doc with `senderId: "system"`/`isSystem: true` — rendered
  * centered/muted by MessagesClient instead of as a bubble. Best-effort: a missed system message
  * should never fail the join/add it's narrating. */
-async function addSystemMessage(conversationId: string, text: string): Promise<void> {
+export async function addSystemMessage(conversationId: string, text: string): Promise<void> {
   try {
     await addDoc(collection(doc(db, CONVERSATIONS, conversationId), "messages"), {
       conversationId,

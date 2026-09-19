@@ -541,3 +541,63 @@ bigger suggestions).
 
 `npx tsc --noEmit`: 0 errors. `npm run build`: clean, all 26 routes (27 including the new
 `/api/link-preview` route).
+
+---
+
+# Pricing overhaul, voice notes, creator payouts & beta-feedback triage
+
+Every unresolved item in Admin → Feedback (20 at the start of this pass) was read and triaged.
+Statuses below reflect what was actually done and verified, not what was hoped for.
+
+## Resolved
+
+| Feedback | What happened |
+|---|---|
+| "Voicenotes keep sending the first voice note I recorded per user" | Fixed earlier (unique Cloudinary filename per recording, `uploadVoiceNote`); deployed. |
+| "Posts image and video preview showing broken images" | Stored `videoPosterUrl` values 404 (`/image/upload/so_auto/`). `PostGridCard` now derives the poster from `videoUrl` (`/video/upload/so_auto/…jpg`, verified 200 on real posts). Deployed. |
+| "All 10 bubble styles are the same" | Tailwind was purging the interpolated `bubble-style-N` classes. Safelisted + rewritten as `.message-bubble.bubble-style-N`; live CSS now contains all 12 rules. |
+| "The select button for spotify sounds still doesn't work" | Spotify removed `preview_url` for third-party apps (Nov 2024), so this can't work. The Spotify tab was already removed from `SoundPicker`; library + own-upload sounds remain. |
+| "Add inline activity messages in DMs (angie missed a call; joined; left)" | Joined/added/left already existed. Added the missing call lines: "📞 Missed voice call from X", "📞 Voice call declined", "📞 Voice call · m:ss" (duration now measured from answer, not from ringing). |
+| "The create post modal is too far down, bring it up to the middle" | `Modal` gained a `centered` prop (default unchanged); Create Post uses it instead of docking to the bottom on phones. |
+| "Story videos should fit the viewport… and the reply should always be on the video" | Media layer now fills the whole story card; the reply bar (and viewer count) overlays the bottom of the video. Portrait/square clips fill the screen, landscape clips stay uncropped. |
+| "Next time she logs in, popup of an ice cream with confetti, 'From Zamy'" | New one-time `GiftPopup` driven by a `pendingGift` field on the profile (cleared after it's shown). Set on that user's profile. |
+| "Voice note issue" / voice notes stop early / timer shows 00:00 | See the voice-recorder rewrite below. |
+| Compliment ("peak build") | Acknowledged. |
+| "Maybe you should get a girl named angel ice cream 👀" | Not actionable as a code change (see the gift popup above for the fun version). |
+
+## Deliberately left open (with reasons)
+
+- **"White verification 1k/month… Platinum 2k… scale everything down… time-based Platinum (₦200/hour, max 5h/week)"** — the pricing overhaul and the ₦1,000/month white-verification renewal are done. **Hourly Platinum is not built:** it needs a new purchase flow, a weekly-hours cap, and reliable sub-hour expiry of the Platinum flag, and nothing today sweeps `platinumUntil` on a sub-hour cadence. Left open.
+- **Verified-tier reach algorithm / "only verified creators earn" / posting-consistency rules** — a large product design (per-tier reach percentages, consistency requirements, boost reach bands), not a 20-minute change. Also conflicts with the published Creator Agreement, which says all creators earn. Needs a spec conversation first.
+- **Telegram-style preview + caption before sending voice notes/files, custom video controls** — a new compose-and-review flow across several attachment types. Not started.
+- **HD/2K/4K should AI-enhance or downscale media** — needs server-side media processing; the Cloudinary transformations exist but AI upscaling is a paid add-on and a real design decision.
+- **Profile photo cropping + cover photos (not just colours)** — needs a crop UI plus cover-image plumbing through every profile surface. Not started.
+- **"Can't hear each other on calls" / "hear ourselves for 5 seconds" (×3)** — ICE candidate queueing, audio-element remount and mic-status fixes are deployed, but a real two-person call has not been tested, and TURN credentials (Metered.ca) still have to be added to Vercel. **Not marked resolved until someone confirms audio on a real call.**
+- **"Notifications should push to devices like WhatsApp" / "I still don't get notifications"** — investigated, not a code bug: the push pipeline works (both stored FCM tokens validate), but only **2 of 14 accounts have ever enabled notifications**, so most people can't be pushed to at all. iOS additionally needs the PWA installed. Added a heads-up when you call someone with no push enabled. The custom notification chime already exists. Left open: it needs an opt-in campaign, not a fix.
+
+## Voice recorder rewrite (`components/messages/VoiceRecorder.tsx`)
+
+Root causes found (not the ones assumed): the duration passed to `onSend` was read from a stale
+render (always 0 → every sent note read 0:00); release was detected with `onMouseLeave` on a bar
+that replaced the button under the pointer, and on touch `touchend` fires on the unmounted button
+and never arrives; the blob was always labelled `audio/webm`. Now: window-level pointer listeners,
+wall-clock timer, real mime type, 250ms timeslice, tap-to-lock for long (Platinum) recordings, and
+limits of 1:30 (everyone) / 10:00 (Platinum) with a red "Ns remaining" bar for the last 10 seconds.
+
+## Pricing (all constants live in `lib/payments.ts`, `lib/creatorFeed.ts`, `lib/contentLocking.ts`)
+
+Platinum ₦2,000/mo, ₦20,000/yr (17% off), student ₦1,000, family ₦4,500; coin packs ₦300 / ₦700 /
+₦1,500 / ₦3,500; Platinum with coins 200 / 1,800; chapter unlocks 3 (skip-the-ad option, new) / 8 / 15;
+boosts 20 / 60 / 200; image resolution HD 5, 2K 10, 4K 20; ads-free hour 5; white verification 1,000
+coins / 30 days. **Video resolution costs were not changed** (720p 15 / 1080p 30 / 2K 60 / 4K 120) —
+the spec's "was" values only match the image tiers.
+
+## Creator payout system — decisions that need your confirmation
+
+- **`COIN_TO_NGN = 6`, not the spec's 15** (`lib/earningsConfig.ts`). At the new pack prices a coin sells for ₦6 (smallest pack) down to ~₦4; paying ₦15 × 70% = ₦10.50/coin would pay creators more than the platform ever collected. One line to change.
+- **Split percentages** follow the payout spec (unlocks 70%, tips 65%, ads 60%, Platinum pool 70%) **but do not match the published Creator Agreement page** (70 / 85 / 60 / 0% for feed ads). Reconcile before the first real payout.
+- **Platinum pool size (30% of Platinum revenue) is a placeholder** — the spec never defines it. Shared by creators' proportion of Platinum members' reads; self-reads excluded.
+- **Ad revenue is ₦0 for everyone** — no ad network attributes revenue to creators yet. It reads `creatorAdRevenue/{period}_{uid}.grossNGN` if finance records it; otherwise use the adjustment field.
+- **Tip coins are already credited to the creator's coin balance** when the tip is sent; the payout also pays tips in Naira. Decide whether tip coins should stop being credited, or tips should be left out of cash payouts, or you'll pay twice.
+- The transfer route takes the caller's identity from their verified ID token, not from the request body (`adminUid` in the spec would be forgeable), requires a Super Admin, and refuses to let the person who prepared a run approve it.
+- No retry for individually failed transfers yet (references are deterministic, so a plain re-send can't double-pay, but a failed creator needs a new reference). Handle via next month's adjustment for now.

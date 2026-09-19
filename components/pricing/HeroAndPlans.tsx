@@ -137,7 +137,7 @@ export default function HeroAndPlans() {
           >
             Annual
             <span className="rounded-full bg-green/20 px-2 py-0.5 text-[10px] font-bold text-green2">
-              Save 20%
+              Save 17%
             </span>
           </button>
         </div>

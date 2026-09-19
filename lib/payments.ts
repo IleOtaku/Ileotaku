@@ -23,18 +23,18 @@ export interface CoinPack {
 
 /** NGN is the real charge currency; USD is an approximate equivalent for display only (~₦1,500/$1). */
 export const COIN_PACKS: CoinPack[] = [
-  { id: "pack-50", coins: 50, bonus: 0, priceNGN: 1500, priceUSD: 0.99, label: "50 coins" },
-  { id: "pack-130", coins: 130, bonus: 0, priceNGN: 3000, priceUSD: 1.99, label: "130 coins" },
+  { id: "pack-50", coins: 50, bonus: 0, priceNGN: 300, priceUSD: 0.2, label: "50 coins" },
+  { id: "pack-130", coins: 130, bonus: 0, priceNGN: 700, priceUSD: 0.47, label: "130 coins" },
   {
     id: "pack-300",
     coins: 300,
     bonus: 30,
-    priceNGN: 6000,
-    priceUSD: 3.99,
+    priceNGN: 1500,
+    priceUSD: 1,
     label: "300 + 30 coins",
     bestValue: true,
   },
-  { id: "pack-800", coins: 800, bonus: 80, priceNGN: 15000, priceUSD: 9.99, label: "800 + 80 coins" },
+  { id: "pack-800", coins: 800, bonus: 80, priceNGN: 3500, priceUSD: 2.33, label: "800 + 80 coins" },
 ];
 
 export type PlatinumTier = "monthly" | "annual" | "student" | "family";
@@ -51,10 +51,10 @@ export interface PlatinumPlan {
 
 /** NGN is the real charge currency; USD is an approximate equivalent for display only (~₦1,500/$1). */
 export const PLATINUM_PLANS: PlatinumPlan[] = [
-  { tier: "monthly", label: "Monthly", priceNGN: 7500, priceUSD: 5, months: 1 },
-  { tier: "annual", label: "Annual", priceNGN: 72000, priceUSD: 48, months: 12 },
-  { tier: "student", label: "Student", priceNGN: 4500, priceUSD: 2.5, months: 1 },
-  { tier: "family", label: "Family", priceNGN: 15000, priceUSD: 8, months: 1 },
+  { tier: "monthly", label: "Monthly", priceNGN: 2000, priceUSD: 1.33, months: 1 },
+  { tier: "annual", label: "Annual", priceNGN: 20000, priceUSD: 13.33, months: 12 },
+  { tier: "student", label: "Student", priceNGN: 1000, priceUSD: 0.67, months: 1 },
+  { tier: "family", label: "Family", priceNGN: 4500, priceUSD: 3, months: 1 },
 ];
 
 export interface PaymentResult {
@@ -173,12 +173,11 @@ export async function subscribePlatinum(user: User, tier: PlatinumTier): Promise
   }
 }
 
-/** Coin price of each Platinum tier purchasable with coins — annual works out to a ~20% discount
- * vs. 12x the monthly rate (500 × 12 = 6000; 4800 is 20% off that), same "save 20%" framing the
- * pricing page already uses for the NGN annual plan. */
+/** Coin price of each Platinum tier purchasable with coins. Annual is 25% off 12x the monthly
+ * rate (200 × 12 = 2400; 1800 is 25% off that). */
 export const PLATINUM_COIN_PRICES: Record<"monthly" | "annual", number> = {
-  monthly: 500,
-  annual: 4800,
+  monthly: 200,
+  annual: 1800,
 };
 
 /** Buys Platinum outright with coins instead of a Paystack charge — no payment gateway involved,
@@ -220,6 +219,58 @@ export async function purchasePlatinumWithCoins(
   } catch (error) {
     await logError(error, { operation: "purchasePlatinumWithCoins", uid, tier });
     return { success: false, message: "Couldn't activate Platinum. Please try again." };
+  }
+}
+
+/* ---------------------------- White verification ---------------------------- */
+
+/** Beta feedback: white (general) verification for non-Platinum accounts is a paid, recurring
+ * status — 1,000 coins buys 30 more days. Platinum, Creator and Publisher verification is
+ * permanent and never goes through this. */
+export const WHITE_VERIFICATION_PRICE = 1000;
+export const WHITE_VERIFICATION_DAYS = 30;
+
+/** Deducts WHITE_VERIFICATION_PRICE coins and extends `verificationExpiresAt` by 30 days —
+ * from the current expiry if it's still in the future (renewing early stacks rather than wastes
+ * the remainder), otherwise from now. Re-sets isVerified in the same write, since an expired
+ * account had it flipped off by the expiry check (see lib/verification.ts). */
+export async function purchaseWhiteVerification(uid: string): Promise<PaymentResult> {
+  const profile = await getUserProfile(uid);
+  if (!profile) return { success: false, message: "Couldn't load your account. Please try again." };
+  if (profile.isPlatinum || profile.verifiedType || profile.isFounder || profile.isAdmin) {
+    return { success: false, message: "Your verification is permanent — there's nothing to renew." };
+  }
+  if (!profile.verificationExpiresAt) {
+    return { success: false, message: "Only accounts approved for verification can renew it." };
+  }
+  const balance = profile.coins ?? 0;
+  if (balance < WHITE_VERIFICATION_PRICE) {
+    return { success: false, message: `You need ${(WHITE_VERIFICATION_PRICE - balance).toLocaleString()} more coins for this.` };
+  }
+
+  const newBalance = balance - WHITE_VERIFICATION_PRICE;
+  const currentExpiry = new Date(profile.verificationExpiresAt).getTime();
+  const base = Number.isFinite(currentExpiry) ? Math.max(Date.now(), currentExpiry) : Date.now();
+  const expiresAt = new Date(base + WHITE_VERIFICATION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+  try {
+    await updateUserPrefs(uid, {
+      coins: newBalance,
+      isVerified: true,
+      verifiedType: null,
+      verificationExpiresAt: expiresAt,
+    });
+    await addTransaction(uid, {
+      type: "spend",
+      amount: -WHITE_VERIFICATION_PRICE,
+      balanceAfter: newBalance,
+      description: "Renewed verification (30 days)",
+      category: "verification",
+    });
+    return { success: true };
+  } catch (error) {
+    await logError(error, { operation: "purchaseWhiteVerification", uid });
+    return { success: false, message: "Couldn't renew your verification. Please try again." };
   }
 }
 
@@ -415,12 +466,12 @@ export async function purchaseChapterWithCoins(
  * ads-free window rather than always restarting it from now — buying another hour while one is
  * already running should stack, not waste the remainder. See lib/ads.ts's isAdsFree, which every
  * ad component checks instead of `isPlatinum` directly so this actually suppresses ads. */
-export const ADS_FREE_HOUR_PRICE = 30;
+export const ADS_FREE_HOUR_PRICE = 5;
 
 export async function purchaseAdsFreeHour(user: User): Promise<PaymentResult> {
   const profile = await getUserProfile(user.uid);
   if (!profile || (profile.coins ?? 0) < ADS_FREE_HOUR_PRICE) {
-    return { success: false, message: "Not enough coins — you need 30." };
+    return { success: false, message: `Not enough coins — you need ${ADS_FREE_HOUR_PRICE}.` };
   }
   if (profile.isPlatinum) {
     return { success: false, message: "You're Platinum — you already never see ads." };

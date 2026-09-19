@@ -50,7 +50,7 @@ import { saveSticker } from "@/lib/stickers";
 import { checkMicrophonePermission, newCallId, WebRTCCall } from "@/lib/webrtc";
 import SharePickerModal, { type SharedManga, type SharedPost } from "./SharePickerModal";
 import StickerPicker from "./StickerPicker";
-import VoiceRecorder from "./VoiceRecorder";
+import VoiceRecorder, { VOICE_MAX_SECONDS_FREE, VOICE_MAX_SECONDS_PLATINUM } from "./VoiceRecorder";
 import { useAuth } from "@/hooks/useAuth";
 import { getBlockedUsers, isBlockedBy } from "@/lib/blocking";
 import { uploadAnyFile, uploadImage, uploadImageWithProgress, uploadVideo, uploadVoiceNote } from "@/lib/cloudinary";
@@ -525,6 +525,16 @@ export default function MessagesClient() {
     }
     const callId = newCallId();
     const call = new WebRTCCall(callId);
+    if (selectedId) call.setChatContext(selectedId, profile?.displayName ?? "Someone");
+    // Push notifications only reach people who've enabled them (most accounts haven't) — say so up
+    // front instead of letting the caller wonder why the other side never noticed the call.
+    getUserProfile(targetUid)
+      .then((p) => {
+        if (p && (p.fcmTokens ?? []).length === 0) {
+          toast(`${targetName} hasn't turned on notifications, so they may not notice this call until they open ÍléOtaku.`, { duration: 6000 });
+        }
+      })
+      .catch(() => {});
     useActiveCall.getState().start(callId, call, { uid: targetUid, displayName: targetName, photoURL: targetPhoto }, "outgoing", "ringing");
     try {
       await call.startCall(user.uid, targetUid);
@@ -1903,7 +1913,10 @@ export default function MessagesClient() {
                       >
                         <X className="h-4 w-4" />
                       </button>
-                      <VoiceRecorder maxSeconds={profile?.isPlatinum ? 600 : 120} onSend={handleVoiceSend} />
+                      <VoiceRecorder
+                        maxSeconds={profile?.isPlatinum ? VOICE_MAX_SECONDS_PLATINUM : VOICE_MAX_SECONDS_FREE}
+                        onSend={handleVoiceSend}
+                      />
                     </>
                   ) : (
                     <>

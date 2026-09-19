@@ -115,9 +115,9 @@ export interface BoostTierConfig {
 }
 
 export const BOOST_TIERS: Record<1 | 2 | 3, BoostTierConfig> = {
-  1: { cost: 50, hours: 24, multiplier: 2, label: "Boost" },
-  2: { cost: 150, hours: 48, multiplier: 5, label: "Super Boost" },
-  3: { cost: 500, hours: 72, multiplier: 10, label: "Mega Boost" },
+  1: { cost: 20, hours: 24, multiplier: 2, label: "Boost" },
+  2: { cost: 60, hours: 48, multiplier: 5, label: "Super Boost" },
+  3: { cost: 200, hours: 72, multiplier: 10, label: "Mega Boost" },
 };
 
 /* ---------------------------- Resolution-based monetization ---------------------------- */
@@ -128,9 +128,9 @@ export const BOOST_TIERS: Record<1 | 2 | 3, BoostTierConfig> = {
  * pay per-post for a resolution bump, Platinum pays once for unlimited high-res posting. */
 export const IMAGE_RESOLUTION_COSTS: Record<NonNullable<CreatorPost["imageResolution"]>, number> = {
   standard: 0,
-  hd: 10,
-  "2k": 25,
-  "4k": 50,
+  hd: 5,
+  "2k": 10,
+  "4k": 20,
 };
 
 export const VIDEO_RESOLUTION_COSTS: Record<NonNullable<CreatorPost["videoResolution"]>, number> = {

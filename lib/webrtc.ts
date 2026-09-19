@@ -19,6 +19,7 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { db } from "./firebase";
+import { addSystemMessage } from "./dms";
 import { logError } from "./errorLogger";
 import { createNotification } from "./notifications";
 import { NotificationType } from "@/types";
@@ -71,6 +72,8 @@ export interface CallDoc {
   offer?: RTCSessionDescriptionInit;
   answer?: RTCSessionDescriptionInit;
   startedAt: string;
+  /** When the callee picked up — `duration` is measured from here, not from when it started ringing. */
+  answeredAt?: string;
   endedAt?: string;
   /** Seconds. */
   duration?: number;
@@ -119,6 +122,10 @@ export class WebRTCCall {
   // before the answer has been applied), which can leave ICE with no usable path and no audio.
   private pendingCandidates: RTCIceCandidateInit[] = [];
   private answerApplied = false;
+  /** Set on the CALLER's instance only: where to post the inline "missed / declined / voice call ·
+   * 3:24" activity line, and who's calling (for the missed-call wording). */
+  private chat: { conversationId: string; callerName: string } | null = null;
+  private summaryPosted = false;
 
   constructor(callId: string) {
     this.callId = callId;
@@ -189,6 +196,26 @@ export class WebRTCCall {
     };
   }
 
+  /** Beta feedback: "Add inline activity messages in DMs (angie missed a call...)". Only the caller's
+   * instance posts, and only once, so the thread gets exactly one line per call however it ends. */
+  setChatContext(conversationId: string, callerName: string): void {
+    this.chat = { conversationId, callerName };
+  }
+
+  private async postSummary(outcome: "missed" | "declined" | "completed", durationSeconds = 0): Promise<void> {
+    if (!this.chat || this.summaryPosted) return;
+    this.summaryPosted = true;
+    const m = Math.floor(durationSeconds / 60);
+    const s = String(durationSeconds % 60).padStart(2, "0");
+    const text =
+      outcome === "missed"
+        ? `📞 Missed voice call from ${this.chat.callerName}`
+        : outcome === "declined"
+          ? "📞 Voice call declined"
+          : `📞 Voice call · ${m}:${s}`;
+    await addSystemMessage(this.chat.conversationId, text);
+  }
+
   /** Caller's side: mints the offer, writes the call doc (status "ringing"), and starts
    * listening for the callee's answer + ICE candidates. Returns the call id (same one passed
    * to the constructor — returned for API-shape convenience, matching callers that construct
@@ -236,6 +263,11 @@ export class WebRTCCall {
             console.error("[webrtc] setRemoteDescription(answer) failed:", error);
           }
         }
+        if (data.status === "declined") this.postSummary("declined").catch(() => {});
+        if (data.status === "ended") {
+          if (data.answeredAt) this.postSummary("completed", data.duration ?? 0).catch(() => {});
+          else this.postSummary("missed").catch(() => {});
+        }
         if (data.status === "declined" || data.status === "ended") this.callEndedCallback?.();
       });
 
@@ -276,6 +308,7 @@ export class WebRTCCall {
 
       await updateDoc(this.callDocRef, {
         status: "active",
+        answeredAt: new Date().toISOString(),
         answer: { type: answer.type, sdp: answer.sdp },
       });
 
@@ -309,12 +342,16 @@ export class WebRTCCall {
     try {
       const snap = await getDoc(this.callDocRef);
       const data = snap.data() as CallDoc | undefined;
-      const startedAtMs = data?.startedAt ? new Date(data.startedAt).getTime() : Date.now();
+      // Measured from when the callee answered, not from when it started ringing.
+      const startedAtMs = data?.answeredAt ? new Date(data.answeredAt).getTime() : data?.startedAt ? new Date(data.startedAt).getTime() : Date.now();
+      const duration = Math.max(0, Math.round((Date.now() - startedAtMs) / 1000));
       await updateDoc(this.callDocRef, {
         status: "ended",
         endedAt: new Date().toISOString(),
-        duration: Math.max(0, Math.round((Date.now() - startedAtMs) / 1000)),
+        duration,
       }).catch(() => {});
+      if (data?.answeredAt) this.postSummary("completed", duration).catch(() => {});
+      else this.postSummary("missed").catch(() => {});
     } finally {
       this.cleanup();
     }

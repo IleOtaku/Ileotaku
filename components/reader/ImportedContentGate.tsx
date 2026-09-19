@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
+import toast from "react-hot-toast";
 import { AnimatePresence, motion } from "framer-motion";
 import { Coins, Loader2, Lock, SkipForward, Sparkles } from "lucide-react";
 import {
@@ -118,6 +119,20 @@ export default function ImportedContentGate({
       <AdGate
         mangaTitle={mangaTitle}
         chapterLabel={chapterLabel}
+        coinPrice={userProfile?.uid ? state.config.coinPrice : undefined}
+        balance={balance}
+        onUnlockWithCoins={async () => {
+          if (!userProfile?.uid) return false;
+          const price = state.config.coinPrice ?? 0;
+          const result = await unlockChapterWithCoins(userProfile.uid, mangaId, chapterId, price);
+          if (!result.success) {
+            toast.error(result.message ?? "Couldn't unlock this chapter.");
+            return false;
+          }
+          setBalance((b) => b - price);
+          setState({ status: "open" });
+          return true;
+        }}
         onUnlocked={async () => {
           if (userProfile?.uid) await unlockChapterWithAd(userProfile.uid, mangaId, chapterId);
           setState({ status: "open" });
@@ -154,14 +169,22 @@ export default function ImportedContentGate({
 function AdGate({
   mangaTitle,
   chapterLabel,
+  coinPrice,
+  balance,
+  onUnlockWithCoins,
   onUnlocked,
   children,
 }: {
   mangaTitle: string;
   chapterLabel: string;
+  /** Price of skipping the ad with coins; undefined hides the option (e.g. signed-out readers). */
+  coinPrice?: number;
+  balance: number;
+  onUnlockWithCoins: () => Promise<boolean>;
   onUnlocked: () => void | Promise<void>;
   children: ReactNode;
 }) {
+  const [payingCoins, setPayingCoins] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(AD_SECONDS);
   const [finishing, setFinishing] = useState(false);
   const [fading, setFading] = useState(false);
@@ -230,6 +253,27 @@ function AdGate({
                 </button>
               )}
             </div>
+
+            {coinPrice !== undefined && !finishing && (
+              <button
+                type="button"
+                disabled={payingCoins || balance < coinPrice}
+                onClick={async () => {
+                  setPayingCoins(true);
+                  const ok = await onUnlockWithCoins();
+                  setPayingCoins(false);
+                  if (ok) {
+                    if (timerRef.current) clearInterval(timerRef.current);
+                    setFinishing(true);
+                    setFading(true);
+                  }
+                }}
+                className="flex items-center gap-1.5 rounded-full border border-gold/50 px-4 py-1.5 font-noto text-xs font-semibold text-gold hover:bg-gold/10 disabled:opacity-50"
+              >
+                {payingCoins ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Coins className="h-3.5 w-3.5" />}
+                {balance < coinPrice ? `Skip the ad — ${coinPrice} 🪙 (you have ${balance})` : `Skip the ad — unlock for ${coinPrice} 🪙`}
+              </button>
+            )}
 
             <Link
               href="/pricing"

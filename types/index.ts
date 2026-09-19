@@ -65,6 +65,15 @@ export interface UserProfile {
   /** Which kind of account `isVerified` badge represents — changes badge color (blue vs purple)
    * and copy wherever it's shown. Only meaningful when isVerified is true. */
   verifiedType?: "creator" | "publisher" | null;
+  /** ISO timestamp a paid "white" (general, verifiedType null) verification lapses at — set when
+   * an approved non-Platinum account is verified or renews with coins (see lib/payments.ts's
+   * purchaseWhiteVerification). Absent means permanent: Platinum, Creator and Publisher
+   * verification never expires. Deliberately kept after it lapses (isVerified flips to false, this
+   * field stays) so the Settings tab can still offer "Renew Verification". */
+  verificationExpiresAt?: string | null;
+  /** A one-time surprise popup (emoji + message) shown the next time this account loads the app,
+   * then deleted by components/layout/GiftPopup.tsx. Set by an admin; users can clear their own. */
+  pendingGift?: { emoji: string; message: string; title?: string };
   /** ÍléOtaku's own actual founder — a single account, set manually (never through the
    * creator/publisher verify flow), distinct from `foundingCreator` (the early-cohort-creator
    * badge below). Recolors the verified checkmark gold everywhere it renders — see
@@ -536,7 +545,8 @@ export type TransactionCategory =
   | "streak"
   | "boost"
   | "resolution"
-  | "ads_free";
+  | "ads_free"
+  | "verification";
 
 export interface CoinTransaction {
   id: string;
@@ -577,7 +587,7 @@ export interface Announcement {
 
 /* ---------------------------- Admin: creator payouts ---------------------------- */
 
-export type PayoutStatus = "pending" | "paid";
+export type PayoutStatus = "pending" | "processing" | "paid" | "failed";
 
 export interface EarningsRecord {
   id: string;
@@ -589,6 +599,11 @@ export interface EarningsRecord {
   payoutStatus: PayoutStatus;
   paidAt?: string;
   createdAt: string;
+  /** Set by app/api/paystack/transfer once this row belongs to a payout run (see lib/payouts.ts). */
+  payoutId?: string;
+  /** Paystack transfer reference — shown on "Paid" rows in the creator's payout history. */
+  paystackReference?: string;
+  failureReason?: string;
 }
 
 /* ---------------------------- Admin: error logs & bug reports ---------------------------- */
@@ -1353,4 +1368,89 @@ export interface Appeal {
   submittedAt: string;
   reviewedAt?: string;
   reviewedBy?: string;
+}
+
+/* ---------------------------- Creator payouts (bank details, payout runs) ---------------------------- */
+
+/** Saved at users/{uid}/payoutDetails/bank — written ONLY by app/api/paystack/create-recipient
+ * (never from the client), so `verified`/`accountName` always reflect what Paystack itself
+ * resolved for the account number, not something a user typed. */
+export interface PayoutDetails {
+  bankCode: string;
+  bankName: string;
+  accountNumber: string;
+  /** The name Paystack resolved for this account — shown to the creator as "✓ NAME". */
+  accountName: string;
+  /** Paystack transfer-recipient code (RCP_...) that payouts are sent to. */
+  recipientCode: string;
+  verified: true;
+  updatedAt: string;
+}
+
+export type PayoutRunStatus =
+  | "draft"
+  | "pending_approval"
+  | "changes_requested"
+  | "approved"
+  | "processing"
+  | "completed"
+  | "failed";
+
+export type CreatorPayoutLineStatus = "pending" | "processing" | "paid" | "failed" | "skipped";
+
+/** One creator's row inside a PayoutRun: the full earnings breakdown, the accountant's manual
+ * adjustment, the resulting final amount, and (once a transfer starts) its Paystack outcome. */
+export interface CreatorPayoutLine {
+  uid: string;
+  displayName: string;
+  handle?: string;
+  photoURL?: string;
+  coinUnlocksNGN: number;
+  adRevenueNGN: number;
+  platinumShareNGN: number;
+  tipsNGN: number;
+  totalNetNGN: number;
+  /** Signed: accountant can add (+) or deduct (-), always with a reason. */
+  adjustmentNGN: number;
+  adjustmentReason?: string;
+  finalPayoutNGN: number;
+  /** Revenue before the platform's cut — platform fee for the row is grossNGN - totalNetNGN. */
+  grossNGN: number;
+  hasBankDetails: boolean;
+  bankName?: string;
+  /** Last 4 digits only — the full account number is never copied into a payout run. */
+  accountLast4?: string;
+  accountName?: string;
+  status: CreatorPayoutLineStatus;
+  paystackReference?: string;
+  transferCode?: string;
+  failureReason?: string;
+  paidAt?: string;
+}
+
+export interface PayoutRun {
+  id: string;
+  /** "YYYY-MM" */
+  period: string;
+  periodStart: string;
+  periodEnd: string;
+  createdBy: string;
+  createdByName?: string;
+  status: PayoutRunStatus;
+  /** Only creators who will actually be paid (bank details on file and amount > 0). */
+  totalCreators: number;
+  totalAmountNGN: number;
+  platformFeeNGN: number;
+  creators: CreatorPayoutLine[];
+  accountantNotes?: string;
+  /** Super Admin's note when sending a run back with "Request Changes". */
+  reviewNotes?: string;
+  submittedAt?: string;
+  approvedBy?: string;
+  approvedAt?: string;
+  paystackBatchId?: string;
+  failedCount?: number;
+  lastError?: string;
+  createdAt: string;
+  updatedAt: string;
 }

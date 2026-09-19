@@ -25,7 +25,7 @@ const FEATURES: FeatureRow[] = [
   {
     label: "Monthly cost",
     free: "₦0",
-    platinum: "₦6,000–7,500 (~$4–5)",
+    platinum: "₦1,000–2,000 (~$0.70–1.35)",
     coins: "Pay as you go",
   },
 ];

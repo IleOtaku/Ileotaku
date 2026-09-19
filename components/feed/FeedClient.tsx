@@ -358,7 +358,7 @@ export default function FeedClient() {
         </div>
       </div>
 
-      <Modal open={composerOpen} onClose={() => setComposerOpen(false)} title="Create Post">
+      <Modal open={composerOpen} onClose={() => setComposerOpen(false)} title="Create Post" centered>
         <PostComposer
           onPosted={() => {
             setComposerOpen(false);

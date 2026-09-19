@@ -941,6 +941,8 @@ export async function getFinanceSummary(): Promise<FinanceSummary> {
 
 export interface TransactionLogEntry extends CoinTransaction {
   userEmail?: string;
+  /** Display name of the account the transaction belongs to — searchable in the Accountant's ledger. */
+  userName?: string;
 }
 
 /** Last `take` real-money transactions across every user, newest first, with the paying
@@ -952,8 +954,9 @@ export async function getRecentTransactions(take = 50): Promise<TransactionLogEn
   const uniqueUserIds = Array.from(new Set(txs.map((t) => t.userId)));
   const profiles = await Promise.all(uniqueUserIds.map((uid) => getUserProfile(uid)));
   const emailByUid = new Map(uniqueUserIds.map((uid, i) => [uid, profiles[i]?.email]));
+  const nameByUid = new Map(uniqueUserIds.map((uid, i) => [uid, profiles[i]?.displayName]));
 
-  return txs.map((t) => ({ ...t, userEmail: emailByUid.get(t.userId) }));
+  return txs.map((t) => ({ ...t, userEmail: emailByUid.get(t.userId), userName: nameByUid.get(t.userId) }));
 }
 
 export async function getPendingPayouts(): Promise<EarningsRecord[]> {
@@ -971,15 +974,19 @@ export async function markPayoutPaid(earningId: string): Promise<void> {
 
 /** Builds a CSV string from the transaction log — used by the Finance tab's Export CSV button. */
 export function transactionsToCsv(transactions: TransactionLogEntry[]): string {
-  const header = ["Date", "Type", "Category", "Amount (NGN)", "User Email", "Paystack Reference", "Description"];
+  const header = ["Date", "Transaction ID", "Type", "Category", "Coins", "Amount (NGN)", "User Name", "User Email", "Paystack Reference", "Description"];
+  const quote = (v: string) => `"${v.replace(/"/g, '""')}"`;
   const rows = transactions.map((t) => [
     t.createdAt,
+    t.id,
     t.type,
     t.category ?? "",
+    String(t.amount),
     t.amountNGN?.toString() ?? "",
+    quote(t.userName ?? ""),
     t.userEmail ?? "",
     t.paystackRef ?? "",
-    `"${t.description.replace(/"/g, '""')}"`,
+    quote(t.description),
   ]);
   return [header, ...rows].map((row) => row.join(",")).join("\n");
 }

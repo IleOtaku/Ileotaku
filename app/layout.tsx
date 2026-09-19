@@ -12,6 +12,7 @@ import Preloader from "@/components/layout/Preloader";
 import ServiceWorkerRegister from "@/components/layout/ServiceWorkerRegister";
 import SiteChrome from "@/components/layout/SiteChrome";
 import IncomingCallListener from "@/components/messages/IncomingCallListener";
+import GiftPopup from "@/components/layout/GiftPopup";
 import { FeedAudioProvider } from "@/lib/audioContext";
 import "./globals.css";
 
@@ -108,6 +109,7 @@ export default function RootLayout({
               <InstallPrompt />
               <NotificationPrompt />
               <IncomingCallListener />
+              <GiftPopup />
             </FeedAudioProvider>
           </AuthProvider>
         </ErrorBoundary>

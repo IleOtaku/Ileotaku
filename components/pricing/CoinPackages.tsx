@@ -68,7 +68,7 @@ export default function CoinPackages() {
           <h2 className="font-cinzel text-2xl text-text sm:text-3xl">Buy Coins</h2>
           <p className="mt-2 font-noto text-sm text-muted">
             Unlock individual premium chapters or tip a creator directly — no subscription
-            required. Use coins to unlock premium manga chapters at 10-20 coins each, based on how
+            required. Use coins to unlock premium manga chapters at 3–15 coins each, based on how
             popular a title is.
           </p>
           <p className="mt-1.5 font-noto text-xs text-muted">

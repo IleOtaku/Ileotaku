@@ -7,8 +7,10 @@ import { CheckCircle2, Clock, Lock, Loader2, XCircle } from "lucide-react";
 import { Select } from "@/components/ui";
 import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import { useAuth } from "@/hooks/useAuth";
+import { purchaseWhiteVerification, WHITE_VERIFICATION_PRICE } from "@/lib/payments";
 import {
   getVerificationApplication,
+  isWhiteVerificationExpired,
   submitVerificationApplication,
 } from "@/lib/verification";
 import type { VerificationApplication, VerificationCategory } from "@/types";
@@ -38,7 +40,14 @@ export default function VerificationApplicationSection() {
   const [category, setCategory] = useState<VerificationCategory>("Content Creator");
   const [submitting, setSubmitting] = useState(false);
 
+  const [renewing, setRenewing] = useState(false);
+
   const isPlatinum = profile?.isPlatinum === true;
+  // Paid "white" verification: approved without Platinum, so it has an expiry that needs coin
+  // renewals. `verificationExpiresAt` is kept after it lapses (see the field's doc comment), so
+  // this stays true for an expired account too — that's exactly who most needs the Renew button.
+  const hasRenewableVerification =
+    !isPlatinum && !profile?.verifiedType && !profile?.isFounder && !profile?.isAdmin && !!profile?.verificationExpiresAt;
 
   useEffect(() => {
     if (!user || !isPlatinum) {
@@ -85,6 +94,70 @@ export default function VerificationApplicationSection() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  async function handleRenew() {
+    if (!user) return;
+    setRenewing(true);
+    try {
+      const result = await purchaseWhiteVerification(user.uid);
+      if (result.success) toast.success("Verification renewed for 30 days!");
+      else toast.error(result.message ?? "Couldn't renew your verification.");
+    } finally {
+      setRenewing(false);
+    }
+  }
+
+  if (hasRenewableVerification && profile?.verificationExpiresAt) {
+    const expired = isWhiteVerificationExpired(profile);
+    const expiryLabel = new Date(profile.verificationExpiresAt).toLocaleDateString(undefined, {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+    const balance = profile.coins ?? 0;
+    return (
+      <section>
+        <h3 className="mb-4 flex items-center gap-2 font-syne text-sm font-semibold text-text">
+          <CheckCircle2 className="h-4 w-4 text-gold" /> Verification
+        </h3>
+        <div className="flex flex-col gap-3 rounded-2xl border border-bg4 bg-bg2 p-5">
+          <p className="flex items-center gap-2 font-noto text-sm text-text">
+            {expired ? (
+              <>
+                <XCircle className="h-4 w-4 shrink-0 text-clay2" /> Your verification expired on {expiryLabel}.
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-green2" /> Verified until {expiryLabel}
+                <VerificationBadge user={profile} size={16} />
+              </>
+            )}
+          </p>
+          <button
+            type="button"
+            onClick={handleRenew}
+            disabled={renewing || balance < WHITE_VERIFICATION_PRICE}
+            className="btn-primary w-fit disabled:opacity-40"
+          >
+            {renewing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              `Renew Verification — ${WHITE_VERIFICATION_PRICE.toLocaleString()} 🪙 per month`
+            )}
+          </button>
+          <p className="font-noto text-[11px] text-muted">
+            {balance < WHITE_VERIFICATION_PRICE
+              ? `You have ${balance.toLocaleString()} coins — you need ${WHITE_VERIFICATION_PRICE.toLocaleString()}. `
+              : ""}
+            Platinum members keep their verification permanently, with no renewals.{" "}
+            <Link href="/pricing" className="text-gold hover:underline">
+              See Platinum
+            </Link>
+          </p>
+        </div>
+      </section>
+    );
   }
 
   if (!isPlatinum) {

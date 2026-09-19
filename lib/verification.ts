@@ -54,6 +54,41 @@ function getBadgeForTier(tier: VerificationTier | null | undefined): Verificatio
   return info ? { ...info, tier } : null;
 }
 
+/** True when a paid "white" verification has lapsed: verified with no creator/publisher type, not
+ * Platinum, and a `verificationExpiresAt` in the past. Accounts with no expiry stored (Platinum,
+ * Creator, Publisher, or verified before expiry existed) are permanent and never expire. */
+export function isWhiteVerificationExpired(user: {
+  verifiedType?: string | null;
+  isPlatinum?: boolean;
+  isPublisher?: boolean;
+  isFounder?: boolean;
+  isAdmin?: boolean;
+  verificationExpiresAt?: string | null;
+}): boolean {
+  if (!user.verificationExpiresAt) return false;
+  if (user.isPlatinum || user.isFounder || user.isAdmin || user.isPublisher || user.verifiedType) return false;
+  const expires = new Date(user.verificationExpiresAt).getTime();
+  return Number.isFinite(expires) && expires <= Date.now();
+}
+
+/** Runs on every load of the signed-in user's own profile (see hooks/useAuth.ts): if their white
+ * verification has lapsed, flips isVerified off. Only ever writes their OWN document, which is
+ * all firestore.rules allows a client to do — other people's lapsed badges are hidden at render
+ * time by getVerificationBadge below instead. Returns true if it changed anything. */
+export async function enforceVerificationExpiry(
+  uid: string,
+  profile: Parameters<typeof isWhiteVerificationExpired>[0] & { isVerified?: boolean }
+): Promise<boolean> {
+  if (!profile.isVerified || !isWhiteVerificationExpired(profile)) return false;
+  try {
+    await updateDoc(doc(db, "users", uid), { isVerified: false });
+    return true;
+  } catch (error) {
+    await logError(error, { operation: "verification.enforceVerificationExpiry", uid });
+    return false;
+  }
+}
+
 export function getVerificationBadge(user: {
   isFounder?: boolean;
   isAdmin?: boolean;
@@ -61,9 +96,12 @@ export function getVerificationBadge(user: {
   isVerified?: boolean;
   /** Legacy fallback only — see doc comment above. */
   isPublisher?: boolean;
+  isPlatinum?: boolean;
+  verificationExpiresAt?: string | null;
 }): VerificationBadgeInfo | null {
   if (user.isFounder) return getBadgeForTier("founder");
   if (user.isAdmin) return getBadgeForTier("admin");
+  if (isWhiteVerificationExpired(user)) return null;
 
   const effectiveType = user.verifiedType ?? (user.isPublisher ? "publisher" : undefined);
   if (user.isVerified && effectiveType === "publisher") return getBadgeForTier("publisher");
@@ -176,7 +214,17 @@ export async function approveApplication(
   verifiedType?: "creator" | "publisher"
 ): Promise<void> {
   try {
-    await updateUserPrefs(uid, { isVerified: true, verifiedType: verifiedType ?? null });
+    // A "white" (no creator/publisher type) approval for an account that isn't Platinum is paid,
+    // recurring verification — it starts with 30 days, then needs a coin renewal. Platinum,
+    // Creator and Publisher verification stays permanent (no expiry stored).
+    const applicantIsPlatinum = (await getDoc(doc(db, "users", uid))).data()?.isPlatinum === true;
+    const expiresAt =
+      !verifiedType && !applicantIsPlatinum ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() : null;
+    await updateUserPrefs(uid, {
+      isVerified: true,
+      verifiedType: verifiedType ?? null,
+      verificationExpiresAt: expiresAt,
+    });
     await updateDoc(applicationRef(uid), {
       status: "approved",
       reviewedAt: new Date().toISOString(),

@@ -180,6 +180,13 @@ export interface ModalProps {
   onClose: () => void;
   title?: string;
   children: ReactNode;
+  /** Tailwind max-width class for the dialog at `sm` and up — default "sm:max-w-md". Wide data
+   * views (e.g. the payout review table) pass something like "sm:max-w-5xl". */
+  widthClass?: string;
+  /** By default the modal docks to the bottom edge on phones (a bottom sheet). Pass true to keep it
+   * vertically centred at every width instead — used by Create Post, which reads better in the
+   * middle of the screen than hugging the bottom. */
+  centered?: boolean;
   /**
    * Stacking order, default 100. Raise this only when the modal is opened from inside another
    * fixed-position overlay (e.g. a slide-in settings panel) that itself sits above z-100 — the
@@ -205,7 +212,7 @@ export interface ModalProps {
  * that ancestor's box instead of the viewport — which is exactly what made the notification-bell
  * announcement modal render squashed against the top of the screen instead of centered.
  */
-export function Modal({ open, onClose, title, children, zIndex = 100 }: ModalProps) {
+export function Modal({ open, onClose, title, children, zIndex = 100, widthClass = "sm:max-w-md", centered = false }: ModalProps) {
   const modal = (
     <AnimatePresence>
       {open && (
@@ -214,7 +221,7 @@ export function Modal({ open, onClose, title, children, zIndex = 100 }: ModalPro
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           style={{ zIndex }}
-          className="fixed inset-0 flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4"
+          className={`fixed inset-0 flex justify-center bg-black/70 backdrop-blur-sm ${centered ? "items-center p-4" : "items-end sm:items-center sm:p-4"}`}
           onClick={onClose}
         >
           <motion.div
@@ -222,7 +229,7 @@ export function Modal({ open, onClose, title, children, zIndex = 100 }: ModalPro
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 40 }}
             onClick={(e) => e.stopPropagation()}
-            className="glass flex max-h-[90vh] w-full flex-col rounded-t-2xl sm:max-w-md sm:rounded-2xl"
+            className={`glass flex max-h-[90vh] w-full flex-col ${centered ? "rounded-2xl" : "rounded-t-2xl sm:rounded-2xl"} ${widthClass}`}
           >
             <div className="sticky top-0 z-10 flex shrink-0 items-center justify-between gap-4 rounded-t-2xl border-b border-white/[0.07] bg-bg2/95 p-6 pb-4 backdrop-blur">
               {title && <h2 className="font-cinzel text-lg text-gold">{title}</h2>}

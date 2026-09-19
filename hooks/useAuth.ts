@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { auth } from "@/lib/firebase";
 import { subscribeToUserProfile } from "@/lib/firestore";
 import { setOffline, setOnline } from "@/lib/onlineStatus";
+import { enforceVerificationExpiry } from "@/lib/verification";
 import type { UserProfile } from "@/types";
 
 interface AuthState {
@@ -68,6 +69,9 @@ export function initAuthListener(): void {
     if (user) {
       unsubscribeProfile = subscribeToUserProfile(user.uid, (profile) => {
         setProfile(profile);
+        // Lapsed paid "white" verification: flip isVerified off on the owner's own load; the
+        // snapshot listener then delivers the corrected profile right back.
+        if (profile) void enforceVerificationExpiry(user.uid, profile);
         setLoading(false);
       });
       setOnline(user.uid);

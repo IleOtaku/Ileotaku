@@ -29,6 +29,7 @@ import ManageChaptersModal from "@/components/creator/ManageChaptersModal";
 import EditSeriesModal from "@/components/creator/EditSeriesModal";
 import TransferOwnershipModal from "@/components/creator/TransferOwnershipModal";
 import EarningsChart from "@/components/creator/EarningsChart";
+import PayoutTab from "@/components/creator/PayoutTab";
 import { EmptyState, SectionEyebrow, Skeleton, Tabs } from "@/components/ui";
 import { getPendingTransfersFor, respondToOwnershipTransfer } from "@/lib/publishedSeries";
 import type { CreatorWork, OwnershipTransferRequest } from "@/types";
@@ -80,7 +81,7 @@ const GUIDELINES = [
   },
 ];
 
-type TabValue = "works" | "feed" | "stories" | "earnings" | "stickers" | "guidelines";
+type TabValue = "works" | "feed" | "stories" | "earnings" | "payout" | "stickers" | "guidelines";
 
 function StatCard({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
   return (
@@ -316,6 +317,7 @@ export default function CreatorDashboardClient() {
                 { label: "Feed", value: "feed" },
                 { label: "Stories", value: "stories" },
                 { label: "Earnings", value: "earnings" },
+                { label: "Payout", value: "payout" },
                 // PART 6 — sticker packs: Platinum-only, per spec.
                 ...(profile?.isPlatinum ? [{ label: "Sticker Packs", value: "stickers" }] : []),
                 { label: "Guidelines", value: "guidelines" },
@@ -371,6 +373,8 @@ export default function CreatorDashboardClient() {
               {tab === "feed" && <CreatorFeedTab uid={user.uid} />}
 
               {tab === "stories" && <CreatorStoriesTab uid={user.uid} />}
+
+              {tab === "payout" && <PayoutTab />}
 
               {tab === "earnings" && (
                 <div className="max-w-lg rounded-2xl border border-bg4 bg-bg2 p-6">

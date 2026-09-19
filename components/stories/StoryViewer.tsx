@@ -41,6 +41,7 @@ export default function StoryViewer({ uids, startUid, storiesByUid, onClose, onA
   const pauseIconTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [reply, setReply] = useState("");
+  const [videoFit, setVideoFit] = useState<"object-cover" | "object-contain">("object-contain");
   const [sendingReply, setSendingReply] = useState(false);
   const [viewersOpen, setViewersOpen] = useState(false);
   const [viewedBy, setViewedBy] = useState<string[]>([]);
@@ -339,7 +340,10 @@ export default function StoryViewer({ uids, startUid, storiesByUid, onClose, onA
           </button>
         </div>
 
-        <div onClick={handleTap} className="relative flex-1 cursor-pointer">
+        {/* Beta feedback: "story videos should fit the viewport... and the reply should always be on
+            the video." The media layer now fills the WHOLE card (absolute inset-0) instead of sharing
+            it with the reply bar below, and that bar is overlaid on the bottom of the media. */}
+        <div onClick={handleTap} className="absolute inset-0 cursor-pointer">
           {story.mediaType === "text" ? (
             <div
               className="flex h-full w-full items-center justify-center p-8"
@@ -355,7 +359,13 @@ export default function StoryViewer({ uids, startUid, storiesByUid, onClose, onA
                 autoPlay
                 muted={muted}
                 playsInline
-                className="h-full w-full object-contain"
+                // Portrait/square clips fill the screen (cover); landscape ones stay whole (contain)
+                // rather than being cropped to a sliver.
+                className={`h-full w-full ${videoFit}`}
+                onLoadedMetadata={(e) => {
+                  const el = e.currentTarget;
+                  setVideoFit(el.videoWidth > 0 && el.videoWidth <= el.videoHeight ? "object-cover" : "object-contain");
+                }}
                 onTimeUpdate={(e) => {
                   const el = e.currentTarget;
                   setVideoProgress(el.duration > 0 ? Math.min(100, (el.currentTime / el.duration) * 100) : 0);
@@ -381,7 +391,7 @@ export default function StoryViewer({ uids, startUid, storiesByUid, onClose, onA
 
           {/* Beta feedback: "Allow users add stories with captions, exactly like WhatsApp." */}
           {story.mediaType !== "text" && story.caption && (
-            <div className="absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/70 to-transparent p-4 pt-10">
+            <div className={`absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/70 to-transparent p-4 pt-10 ${isOwn ? "pb-14" : "pb-20"}`}>
               <p className={`font-noto text-sm text-white ${captionExpanded ? "" : "line-clamp-2"}`}>
                 {story.caption}
               </p>
@@ -402,12 +412,12 @@ export default function StoryViewer({ uids, startUid, storiesByUid, onClose, onA
           <button
             type="button"
             onClick={() => setViewersOpen((o) => !o)}
-            className="flex items-center gap-1.5 p-3 font-noto text-xs text-white/80"
+            className="absolute inset-x-0 bottom-0 z-20 flex items-center gap-1.5 bg-gradient-to-t from-black/60 to-transparent p-3 font-noto text-xs text-white/80"
           >
             <Eye className="h-4 w-4" /> {uniqueViewerCount} view{uniqueViewerCount === 1 ? "" : "s"}
           </button>
         ) : (
-          <div className="flex items-center gap-2 p-3">
+          <div className="absolute inset-x-0 bottom-0 z-20 flex items-center gap-2 bg-gradient-to-t from-black/60 to-transparent p-3 pt-8">
             <input
               value={reply}
               onChange={(e) => setReply(e.target.value)}
@@ -435,7 +445,7 @@ export default function StoryViewer({ uids, startUid, storiesByUid, onClose, onA
         )}
 
         {isOwn && viewersOpen && (
-          <div className="max-h-48 overflow-y-auto border-t border-white/10 bg-black/80 p-3">
+          <div className="absolute inset-x-0 bottom-12 z-20 max-h-48 overflow-y-auto border-t border-white/10 bg-black/80 p-3">
             {viewedBy.filter((v) => v !== uid).length === 0 ? (
               <p className="text-center font-noto text-xs text-white/60">No views yet.</p>
             ) : (

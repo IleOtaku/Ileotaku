@@ -17,6 +17,25 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
     }
 
+    // Finance roles. `adminType` is unset on the original, un-typed admin account, which is the Super
+    // Admin — hence the 'super' default. Accountants and Super Admins are the ONLY roles that may
+    // touch payout data; sub/technical/community admins deliberately can't (isAdmin() alone would
+    // let them). map.get() with a default rather than dot access: reading a missing field is a rules
+    // evaluation error, not null (see computedForYouEligible below).
+    function isAccountant() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('isAdmin', false) == true &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('adminType', '') == 'accountant';
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('isAdmin', false) == true &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('adminType', 'super') == 'super';
+    }
+
     // Mirrors lib/creatorFeed.ts's getForYouEligibility() so a post's `forYouEligible` flag can
     // never be self-declared out of step with the author's own role — only Creator/Publisher
     // accounts in good standing (not banned) may claim eligibility at create time. Uses
@@ -106,6 +125,16 @@ service cloud.firestore {
       // someone else's — confirmed live during testing that this was previously owner-deletion's
       // only remaining blocker after every subcollection had already been cleared.
       allow delete: if isOwner(uid) || isAdmin();
+
+      // Creator bank details for payouts. Readable by the creator themself and by the finance roles
+      // that prepare/approve payouts; NEVER writable from a client. The only writer is
+      // app/api/paystack/create-recipient (firebase-admin, which bypasses rules), which resolves the
+      // account name from Paystack itself — a client-writable rule would let anyone forge a
+      // "verified" name or point their payouts at an arbitrary recipient code.
+      match /payoutDetails/{detailId} {
+        allow read: if isOwner(uid) || isAccountant() || isSuperAdmin();
+        allow write: if false;
+      }
 
       // Notifications are written by whoever triggers them (a follow, a reply, a tip — not
       // necessarily the notification's own owner), so create is open to any signed-in user;
@@ -645,6 +674,38 @@ service cloud.firestore {
       allow read: if isAdmin() || (isSignedIn() && resource.data.creatorId == request.auth.uid);
       allow write: if isAdmin();
     }
+
+    // ---------------------------- admin: payout runs ----------------------------
+    // payouts/{YYYY-MM}: one run per month, prepared by an Accountant, approved and SENT by a Super
+    // Admin (via app/api/paystack/transfer, which uses firebase-admin and so isn't bound by these).
+    // What the rules enforce is the separation of duties: an accountant can create a run and edit it
+    // only while it's a draft or has been sent back — never once it's pending/approved/sent, and
+    // never by setting an approved/processing/completed status themselves; a Super Admin can only
+    // send a pending run back for changes here (touching just status/reviewNotes/updatedAt).
+    match /payouts/{payoutId} {
+      allow read: if isAccountant() || isSuperAdmin();
+      allow create: if isAccountant()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.status in ['draft', 'pending_approval'];
+      allow update: if (isAccountant()
+          && resource.data.status in ['draft', 'changes_requested']
+          && request.resource.data.status in ['draft', 'pending_approval']
+          && request.resource.data.createdBy == resource.data.createdBy)
+        || (isSuperAdmin()
+          && resource.data.status == 'pending_approval'
+          && request.resource.data.status == 'changes_requested'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reviewNotes', 'updatedAt']));
+      allow delete: if isAccountant() && resource.data.status == 'draft';
+    }
+
+    // Ad revenue attributed to a creator for a month ({period}_{uid}) — the one input to the earnings
+    // calculation that no code produces yet, so finance maintains it by hand.
+    match /creatorAdRevenue/{entryId} {
+      allow read, write: if isAccountant() || isSuperAdmin();
+    }
+
+    // payoutTransfers/{reference} (reference -> payout run lookup for the Paystack webhook) is
+    // server-only: no rule matches it, so every client read and write is denied.
 
     // ---------------------------- admin: ban audit trail ----------------------------
     match /bannedEmails/{uid} {
