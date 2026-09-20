@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import {
@@ -100,8 +101,9 @@ const MAX_TEXTAREA_HEIGHT = 112; // ~4 lines at this input's font/line-height + 
 const TYPING_CLEAR_DELAY_MS = 2000;
 /** Long-press duration (mobile) before the message context menu opens. */
 const LONG_PRESS_MS = 450;
+// The full emoji set (search, categories, skin tones) — loaded only when someone opens it.
+const EmojiPicker = dynamic(() => import("@/components/ui/EmojiPicker"), { ssr: false });
 const REACTION_EMOJIS = ["❤️", "🔥", "😂", "😮", "😢", "👏"];
-const QUICK_EMOJIS = ["❤️", "🔥", "😂", "😍", "👏", "😢", "😮", "🙏", "💯", "🎉", "😊", "👀"];
 
 /** "Online" / "Last seen 3 minutes ago" / "Last seen a while ago" for the thread header. */
 function statusLabel(status: OnlineStatus | null): string {
@@ -158,6 +160,8 @@ export default function MessagesClient() {
   // just a "coming soon" tooltip. Same QUICK_EMOJIS-grid pattern FeedCommentSheet's own (already
   // working) emoji button uses.
   const [emojiOpen, setEmojiOpen] = useState(false);
+  // "+" on the reaction bar: pick ANY emoji to react with, not just the six quick ones.
+  const [reactionPickerFor, setReactionPickerFor] = useState<DMMessage | null>(null);
   // DM Feature Overhaul (Part A): attachment tray + every picker/overlay it can open.
   const [attachmentTrayOpen, setAttachmentTrayOpen] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -2055,6 +2059,18 @@ export default function MessagesClient() {
                                     {emoji}
                                   </button>
                                 ))}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    closeMenu();
+                                    setReactionPickerFor(m);
+                                  }}
+                                  aria-label="More reactions"
+                                  data-testid="more-reactions"
+                                  className="rounded p-1 text-lg leading-none text-muted hover:bg-white/10 hover:text-text"
+                                >
+                                  ＋
+                                </button>
                               </div>
                               <button
                                 type="button"
@@ -2198,8 +2214,16 @@ export default function MessagesClient() {
                           <span className="truncate font-noto text-sm font-semibold text-text">All</span>
                         </button>
                       )}
+                      {/* Beta feedback bug: "Past group members show up in the @". `participantNames` is deliberately
+                          kept for people who left or were removed (their old messages still need a name above them),
+                          so it can't be the list of who can be mentioned — that is `participants`, the CURRENT members. */}
                       {Object.entries(selectedGroup.participantNames ?? {})
-                        .filter(([uid, name]) => uid !== user.uid && name.toLowerCase().includes(mentionQuery.toLowerCase()))
+                        .filter(
+                          ([uid, name]) =>
+                            selectedGroup.participants.includes(uid) &&
+                            uid !== user.uid &&
+                            name.toLowerCase().includes(mentionQuery.toLowerCase())
+                        )
                         .slice(0, 6)
                         .map(([uid, name]) => (
                           <button
@@ -2232,29 +2256,21 @@ export default function MessagesClient() {
                     </div>
                   )}
                 {emojiOpen && (
-                  <div className="flex flex-wrap gap-2 border-t border-bg4 bg-bg2 p-3">
-                    {QUICK_EMOJIS.map((emoji) => (
-                      <button
-                        key={emoji}
-                        type="button"
-                        onClick={() => {
-                          setText((t) => t + emoji);
-                          // Match handleTextareaInput's auto-grow so the textarea doesn't stay a
-                          // stale height after an emoji-only insert (which skips that handler,
-                          // since it's triggered by a button click, not a real input event).
-                          requestAnimationFrame(() => {
-                            const el = textareaRef.current;
-                            if (!el) return;
-                            el.style.height = "auto";
-                            el.style.height = `${Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT)}px`;
-                            el.focus();
-                          });
-                        }}
-                        className="text-xl"
-                      >
-                        {emoji}
-                      </button>
-                    ))}
+                  <div className="border-t border-bg4 bg-bg2 p-2">
+                    <EmojiPicker
+                      onPick={(emoji) => {
+                        setText((t) => t + emoji);
+                        // Match handleTextareaInput's auto-grow so the textarea doesn't stay a
+                        // stale height after an emoji-only insert (which skips that handler,
+                        // since it's triggered by a button click, not a real input event).
+                        requestAnimationFrame(() => {
+                          const el = textareaRef.current;
+                          if (!el) return;
+                          el.style.height = "auto";
+                          el.style.height = `${Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT)}px`;
+                        });
+                      }}
+                    />
                   </div>
                 )}
                 <AttachmentTray
@@ -2366,6 +2382,16 @@ export default function MessagesClient() {
           )}
         </div>
       </div>
+
+      <Modal open={reactionPickerFor !== null} onClose={() => setReactionPickerFor(null)} title="React with any emoji">
+        <EmojiPicker
+          onPick={(emoji) => {
+            const target = reactionPickerFor;
+            setReactionPickerFor(null);
+            if (target) void handleReact(target, emoji);
+          }}
+        />
+      </Modal>
 
       <Modal open={reactionViewer !== null} onClose={() => setReactionViewer(null)} title={reactionViewer ? `Reacted ${reactionViewer.emoji}` : ""}>
         <div className="flex flex-col gap-2">

@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui";
 import { formatTime } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import type { Announcement, AnnouncementTarget } from "@/types";
+import AdminPopupGiftSection from "./AdminPopupGiftSection";
 
 const TARGET_OPTIONS: { label: string; value: AnnouncementTarget }[] = [
   { label: "Everyone", value: "everyone" },
@@ -192,6 +193,8 @@ export default function AdminAnnouncementsTab() {
           </div>
         </div>
       </div>
+
+      <AdminPopupGiftSection />
     </div>
   );
 }

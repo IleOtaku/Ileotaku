@@ -466,6 +466,7 @@ export async function removeMemberFromGroup(
     await updateDoc(ref, {
       participants: (convo.participants ?? []).filter((uid) => uid !== memberUid),
       adminUids: (convo.adminUids ?? []).filter((uid) => uid !== memberUid),
+      ...(convo.memberTags?.[memberUid] ? { [`memberTags.${memberUid}`]: deleteField() } : {}),
     });
   } catch (error) {
     await logError(error, { operation: "removeMemberFromGroup", conversationId, adminUid, memberUid });
@@ -559,6 +560,7 @@ export async function leaveGroup(conversationId: string, uid: string): Promise<v
     await updateDoc(ref, {
       participants: (convo.participants ?? []).filter((id) => id !== uid),
       adminUids: (convo.adminUids ?? []).filter((id) => id !== uid),
+      ...(convo.memberTags?.[uid] ? { [`memberTags.${uid}`]: deleteField() } : {}),
     });
     // Beta feedback: "Add inline activity messages in dms (...aythex left)" — same grey
     // system-message convention as the join-via-invite/added-by-admin messages.

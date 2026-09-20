@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import toast from "react-hot-toast";
 import { AnimatePresence, motion } from "framer-motion";
 import { Heart, Loader2, Send, Smile, X } from "lucide-react";
@@ -18,7 +19,8 @@ import {
 import { formatPostTimestamp } from "@/lib/utils";
 import type { FeedComment } from "@/types";
 
-const QUICK_EMOJIS = ["❤️", "🔥", "😂", "😍", "👏", "😢", "😮", "🙏", "💯", "🎉", "😊", "👀"];
+// The full emoji set — loaded only when the emoji button is opened.
+const EmojiPicker = dynamic(() => import("@/components/ui/EmojiPicker"), { ssr: false });
 /** How long a press-and-hold on a comment must last before it counts as a long press (mobile
  * "long press → Delete", matching MessagesClient's own long-press threshold). */
 const LONG_PRESS_MS = 450;
@@ -277,17 +279,8 @@ export default function FeedCommentSheet({ postId, postAuthorUid, open, onClose 
             )}
 
             {emojiOpen && (
-              <div className="flex shrink-0 flex-wrap gap-2 border-t border-white/10 bg-[#1d1d1d] p-3">
-                {QUICK_EMOJIS.map((emoji) => (
-                  <button
-                    key={emoji}
-                    type="button"
-                    onClick={() => setText((t) => t + emoji)}
-                    className="text-xl"
-                  >
-                    {emoji}
-                  </button>
-                ))}
+              <div className="shrink-0 border-t border-white/10 bg-[#1d1d1d] p-2">
+                <EmojiPicker onPick={(emoji) => setText((t) => t + emoji)} />
               </div>
             )}
 
