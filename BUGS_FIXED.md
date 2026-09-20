@@ -660,3 +660,26 @@ too. Several photos are sent as **one** message (`mediaUrls`) rendered as a 2×2
   added to Vercel, and the echo report can't be reproduced without two physical devices.
 - **"I still don't get notifications"** — the gaps found in code are fixed (above), but delivery to a specific device
   can only be confirmed on that device after enabling notifications.
+
+---
+
+# Watermark on download only, Telegram-style DM media, Keep Message
+
+## Watermark moved from upload to download
+- `VideoUploader` no longer processes anything: videos upload to Cloudinary exactly as picked. `lib/videoWatermark.ts` deleted.
+- `lib/videoDownload.ts`: `downloadVideoWithWatermark` stamps the ÍléOtaku eye + name + the creator's @handle in the bottom-right of the *downloader's* copy, in the browser (canvas + MediaRecorder, original audio kept, silently — nothing plays out loud). It records in real time, so it takes as long as the video; keep the tab open. Output is WebM (MP4 on Safari). Also `downloadMediaDirect` for everything that must stay untouched.
+- `hooks/usePostDownload.ts` is the single download path for feed posts (three-dot menu **and** the share sheet, so there's no unmarked back door). Videos are watermarked unless the **post author's** "Add watermark to downloads" setting is off (read from their profile); photos are never watermarked; posts with downloads disabled hide the option for everyone but the author.
+- DM downloads (message menu, video player, photo viewer) always use `downloadMediaDirect`: never watermarked.
+- **Not undone:** videos uploaded before this change already have a watermark burned into the file (they were re-encoded at upload); those can't be restored.
+- The old settings toggle was repurposed: "Add watermark to downloads".
+
+## Telegram-style DM media
+- `DMImageMessage`: one rounded card, caption laid over the bottom, skeleton until loaded, "Unavailable" tile on a broken image, fullscreen viewer with Download. Layouts: 1 full width · 2 side by side · 3 = one wide + two · 4 = 2×2 · 5+ = 2×2 with "+N". The card has an explicit width — a box sized only by aspect-ratio collapses to 0 wide in a shrink-wrapped bubble.
+- `DMVideoMessage`: never has `controls` (plus no PiP / native download menu). Tap to play/pause, auto-hiding controls, seek bar, mute, time, fullscreen, Download (original). The shared-media gallery (`ConversationMediaClient`) still had a native `<video controls>`; replaced with a poster tile that opens our player.
+- Photo/video messages are edge-to-edge in their bubble (caption inside the media, no longer repeated as text below).
+
+## Keep Message (disappearing chats only)
+- `keepMessage` / `unkeepMessage` (transactions) set `isKept` / `keptBy`; `subscribeToConversation` skips the expiry filter for `isKept` messages. A message stays kept until *nobody* keeps it.
+- Menu "Keep / Unkeep Message", the solid bookmark on kept messages, and "Kept Messages" in the conversation menu only exist when the chat has disappearing messages on. A conversation without it shows no bookmark anywhere.
+- **Firestore rules changed** (deployed): a participant may update only `isKept`/`keptBy`, and may only add/remove their *own* uid. Verified against the real rules: adding someone else's uid, smuggling another field, and a non-boolean `isKept` are all denied.
+- Note: keeping is per-person in `keptBy`, but a message kept by *anyone* survives for *everyone* (as specified). In the Kept Messages panel you can only unkeep what you kept; messages kept by someone else show who's holding them.
