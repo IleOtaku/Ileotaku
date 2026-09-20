@@ -1,5 +1,6 @@
 "use client";
 
+import { warmImageTier } from "@/lib/mediaQuality";
 import { useRef, useState } from "react";
 import toast from "react-hot-toast";
 import {
@@ -89,7 +90,8 @@ export default function PostComposer({ onPosted }: PostComposerProps) {
   const [savingDraft, setSavingDraft] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const canPost = profile?.isCreator === true || profile?.isPublisher === true;
+  // Beta feedback: "everyone can post on feed" — reach is decided by lib/feedAlgorithm.ts, not by a role gate.
+  const canPost = profile?.isBanned !== true;
   if (!user || !profile || !canPost) return null;
 
   const displayName = profile.displayName ?? user.displayName ?? "Creator";
@@ -209,6 +211,8 @@ export default function PostComposer({ onPosted }: PostComposerProps) {
         editingApp: mediaKind === "video" ? (editingApp || null) : undefined,
         forYouEligible,
       };
+      // Have Cloudinary build the AI-enhanced / resized versions now so the post is ready when it's first seen.
+      if (mediaKind === "photo") attachments.forEach((u) => warmImageTier(u, imageResolution));
 
       if (mediaKind === "video" && !video?.url) {
         toast.error("Wait for the video to finish uploading first.");

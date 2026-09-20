@@ -5,6 +5,7 @@ import toast from "react-hot-toast";
 import { Maximize2, Mic, MicOff, Phone, PhoneOff, Volume2, VolumeX } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { useActiveCall } from "@/hooks/useActiveCall";
+import { useRingtone } from "@/hooks/useRingtone";
 import { checkMicrophonePermission } from "@/lib/webrtc";
 
 /** How long an unanswered outgoing call rings before it's ended as "missed". */
@@ -32,6 +33,9 @@ export default function CallUI() {
   const [requestingMic, setRequestingMic] = useState(false);
   const [micReady, setMicReady] = useState(false);
   const connectedAtRef = useRef<number | null>(null);
+
+  // Our own ringtone (lib/ringtone.ts): the melody for an incoming call, a softer ringback for the caller.
+  useRingtone(status === "ringing" && !minimized ? (direction === "incoming" ? "incoming" : "outgoing") : null);
 
   useEffect(() => {
     if (!call) return;

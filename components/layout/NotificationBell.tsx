@@ -152,7 +152,8 @@ export default function NotificationBell() {
     }
     return subscribeToNotifications(user.uid, (snapshot) => {
       const newestId = snapshot.notifications[0]?.id ?? null;
-      if (hasLoadedOnceRef.current && newestId && newestId !== lastSeenIdRef.current) {
+      // A call has its own ringtone (lib/ringtone.ts) — the notification chime is for everything else.
+      if (hasLoadedOnceRef.current && newestId && newestId !== lastSeenIdRef.current && snapshot.notifications[0]?.type !== NotificationType.INCOMING_CALL) {
         playNotificationSound();
       }
       hasLoadedOnceRef.current = true;

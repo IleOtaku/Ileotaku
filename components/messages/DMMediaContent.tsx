@@ -8,6 +8,8 @@ import { DMVideoMessage } from "./DMVideoMessage";
 import VoiceMessageBubble from "./VoiceMessageBubble";
 
 export interface DMMediaContentProps {
+  /** The sender's custom bubble color (hex), so a voice note's play button can be drawn from it. */
+  accentColor?: string;
   message: DMMessage;
   isOwn: boolean;
 }
@@ -23,7 +25,7 @@ function formatBytes(bytes?: number): string {
  * — everything else about the bubble (bubble shape/color, timestamp, reactions, reply quote)
  * stays exactly as MessagesClient already renders it around this. Returns null for a plain text
  * message, so callers can render this unconditionally right before MentionText. */
-export default function DMMediaContent({ message: m, isOwn }: DMMediaContentProps) {
+export default function DMMediaContent({ message: m, isOwn, accentColor }: DMMediaContentProps) {
 
   if (m.sharedMangaId) {
     return (
@@ -106,7 +108,7 @@ export default function DMMediaContent({ message: m, isOwn }: DMMediaContentProp
       );
 
     case "voice":
-      return <VoiceMessageBubble url={m.mediaUrl ?? ""} duration={m.mediaDuration ?? 0} isOwn={isOwn} waveform={m.mediaWaveform} />;
+      return <VoiceMessageBubble url={m.mediaUrl ?? ""} duration={m.mediaDuration ?? 0} isOwn={isOwn} waveform={m.mediaWaveform} accentColor={accentColor} />;
 
     case "file":
       return (

@@ -57,9 +57,9 @@ service cloud.firestore {
     // false/true answer instead of an opaque permission error, regardless of what state a
     // profile document happens to be in.
     function computedForYouEligible() {
+      // Everyone may post now ("everyone can post on feed"); only a banned account is kept out of the For You pool.
+      // Who actually SEES a post is decided by the reach algorithm (lib/feedAlgorithm.ts), not by this flag.
       return exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('isCreator', false) == true ||
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('isPublisher', false) == true) &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('isBanned', false) != true;
     }
 
@@ -520,7 +520,7 @@ service cloud.firestore {
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(
             ["lastMessage", "lastMessageAt", "lastSenderId", "unreadCounts",
              "name", "description", "photoURL", "participants", "participantNames",
-             "participantPhotos", "adminUids", "hiddenFor", "inviteCode"])
+             "participantPhotos", "adminUids", "hiddenFor", "inviteCode", "memberTags"])
           || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["archivedBy"])
           || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["nicknames"])
           || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["mutedBy"])
@@ -533,6 +533,10 @@ service cloud.firestore {
               || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["participantBubbleStyles"])
             ))
         );
+      // Group verification: a PLATFORM admin (who is not a member of the group) grants the verified badge by
+      // flipping exactly one field.
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["verifiedGroup"]);
       // Beta feedback: "Groups should have invite via link" — joinGroupViaInvite() adds the
       // CALLER, who by definition isn't a participant yet, so it can never satisfy the
       // `request.auth.uid in resource.data.participants` gate the rule above requires. A separate
@@ -946,6 +950,22 @@ service cloud.firestore {
           && request.auth.uid == sigUid
           && request.auth.uid in get(/databases/$(database)/documents/groupCalls/$(callId)).data.participants;
       }
+    }
+
+    // ---------------------------- group verification ----------------------------
+    // One request per group (doc id = conversation id). Only one of the group's ADMINS may file it, only a
+    // platform admin may decide it (the `verifiedGroup` flag on the conversation itself is guarded in the
+    // conversations rules). After a rejection the requesting admin may reopen it as pending.
+    match /groupVerificationRequests/{conversationId} {
+      allow read: if isSignedIn() && (isAdmin() || resource == null || resource.data.requestedBy == request.auth.uid);
+      allow create: if isSignedIn()
+        && request.resource.data.requestedBy == request.auth.uid
+        && request.resource.data.status == "pending"
+        && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.get('adminUids', []);
+      allow update: if isAdmin()
+        || (isSignedIn() && resource.data.requestedBy == request.auth.uid
+          && resource.data.status == "rejected" && request.resource.data.status == "pending");
+      allow delete: if isAdmin();
     }
 
     // ---------------------------- typing indicators (Part 10) ----------------------------

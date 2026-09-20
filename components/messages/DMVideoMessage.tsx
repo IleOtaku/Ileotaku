@@ -42,9 +42,14 @@ export function DMVideoMessage({ url, posterUrl, duration, width, height, captio
 
   const derivedPoster = posterUrl ?? getVideoThumbnail(url);
   const poster = !posterFailed && derivedPoster !== url ? derivedPoster : undefined;
-  // Box shape: the clip's own ratio, kept between 0.7 (tall) and 1.8 (wide) so the card is never taller than
-  // 400px at 280 wide; the video fills it (object-cover). Fullscreen shows the whole frame.
-  const ratio = Math.min(1.8, Math.max(0.7, width && height ? width / height : 16 / 9));
+  // Beta feedback: "The dm video viewport should frame the video properly in it. Right now it's
+  // cropping." The box takes the clip's OWN shape — the stored size if the message has one, otherwise
+  // whatever the browser reports once metadata loads (older messages and camera clips carry none, so
+  // they used to be forced into 16:9 and cropped) — and the video is letterboxed (object-contain)
+  // inside it, so nothing is ever cut off even when the shape had to be clamped (never taller than
+  // ~470px at 280 wide, never wider than 2:1).
+  const [naturalRatio, setNaturalRatio] = useState<number | null>(null);
+  const ratio = Math.min(2, Math.max(0.6, naturalRatio ?? (width && height ? width / height : 16 / 9)));
   const progress = total > 0 ? (current / total) * 100 : 0;
 
   useEffect(() => setTotal(duration ?? 0), [duration]);
@@ -108,10 +113,14 @@ export function DMVideoMessage({ url, posterUrl, duration, width, height, captio
             setPlaying(false);
             setShowControls(true);
           }}
-          onLoadedMetadata={(e) => Number.isFinite(e.currentTarget.duration) && setTotal(e.currentTarget.duration)}
+          onLoadedMetadata={(e) => {
+            const v = e.currentTarget;
+            if (Number.isFinite(v.duration)) setTotal(v.duration);
+            if (v.videoWidth > 0 && v.videoHeight > 0) setNaturalRatio(v.videoWidth / v.videoHeight);
+          }}
           onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)}
           onError={() => setPosterFailed(true)}
-          className="absolute inset-0 h-full w-full object-cover"
+          className="absolute inset-0 h-full w-full bg-black object-contain"
           data-testid="dm-video"
         />
 

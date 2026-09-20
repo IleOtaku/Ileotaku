@@ -59,9 +59,20 @@ export function VoiceRecordingBar({
         <Trash2 className="h-[18px] w-[18px]" />
       </button>
 
-      <span className="flex shrink-0 items-center gap-1.5 font-mono text-sm font-bold text-clay2" data-testid="rec-timer">
-        <span className={`h-2.5 w-2.5 animate-pulse rounded-full ${warning ? "bg-red-500" : "bg-red-500"}`} />
-        {formatDuration(seconds)}
+      {/* "0:42 / 1:30" — elapsed over THIS user's limit (1:30 free, 10:00 Platinum), with a small
+          "Max 1:30" line under it that is always visible (the bar to the right is hidden on phones). */}
+      <span className="flex shrink-0 flex-col items-start leading-tight">
+        <span className="flex items-center gap-1.5 font-mono text-sm font-bold text-clay2" data-testid="rec-timer">
+          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-500" />
+          {formatDuration(seconds)}
+          <span className="font-normal text-muted" data-testid="rec-limit">/ {formatDuration(maxSeconds)}</span>
+        </span>
+        <span
+          data-testid="rec-max-label"
+          className={`font-mono text-[10px] ${warning ? "font-bold text-red-400" : "text-muted"}`}
+        >
+          {warning ? `${remaining}s left` : `Max ${formatDuration(maxSeconds)}`}
+        </span>
       </span>
 
       <div className="flex h-8 min-w-0 flex-1 items-center justify-center gap-0.5 overflow-hidden" aria-hidden>
@@ -78,9 +89,6 @@ export function VoiceRecordingBar({
         <div className="h-1 w-16 overflow-hidden rounded-full bg-white/10" role="progressbar" aria-valuemin={0} aria-valuemax={maxSeconds} aria-valuenow={seconds}>
           <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: warning ? "#ef4444" : "#c4622d" }} />
         </div>
-        <span className={`font-mono text-[10px] ${warning ? "font-bold text-red-400" : "text-muted"}`}>
-          {warning ? `${remaining}s left` : `/ ${formatDuration(maxSeconds)}`}
-        </span>
       </div>
 
       <span className="shrink-0 whitespace-nowrap font-noto text-xs text-muted" style={hintStyle}>

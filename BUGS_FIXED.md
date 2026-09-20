@@ -683,3 +683,64 @@ too. Several photos are sent as **one** message (`mediaUrls`) rendered as a 2×2
 - Menu "Keep / Unkeep Message", the solid bookmark on kept messages, and "Kept Messages" in the conversation menu only exist when the chat has disappearing messages on. A conversation without it shows no bookmark anywhere.
 - **Firestore rules changed** (deployed): a participant may update only `isKept`/`keptBy`, and may only add/remove their *own* uid. Verified against the real rules: adding someone else's uid, smuggling another field, and a non-boolean `isKept` are all denied.
 - Note: keeping is per-person in `keptBy`, but a message kept by *anyone* survives for *everyone* (as specified). In the Kept Messages panel you can only unkeep what you kept; messages kept by someone else show who's holding them.
+
+---
+
+# Voice-note limits, pricing overhaul, reach algorithm, AI photo enhancement, group verification, ad redo & the rest of the beta feedback
+
+Thirteen items were open in Admin → Feedback (not eleven). An automated session can't type the admin password into a browser, so the queue was read (and is resolved) with the admin SDK instead.
+
+## Voice notes
+The limits were already in code (free 90s, Platinum 600s, chosen when recording starts from `profile.isPlatinum`). What was missing was the readout: the recording bar now shows **`0:42 / 1:30`** (Platinum **`0:42 / 10:00`**) and a **`Max 1:30`** / **`Max 10:00`** label that stays visible on phones (the old limit bar was hidden below `sm`). Auto-stop fires at the user's own limit.
+
+## The 13 feedback items
+
+### 1 · Pricing — "White Verifications should be bought for 1k per month… Platinum should be 2k… time based platinum, 1hr is 200 naira, max 5 hours per week… scale down coins"
+- Platinum monthly was already ₦2,000. **White verification: ₦1,000/month by card or 100 coins** (it was 1,000 *coins* ≈ ₦10,000, five times Platinum's own coin price; everything now sits on the ₦10/coin rate Platinum already used). Buying needs **no application**.
+- **Platinum by the hour**: ₦200 (20 coins) per hour, at most 5 hours a week (Mon–Sun UTC), stacking onto a running window. `lib/payments.ts` (`purchasePlatinumHours`), `components/pricing/PlatinumHours.tsx`.
+- Hourly Platinum has to actually end: `enforcePlatinumExpiry` (`lib/verification.ts`) switches it off on the owner's next load. *Not changed:* monthly/annual Platinum still never expires client-side; that was already true and is a separate decision.
+
+### 2 · Reach algorithm — "Only verified creators earn… everyone can post… Gold seen by every user, purple by majority, blue followers + small %, white followers + little %, unverified mostly following…"
+`lib/feedAlgorithm.ts` (pure functions, one file). A stable hash of (viewer, post) decides visibility, so a viewer always gets the same answer and the audience converges to the tier's share: Gold (Founder) 100% / 80% / 60%, never below 60 · Purple ~55–75% · Blue ~10–20% outside followers · White ~4–10% · Unverified followers only, except ~8% of consistent unverified posts are pushed to 80%. Consistency (Purple none, Blue 1 post/14 d, White 1 post/30 d, Unverified 2 posts/3 d) is computed at publish time. Boosts: purple 45–50%, blue 25–35%, white 12–22%, unverified 5–10%, scaled by boost level. Followers always see followed authors; authors see their own. Checked by simulation (20k viewers). **Everyone can post** (composer gate and the `forYouEligible` rule relaxed to "not banned"). **Only verified creators earn**: `computeCreatorEarnings` returns zero, and payout batches skip, unless the account is a verified Creator/Publisher or Founder/Admin. Verification requirements are "simple but difficult": 30-day-old account, 500 followers, 25 posts, posted in 3 of the last 4 weeks (constants in `lib/verification.ts`, checklist on the application). For You paging was reworked because the filter can shrink a page (`FeedPage.exhausted`).
+
+### 3 · "The HD 2K & 4K features should use an ai or something to enhance… If it's 4k and 720 is picked, it should reduce quality to 720"
+The tier was only a label. `lib/mediaQuality.ts` turns it into delivery: photos below the target are AI-upscaled with Cloudinary `e_upscale` (confirmed enabled: a 74 KB image came back as 898 KB), guarded to sources under 4 MP; larger ones are scaled down to the target. Videos are scaled **down** to the tier but **not** upscaled: there's no AI video enhancer available to us, and stretching a short clip to 4K produced a 43 MB file with no added detail. Every derived URL falls back to the original on error, and photo tiers are pre-generated at post time so the first viewer doesn't wait ~10 s.
+
+### 4 · "Implement group verifications… group admins can apply… admins can grant… 1000 / 1500 / 2000"
+A group **admin** applies with a reason (`lib/groupVerification.ts`, group info panel); a platform admin approves or rejects in Admin → Verification (`AdminGroupVerificationSection`); approval sets `verifiedGroup`, which shows a badge beside the group name. New rules: `groupVerificationRequests`, and a platform admin may flip only `verifiedGroup`. Pricing: white ₦1,000 · Creator ₦1,500 · Publisher ₦2,000 per month (100/150/200 coins). Creator/Publisher approvals now start a 30-day window and renew like white; badges granted before monthly billing (no expiry stored) stay permanent. Group verification itself is free, granted by an admin.
+
+### 5 · "The crop for cover photo works but the output isn't my cropped photo"
+The crop is 3:1 but the banner had a fixed height (200 px, or 160–256 px on the other pages), so on a phone (328×200 ≈ 1.6:1) `background-size: cover` cut the sides off the already-cropped image. All three banners (`/profile`, `/profile/[uid]`, `/creator/[handle]`) are now `aspect-[3/1]`.
+
+### 6 · "group founder can't de-admin other admins… add member tags"
+`removeGroupAdmin` (founder only, never the founder) plus "Remove Admin" in the member menu. `memberTags` (≤20 chars, set/cleared by admins) show as a pill in the member list and above that member's messages; `memberTags` was added to the group-update rule.
+
+### 7 · "Let's redo ads… strictly between chapters… watch ad for coins (5/day, 1–10, rigged 3–6)… watch 3 ads to unlock the next chapter (2/day)… watch 3 ads; only 4 ads per day"
+Popup/floating script ads removed (`ReaderAdScript`, `MonetagScript`); the between-chapters slot shows ÍléOtaku's own creative. New server-verified rewarded ads (`app/api/ads/*`, `lib/server/adRewards.ts`, rules in `lib/adConfig.ts`): the browser can't skip or forge an ad. The server checks that the full 15 s passed on *its* clock, that the session is unclaimed and the caller's, and the daily caps, then pays out in the same transaction. Coins 5/day (weights make 3–6 come up 80% of the time), a chapter unlocks after 3 ads with 2 chapters/day, and 3 ads (4/day cap) give 1 hour of Platinum. The old "Skip Ad after 5 s" gate, which unlocked a chapter with a client-side write, is gone. **Not done:** no third-party ad network is connected (needs an account/approval); the inventory is our own promos until one is.
+
+### 8 · "We need a clear library button and select book feature to remove particular books from library and history"
+Library: **Select** (tap covers to tick, Remove, Select all) and **Clear library**. History: **Select** with bulk delete (it already had per-item, clear-older-than and clear-all). `removeFromLibrary` addresses each progress key with a `FieldPath` because manga ids can contain dots.
+
+### 9 · "When I update display name, it should update everywhere… and stop switching to the old one on every deploy"
+Root cause of the revert: `signInSocial` wrote the provider's (Google's) name and photo over the saved profile on **every** sign-in of an existing user, and a deploy makes everyone sign in again. It now only fills empty fields. Propagation previously reached only posts, series and conversations from the browser; a new server route (`/api/profile/propagate`) re-stamps posts, feed comments, series comments, stories, saved-post snapshots, series and conversation member lists, reading the name from the caller's own profile (never the request body). It needed collection-group index overrides for `comments.uid`, `comments.userId` and `savedPosts.uid` (deployed).
+
+### 10 · "Mobile view of dms… the name, username, verification and everything is jammed up there"
+On a phone the name keeps the first line (ellipsis, badges never squashed), the @handle moves under it beside the status, header padding is tighter, the Spotify strip is hidden and Block moves into the ⋯ menu.
+
+### 11 · "The dm video viewport should frame the video properly… right now it's cropping"
+The card was forced into the stored shape (16:9 when none), clamped to 0.7–1.8, with `object-cover`. It now uses the clip's real shape (read from the video's metadata when the message has none), clamps to 0.6–2 and letterboxes with `object-contain`, so nothing is cut off.
+
+### 12 · "the color picked for dms bubble should be the same for the voice note icon… missed calls and other inline messages should show timestamps"
+Voice bubbles draw the play disc and waveform from the sender's picked colour. Inline system messages (missed call, group-call lines, …) show the time in small muted text below.
+
+### 13 · "Change the ringtone to our own ringtone… notifications can have the chimes but ringtones different"
+`lib/ringtone.ts`: an original synthesized bell motif (G-major arpeggio up and back, ~2.6 s loop) for incoming calls and a softer two-tone ringback for the caller, wired into the 1:1 call screen and both group-call screens. Incoming-call notifications no longer play the notification chime.
+
+## Error logs
+473 of 478 open errors were resolved with per-group notes (old permission errors fixed by rules long ago, offline / "Failed to fetch" noise, the keep/unkeep permission errors fixed by last sprint's rule deployment, and so on). Blocking a user no longer logs "no document to update" for a deleted target. **5 left open on purpose:** `NEXT_PUBLIC_FIREBASE_VAPID_KEY is not configured`. Web push needs a key pair generated in the Firebase console and added to Vercel.
+
+## Not done, and why
+- AI **video** upscaling: no such service available to us (item 3).
+- A real ad network: needs an account and approval (item 7).
+- Paystack card flows (hourly Platinum, ₦1,000 verification): implemented, but the card popup can't be automated.
+- Web push key (VAPID): Firebase console + Vercel env.

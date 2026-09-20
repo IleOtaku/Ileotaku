@@ -48,11 +48,16 @@ export async function blockUser(uid: string, targetUid: string): Promise<void> {
     updateDoc(doc(db, USERS, uid), {
       following: arrayRemove(targetUid),
       followers: arrayRemove(targetUid),
-    }).catch((error) => logError(error, { operation: "blocking.blockUser.cleanupSelf", uid, targetUid })),
+    }).catch((error) => {
+      if ((error as { code?: string }).code !== "not-found") return logError(error, { operation: "blocking.blockUser.cleanupSelf", uid, targetUid });
+    }),
     updateDoc(doc(db, USERS, targetUid), {
       following: arrayRemove(uid),
       followers: arrayRemove(uid),
-    }).catch((error) => logError(error, { operation: "blocking.blockUser.cleanupTarget", uid, targetUid })),
+    }).catch((error) => {
+      // A target whose profile doc no longer exists (deleted account) has nothing to clean up — not an error.
+      if ((error as { code?: string }).code !== "not-found") return logError(error, { operation: "blocking.blockUser.cleanupTarget", uid, targetUid });
+    }),
   ]);
 }
 

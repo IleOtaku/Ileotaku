@@ -166,22 +166,6 @@ export interface UnlockResult {
   message?: string;
 }
 
-/** Records an ad-gated chapter as unlocked once the simulated ad has finished (or been skipped
- * past its 5-second minimum) — no coin cost, so there's nothing to check or deduct first. */
-export async function unlockChapterWithAd(uid: string, mangaId: string, chapterId: string): Promise<UnlockResult> {
-  try {
-    await setDoc(doc(db, "users", uid, "unlocked", chapterId), {
-      unlockedVia: "ad",
-      mangaId,
-      unlockedAt: serverTimestamp(),
-    });
-    return { success: true };
-  } catch (error) {
-    await logError(error, { operation: "contentLocking.unlockChapterWithAd", uid, mangaId, chapterId });
-    return { success: false, message: "Couldn't unlock this chapter. Please try again." };
-  }
-}
-
 /** Deducts `coinPrice` coins and records the chapter as unlocked. Mirrors
  * lib/payments.ts's purchaseChapterWithCoins (same balance-check-then-deduct shape, same
  * "chapter_unlock" transaction category, since both ultimately spend coins on the same

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Phone, PhoneOff } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
+import { useRingtone } from "@/hooks/useRingtone";
 import type { GroupCall } from "@/types";
 
 /** How long the phone rings on screen before it stops on its own. */
@@ -22,6 +23,7 @@ interface IncomingGroupCallProps {
 /** Full-screen "Group voice call" ring: pulsing rings, who's calling, who else is on it. */
 export default function IncomingGroupCall({ call, onAccept, onDecline, onTimeout }: IncomingGroupCallProps) {
   const [busy, setBusy] = useState(false);
+  useRingtone(busy ? null : "incoming");
   const caller = call.participants[call.initiatorUid];
   const others = Object.values(call.participants).filter((p) => p.uid !== call.initiatorUid);
 

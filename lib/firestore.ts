@@ -4,7 +4,9 @@ import {
   arrayUnion,
   collection,
   deleteDoc,
+  deleteField,
   doc,
+  FieldPath,
   getDoc,
   getDocs,
   increment,
@@ -32,7 +34,7 @@ import {
   type UserProfile,
 } from "@/types";
 import { logError } from "./errorLogger";
-import { db } from "./firebase";
+import { auth, db } from "./firebase";
 import { createNotification } from "./notifications";
 
 const USERS = "users";
@@ -147,6 +149,17 @@ export async function propagateProfileChange(
   changes: { displayName?: string; photoURL?: string }
 ): Promise<void> {
   if (changes.displayName === undefined && changes.photoURL === undefined) return;
+  // Preferred path: the server route re-stamps EVERY copy (posts, both kinds of comments, stories, saved
+  // posts, series, conversations) — including per-post comment subcollections a browser can't reach.
+  try {
+    const token = await auth.currentUser?.getIdToken();
+    if (token) {
+      const res = await fetch("/api/profile/propagate", { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) return;
+    }
+  } catch {
+    // fall through to the client-side version below
+  }
   try {
     const [postsSnap, seriesSnap, conversationsSnap] = await Promise.all([
       getDocs(query(collection(db, "creatorFeed"), where("uid", "==", uid), limit(500))),
@@ -344,6 +357,26 @@ export async function clearAllHistory(uid: string): Promise<void> {
 
 export async function deleteHistoryItem(uid: string, itemId: string): Promise<void> {
   await deleteDoc(doc(historyCollection(uid), itemId));
+}
+
+/** Beta feedback: "select book feature to remove particular books from library and history." */
+export async function deleteHistoryItems(uid: string, itemIds: string[]): Promise<void> {
+  await deleteAllInBatches(itemIds.map((id) => doc(historyCollection(uid), id)));
+}
+
+/** Takes the given titles out of the library: the bookmarked list AND the "currently reading" progress
+ * entries. `readingProgress` is keyed by manga id, and an id can contain characters that would be read
+ * as a nested path in a dotted string ("a.b"), so each key is addressed with an explicit FieldPath. */
+export async function removeFromLibrary(uid: string, mangaIds: string[]): Promise<void> {
+  if (mangaIds.length === 0) return;
+  const args: unknown[] = ["readingList", arrayRemove(...mangaIds)];
+  for (const id of mangaIds) args.push(new FieldPath("readingProgress", id), deleteField());
+  await updateDoc(doc(db, "users", uid), ...(args as [string, unknown, ...unknown[]]));
+}
+
+/** "Clear library": every bookmark and every in-progress entry. Reading HISTORY is separate. */
+export async function clearLibrary(uid: string): Promise<void> {
+  await updateDoc(doc(db, "users", uid), { readingList: [], readingProgress: {} });
 }
 
 /** Deletes every history entry older than `days` days — used by the "Clear history older

@@ -6,6 +6,7 @@ import toast from "react-hot-toast";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AtSign,
+  BadgeCheck,
   Bell,
   BellOff,
   Camera,
@@ -37,6 +38,9 @@ import {
   getConversationMedia,
   leaveGroup,
   makeGroupAdmin,
+  MEMBER_TAG_MAX_LENGTH,
+  removeGroupAdmin,
+  setMemberTag,
   muteConversation,
   regenerateInviteCode,
   removeMemberFromGroup,
@@ -49,6 +53,12 @@ import { searchUsers } from "@/lib/firestore";
 import { subscribeToUserStatus, type OnlineStatus } from "@/lib/onlineStatus";
 import { formatTime, getUserProfileUrl, initials, stringToColor } from "@/lib/utils";
 import { formatCallDuration, getGroupCallHistory } from "@/lib/groupCalls";
+import {
+  applyForGroupVerification,
+  getGroupVerificationRequest,
+  GROUP_VERIFICATION_MIN_REASON,
+  type GroupVerificationRequest,
+} from "@/lib/groupVerification";
 import type { Conversation, DMMessage, GroupCall, UserProfile } from "@/types";
 import WallpaperPicker from "./WallpaperPicker";
 
@@ -124,6 +134,12 @@ export default function GroupInfoPanel({
 
   const [memberSearch, setMemberSearch] = useState("");
   const [memberActionUid, setMemberActionUid] = useState<string | null>(null);
+  const [tagEditUid, setTagEditUid] = useState<string | null>(null);
+  const [verifyRequest, setVerifyRequest] = useState<GroupVerificationRequest | null | undefined>(undefined);
+  const [verifyReason, setVerifyReason] = useState("");
+  const [verifyBusy, setVerifyBusy] = useState(false);
+  const [verifyFormOpen, setVerifyFormOpen] = useState(false);
+  const [tagDraft, setTagDraft] = useState("");
   const [statusByUid, setStatusByUid] = useState<Record<string, OnlineStatus>>({});
 
   const [addingMembers, setAddingMembers] = useState(false);
@@ -155,6 +171,33 @@ export default function GroupInfoPanel({
       .then(setMedia)
       .finally(() => setMediaLoading(false));
   }, [open, conversation.id]);
+
+  // Group verification: this group's application (if any) — only a group admin can see/file it.
+  useEffect(() => {
+    if (!open || !isGroupAdmin || conversation.verifiedGroup) return;
+    setVerifyRequest(undefined);
+    getGroupVerificationRequest(conversation.id).then(setVerifyRequest);
+  }, [open, isGroupAdmin, conversation.id, conversation.verifiedGroup]);
+
+  async function handleApplyVerification() {
+    if (!user) return;
+    setVerifyBusy(true);
+    try {
+      const req = await applyForGroupVerification(
+        conversation,
+        { uid: user.uid, displayName: profile?.displayName ?? user.displayName ?? "Admin" },
+        verifyReason
+      );
+      setVerifyRequest(req);
+      setVerifyFormOpen(false);
+      setVerifyReason("");
+      toast.success("Application sent — an ÍléOtaku admin will review it.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't send your application.");
+    } finally {
+      setVerifyBusy(false);
+    }
+  }
 
   // Group voice calls: the last few finished calls. Loaded when the panel opens (a call that ends
   // while it's open shows up the next time it is).
@@ -273,6 +316,28 @@ export default function GroupInfoPanel({
       await makeGroupAdmin(conversation.id, user.uid, targetUid);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't promote that member.");
+    }
+  }
+
+  async function handleRemoveAdmin(targetUid: string) {
+    if (!user) return;
+    setMemberActionUid(null);
+    try {
+      await removeGroupAdmin(conversation.id, user.uid, targetUid);
+      toast.success("Admin rights removed.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't remove that admin.");
+    }
+  }
+
+  async function handleSaveTag(targetUid: string, tag: string) {
+    if (!user) return;
+    try {
+      await setMemberTag(conversation.id, user.uid, targetUid, tag);
+      setTagEditUid(null);
+      toast.success(tag.trim() ? "Tag saved." : "Tag removed.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't save that tag.");
     }
   }
 
@@ -477,6 +542,7 @@ export default function GroupInfoPanel({
                       className="flex items-center gap-1.5 font-cinzel text-lg text-text"
                     >
                       {conversation.name}
+                      {conversation.verifiedGroup && <BadgeCheck data-testid="group-verified-badge" aria-label="Verified group" className="h-4 w-4 text-plat" />}
                       {isGroupAdmin && <Pencil className="h-3.5 w-3.5 text-muted" />}
                     </button>
                   )}
@@ -528,6 +594,62 @@ export default function GroupInfoPanel({
                     </button>
                   )}
                 </div>
+
+                {/* ---- Group verification ---- */}
+                {(isGroupAdmin || conversation.verifiedGroup) && (
+                  <div data-testid="group-verification">
+                    <p className="mb-1.5 font-syne text-xs font-semibold uppercase tracking-wide text-muted">Verification</p>
+                    {conversation.verifiedGroup ? (
+                      <p className="flex items-center gap-1.5 font-noto text-xs text-text">
+                        <BadgeCheck className="h-4 w-4 text-plat" /> This group is verified.
+                      </p>
+                    ) : verifyRequest === undefined ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-muted" />
+                    ) : verifyRequest?.status === "pending" ? (
+                      <p className="font-noto text-xs text-muted" data-testid="group-verification-pending">
+                        Application sent — waiting for an admin to review it.
+                      </p>
+                    ) : verifyFormOpen || !verifyRequest || verifyRequest.status === "rejected" ? (
+                      <div className="flex flex-col gap-2">
+                        {verifyRequest?.status === "rejected" && (
+                          <p className="rounded-lg border border-dashed border-clay2/40 bg-clay2/5 p-2 font-noto text-[11px] text-clay2">
+                            Not verified last time{verifyRequest.rejectionReason ? ` — ${verifyRequest.rejectionReason}` : ""}. You can apply again.
+                          </p>
+                        )}
+                        {verifyFormOpen || verifyRequest?.status === "rejected" ? (
+                          <>
+                            <textarea
+                              value={verifyReason}
+                              onChange={(e) => setVerifyReason(e.target.value)}
+                              rows={3}
+                              placeholder="What is this group, and why should it be verified?"
+                              data-testid="group-verification-reason"
+                              className="input-base w-full resize-none text-xs"
+                            />
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-noto text-[11px] text-muted">
+                                {verifyReason.trim().length}/{GROUP_VERIFICATION_MIN_REASON} characters minimum
+                              </span>
+                              <button
+                                type="button"
+                                onClick={handleApplyVerification}
+                                disabled={verifyBusy || verifyReason.trim().length < GROUP_VERIFICATION_MIN_REASON}
+                                data-testid="group-verification-submit"
+                                className="btn-primary text-xs disabled:opacity-40"
+                              >
+                                {verifyBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Apply"}
+                              </button>
+                            </div>
+                          </>
+                        ) : (
+                          <button type="button" onClick={() => setVerifyFormOpen(true)} data-testid="group-verification-apply" className="btn-ghost inline-flex w-fit items-center gap-1.5 text-xs">
+                            <BadgeCheck className="h-3.5 w-3.5" /> Apply for verification
+                          </button>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                )}
 
                 {/* ---- Call history (group voice calls) ---- */}
                 <div data-testid="call-history">
@@ -744,7 +866,7 @@ export default function GroupInfoPanel({
                       const isFounder = conversation.creatorUid === uid;
                       const memberProfile = participantProfiles.get(uid);
                       return (
-                        <div key={uid} className="flex items-center gap-3 rounded-lg px-1 py-1.5">
+                        <div key={uid} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg px-1 py-1.5">
                           <div className="relative shrink-0">
                             <Avatar uid={uid} photoURL={photo} displayName={name} size={36} />
                             {statusByUid[uid]?.isOnline && (
@@ -756,12 +878,43 @@ export default function GroupInfoPanel({
                               <span className="truncate">{uid === user?.uid ? "You" : name}</span>
                               <VerificationBadge user={memberProfile} size={13} />
                               <BirthdayBadge birthday={memberProfile?.birthday} size={13} />
+                              {conversation.memberTags?.[uid] && (
+                                <span data-testid="member-tag" className="shrink-0 rounded-full bg-gold/15 px-1.5 py-0.5 font-syne text-[9px] font-semibold uppercase tracking-wide text-gold2">
+                                  {conversation.memberTags[uid]}
+                                </span>
+                              )}
                             </span>
                             <p className="truncate font-noto text-[11px] text-muted">
                               {isFounder ? "Founder" : isMemberAdmin ? "Admin" : statusLabel(statusByUid[uid])}
                             </p>
+                            {tagEditUid === uid && (
+                              <div className="mt-1.5 flex items-center gap-1.5">
+                                <input
+                                  autoFocus
+                                  value={tagDraft}
+                                  maxLength={MEMBER_TAG_MAX_LENGTH}
+                                  onChange={(e) => setTagDraft(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") void handleSaveTag(uid, tagDraft);
+                                    if (e.key === "Escape") setTagEditUid(null);
+                                  }}
+                                  placeholder="e.g. Moderator"
+                                  aria-label="Member tag"
+                                  data-testid="member-tag-input"
+                                  className="input-base min-w-0 flex-1 py-1 text-xs"
+                                />
+                                <button type="button" onClick={() => handleSaveTag(uid, tagDraft)} data-testid="member-tag-save" className="text-xs font-semibold text-gold hover:underline">
+                                  Save
+                                </button>
+                                {conversation.memberTags?.[uid] && (
+                                  <button type="button" onClick={() => handleSaveTag(uid, "")} className="text-xs text-muted hover:text-clay2">
+                                    Clear
+                                  </button>
+                                )}
+                              </div>
+                            )}
                           </div>
-                          {uid !== user?.uid && (
+                          {(uid !== user?.uid || isGroupAdmin) && (
                             <div className="relative shrink-0">
                               <button
                                 type="button"
@@ -775,6 +928,7 @@ export default function GroupInfoPanel({
                                 <>
                                   <div className="fixed inset-0 z-40" onClick={() => setMemberActionUid(null)} />
                                   <div className="glass absolute right-0 z-50 mt-1 w-44 overflow-hidden rounded-lg p-1">
+                                    {uid !== user?.uid && (
                                     <Link
                                       href={getUserProfileUrl({ uid, isCreator: memberProfile?.isCreator, handle: memberProfile?.handle })}
                                       onClick={() => setMemberActionUid(null)}
@@ -782,6 +936,32 @@ export default function GroupInfoPanel({
                                     >
                                       <Users className="h-3.5 w-3.5" /> View Profile
                                     </Link>
+                                    )}
+                                    {isGroupAdmin && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setMemberActionUid(null);
+                                          setTagDraft(conversation.memberTags?.[uid] ?? "");
+                                          setTagEditUid(uid);
+                                        }}
+                                        data-testid="member-set-tag"
+                                        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-text hover:bg-bg4"
+                                      >
+                                        <Pencil className="h-3.5 w-3.5" /> {conversation.memberTags?.[uid] ? "Edit Tag" : "Set Tag"}
+                                      </button>
+                                    )}
+                                    {/* Beta feedback: "group founder can't de-admin other admins" — only the founder gets this. */}
+                                    {conversation.creatorUid === user?.uid && isMemberAdmin && !isFounder && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRemoveAdmin(uid)}
+                                        data-testid="member-remove-admin"
+                                        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-text hover:bg-bg4"
+                                      >
+                                        <Shield className="h-3.5 w-3.5" /> Remove Admin
+                                      </button>
+                                    )}
                                     {isGroupAdmin && !isMemberAdmin && (
                                       <button
                                         type="button"
@@ -791,7 +971,7 @@ export default function GroupInfoPanel({
                                         <Shield className="h-3.5 w-3.5" /> Make Admin
                                       </button>
                                     )}
-                                    {isGroupAdmin && !isFounder && (
+                                    {isGroupAdmin && !isFounder && uid !== user?.uid && (
                                       <button
                                         type="button"
                                         onClick={() => handleRemoveMember(uid)}

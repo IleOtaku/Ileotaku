@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import {
   Archive,
+  BadgeCheck,
   ArrowLeft,
   Bookmark,
   Check,
@@ -1500,7 +1501,7 @@ export default function MessagesClient() {
             </div>
           ) : (
             <>
-              <div className="flex shrink-0 items-center gap-3 border-b border-bg4 px-4 py-3">
+              <div className="flex shrink-0 items-center gap-2 border-b border-bg4 px-2.5 py-2.5 sm:gap-3 sm:px-4 sm:py-3" data-testid="dm-header">
                 <button
                   type="button"
                   onClick={() => setSelectedId(null)}
@@ -1527,7 +1528,10 @@ export default function MessagesClient() {
                       </div>
                     )}
                     <div className="min-w-0 flex-1">
-                      <span className="block truncate font-syne text-sm font-semibold text-text">{otherName}</span>
+                      <span className="flex min-w-0 items-center gap-1 font-syne text-sm font-semibold text-text">
+                        <span className="truncate">{otherName}</span>
+                        {selected?.verifiedGroup && <BadgeCheck data-testid="group-verified-badge" aria-label="Verified group" className="h-3.5 w-3.5 shrink-0 text-plat" />}
+                      </span>
                       <span className="font-noto text-xs text-muted">
                         {typingUids.length > 0
                           ? typingUids.length === 1
@@ -1552,26 +1556,40 @@ export default function MessagesClient() {
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <Link href={otherProfileHref ?? "#"} className="flex items-center gap-1 truncate font-syne text-sm font-semibold text-text hover:underline">
-                        <span className="truncate">{displayName}</span>
-                        <VerificationBadge user={otherProfile} size={14} />
-                        <PlatinumBadge isPlatinum={otherProfile?.isPlatinum} className="h-3.5 w-3.5" />
-                        <BirthdayBadge birthday={otherProfile?.birthday} size={14} />
+                      {/* Beta feedback: "Mobile view of dms, an active dm... the name, username,
+                          verification and everything is jammed up there." On a phone the name keeps
+                          the whole first line (truncating with an ellipsis, badges never squashed) and
+                          the @handle drops to the second line beside the status; from sm: up it's the
+                          old single line. */}
+                      <Link href={otherProfileHref ?? "#"} className="flex min-w-0 items-center gap-1 font-syne text-sm font-semibold text-text hover:underline" data-testid="dm-header-name">
+                        <span className="min-w-0 truncate">{displayName}</span>
+                        <span className="flex shrink-0 items-center gap-1">
+                          <VerificationBadge user={otherProfile} size={14} />
+                          <PlatinumBadge isPlatinum={otherProfile?.isPlatinum} className="h-3.5 w-3.5" />
+                          <BirthdayBadge birthday={otherProfile?.birthday} size={14} />
+                        </span>
                         {otherProfile?.handle && (
-                          <span className="ml-1 font-noto text-xs font-normal text-muted">@{otherProfile.handle}</span>
+                          <span className="ml-1 hidden shrink-0 font-noto text-xs font-normal text-muted sm:inline">@{otherProfile.handle}</span>
                         )}
                       </Link>
                       {typingUids.length > 0 ? (
-                        <p className="font-noto text-xs italic text-clay2">typing...</p>
+                        <p className="truncate font-noto text-xs italic text-clay2">typing...</p>
                       ) : (
-                        otherUid &&
-                        statusByUid[otherUid] && (
-                          <p className="font-noto text-xs text-muted">{statusLabel(statusByUid[otherUid])}</p>
+                        otherUid && (
+                          <p className="truncate font-noto text-xs text-muted" data-testid="dm-header-sub">
+                            {otherProfile?.handle && <span className="sm:hidden">@{otherProfile.handle}{statusByUid[otherUid] && statusLabel(statusByUid[otherUid]) ? " · " : ""}</span>}
+                            {statusByUid[otherUid] ? statusLabel(statusByUid[otherUid]) : ""}
+                          </p>
                         )
                       )}
-                      {otherUid && <SpotifyMiniPlayer uid={otherUid} />}
+                      {otherUid && (
+                        <div className="hidden sm:block">
+                          <SpotifyMiniPlayer uid={otherUid} />
+                        </div>
+                      )}
                     </div>
                     {otherUid && !blockingMe && (
+                      <div className="hidden sm:block">
                       <BlockButton
                         targetUid={otherUid}
                         targetLabel={otherName}
@@ -1585,6 +1603,7 @@ export default function MessagesClient() {
                           })
                         }
                       />
+                      </div>
                     )}
                     {/* PART 5 — voice calls: a 1:1 call from a direct conversation (groups get their
                         own mesh call button below). */}
@@ -1643,6 +1662,23 @@ export default function MessagesClient() {
                     <>
                       <div className="fixed inset-0 z-10" onClick={() => setHeaderMenuOpen(false)} />
                       <div className="glass absolute right-0 top-full z-20 mt-1 w-48 overflow-hidden rounded-xl p-1.5">
+                        {/* On phones the header has no room for the block icon, so it moves in here. */}
+                        {!isGroupThread && otherUid && !blockingMe && (
+                          <div className="px-1 py-1 sm:hidden">
+                            <BlockButton
+                              targetUid={otherUid}
+                              targetLabel={otherName}
+                              onBlocked={() => setBlockedUids((s) => new Set(s).add(otherUid))}
+                              onUnblocked={() =>
+                                setBlockedUids((s) => {
+                                  const next = new Set(s);
+                                  next.delete(otherUid);
+                                  return next;
+                                })
+                              }
+                            />
+                          </div>
+                        )}
                         {/* DM Feature Overhaul (Part F). */}
                         <button
                           type="button"
@@ -1781,9 +1817,14 @@ export default function MessagesClient() {
                     const m = item.message;
                     if (m.isSystem) {
                       return (
-                        <div key={m.id} className="my-1 flex items-center justify-center">
+                        <div key={m.id} className="my-1 flex flex-col items-center justify-center" data-testid="system-message">
                           <span className="rounded-full bg-bg3/60 px-3 py-1 text-center font-noto text-[11px] text-muted">
                             {m.text}
+                          </span>
+                          {/* Beta feedback: missed calls and other inline messages "should show timestamps too in a
+                              subtle way below them." */}
+                          <span className="mt-0.5 font-noto text-[9px] text-muted/60" data-testid="system-message-time">
+                            {formatExactTime(m.createdAt)}
                           </span>
                         </div>
                       );
@@ -1852,7 +1893,14 @@ export default function MessagesClient() {
                         )}
                         <div className="flex max-w-[75%] flex-col" style={{ alignItems: isOwn ? "flex-end" : "flex-start" }}>
                           {isGroupThread && !isOwn && (
-                            <span className="mb-0.5 ml-1 font-noto text-[11px] font-semibold text-muted">{senderName}</span>
+                            <span className="mb-0.5 ml-1 flex items-center gap-1 font-noto text-[11px] font-semibold text-muted">
+                              {senderName}
+                              {selected?.memberTags?.[m.senderId] && (
+                                <span data-testid="message-member-tag" className="rounded-full bg-gold/15 px-1.5 py-px font-syne text-[9px] font-semibold uppercase tracking-wide text-gold2">
+                                  {selected.memberTags[m.senderId]}
+                                </span>
+                              )}
+                            </span>
                           )}
                           <div
                             onContextMenu={(e) => handleContextMenu(e, m.id)}
@@ -1906,7 +1954,7 @@ export default function MessagesClient() {
                               </div>
                             ) : (
                               <>
-                                <DMMediaContent message={m} isOwn={isOwn} />
+                                <DMMediaContent message={m} isOwn={isOwn} accentColor={bubbleColor && bubbleColor.startsWith("#") ? bubbleColor : undefined} />
                                 {m.text && !captionInMedia && <MentionText text={m.text} />}
                                 {/* Beta feedback: "Links should be clickable, show the preview
                                     and should be formatted to be shorter." Clickable+shortened is

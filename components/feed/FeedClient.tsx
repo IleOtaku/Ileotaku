@@ -115,7 +115,7 @@ export default function FeedClient() {
             : await getForYouFeed(PAGE_SIZE, null, { followingIds, viewerUid: user?.uid });
         setPosts(page.posts);
         setCursor(page.lastDoc);
-        setHasMore(page.posts.length === PAGE_SIZE);
+        setHasMore(page.exhausted !== undefined ? !page.exhausted : page.posts.length === PAGE_SIZE);
       } finally {
         setLoading(false);
       }
@@ -175,7 +175,7 @@ export default function FeedClient() {
         return [...prev, ...page.posts.filter((p) => !knownIds.has(p.id))];
       });
       setCursor(page.lastDoc);
-      setHasMore(page.posts.length === PAGE_SIZE);
+      setHasMore(page.exhausted !== undefined ? !page.exhausted : page.posts.length === PAGE_SIZE);
     } finally {
       setLoadingMore(false);
     }

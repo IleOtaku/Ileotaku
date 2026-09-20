@@ -9,6 +9,7 @@ import { PlatinumBadge } from "@/components/ui/Badges";
 import { formatTime } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { approveApplication, getAllApplications, rejectApplication } from "@/lib/verification";
+import AdminGroupVerificationSection from "./AdminGroupVerificationSection";
 import type { VerificationApplication, VerificationApplicationStatus } from "@/types";
 
 type FilterValue = VerificationApplicationStatus;
@@ -251,6 +252,8 @@ export default function AdminVerificationTab() {
           </div>
         </div>
       </Modal>
+
+      <AdminGroupVerificationSection />
     </div>
   );
 }

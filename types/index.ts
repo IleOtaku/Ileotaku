@@ -51,6 +51,8 @@ export interface UserProfile {
   adminType?: AdminType;
   /** Which Platinum plan is active — only meaningful when isPlatinum is true. */
   platinumTier?: PlatinumTier;
+  /** Hourly Platinum (lib/payments.ts): hours bought in the current Mon–Sun week, capped at 5. */
+  platinumHours?: { week: string; hours: number };
   /** Date-only string ("YYYY-MM-DD") of the last daily-roulette spin, for the once-a-day gate. */
   lastRouletteSpin?: string;
   /** Date-only strings ("YYYY-MM-DD") marking each day the user read something, for the streak. */
@@ -213,7 +215,7 @@ export interface SocialLinks {
   website?: string;
 }
 
-export type PlatinumTier = "monthly" | "annual" | "student" | "family";
+export type PlatinumTier = "monthly" | "annual" | "student" | "family" | "hourly";
 
 export interface ReadingProgressEntry {
   title: string;
@@ -892,6 +894,12 @@ export interface Conversation {
   /** Uids with admin rights in this group — Make Admin/Remove Member/Delete Group checks read
    * this, not `participants` (every participant, admin or not, is in that array). */
   adminUids?: string[];
+  /** Beta feedback: "add member tags to groups so people can be easily identified" — a short label
+   * (e.g. "Moderator", "Artist", "Translator") an admin gives a member; shown beside their name in the
+   * member list and above their messages. Keyed by uid; absent = no tag. */
+  memberTags?: Record<string, string>;
+  /** Group verification (lib/groupVerification.ts): a platform admin granted this group the verified badge. */
+  verifiedGroup?: boolean;
   /** The uid who created the group — the only one who can delete it outright (see
    * MessagesClient's Delete Group vs. Leave Group distinction). */
   creatorUid?: string;
@@ -1123,6 +1131,9 @@ export interface CreatorPost {
   editingApp?: EditingApp | null;
   /** 0 = not boosted. 1/2/3 = boost tier purchased with coins — see BOOST_TIERS in creatorFeed.ts. */
   boostLevel: 0 | 1 | 2 | 3;
+  /** Set at publish time (lib/feedAlgorithm.ts): whether the author had been posting consistently enough for
+   * their verification tier to earn reach outside their followers. Absent on posts that predate it. */
+  reachConsistent?: boolean;
   /** ISO date string, same convention as `createdAt`. */
   boostExpiresAt?: string;
   /** Computed ranking score powering the For You feed — see calculateForYouScore(). */

@@ -3,13 +3,14 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import toast from "react-hot-toast";
-import { AlertTriangle, Clock, Loader2, Trash2, X } from "lucide-react";
+import { AlertTriangle, Check, CheckSquare, Clock, Loader2, Trash2, X } from "lucide-react";
 import { EmptyState, Modal, Select, Skeleton } from "@/components/ui";
 import { useAuth } from "@/hooks/useAuth";
 import {
   clearAllHistory,
   clearHistoryOlderThan,
   deleteHistoryItem,
+  deleteHistoryItems,
   getHistory,
 } from "@/lib/firestore";
 import { proxyImg } from "@/lib/manga-api";
@@ -46,15 +47,39 @@ interface HistoryItemProps {
   entry: HistoryEntry;
   deleting: boolean;
   onDelete: () => void;
+  /** Select mode: a tick box in front of the row, and a tap on the row ticks it instead of opening the title. */
+  selectMode?: boolean;
+  checked?: boolean;
+  onToggle?: () => void;
 }
 
 /** One row in the reading history list — memoized since the list can hold up to 200 entries and
  * only the row being deleted ever actually changes on a given interaction. */
-const HistoryItem = memo(function HistoryItem({ entry, deleting, onDelete }: HistoryItemProps) {
+const HistoryItem = memo(function HistoryItem({ entry, deleting, onDelete, selectMode, checked, onToggle }: HistoryItemProps) {
   return (
-    <div className="group relative flex items-center gap-3 rounded-xl border border-bg4 bg-bg2 p-3 transition-colors hover:border-clay">
+    <div
+      data-testid="history-item"
+      className={`group relative flex items-center gap-3 rounded-xl border bg-bg2 p-3 transition-colors hover:border-clay ${checked ? "border-clay" : "border-bg4"}`}
+    >
+      {selectMode && (
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-label={checked ? "Deselect" : "Select"}
+          aria-pressed={checked}
+          data-testid="history-check"
+          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 ${checked ? "border-clay bg-clay text-ivory" : "border-muted2 text-transparent"}`}
+        >
+          <Check className="h-3.5 w-3.5" />
+        </button>
+      )}
       <Link
         href={`/manga/${encodeURIComponent(entry.mangaId)}`}
+        onClick={(e) => {
+          if (!selectMode) return;
+          e.preventDefault();
+          onToggle?.();
+        }}
         className="flex min-w-0 flex-1 items-center gap-3"
       >
         <div className="h-16 w-11 shrink-0 overflow-hidden rounded bg-bg3">
@@ -105,6 +130,38 @@ export default function HistoryTab() {
   const [clearingAll, setClearingAll] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [clearingOlderThan, setClearingOlderThan] = useState(false);
+  // Select mode (beta feedback: "select book feature to remove particular books from library and history").
+  const [selectMode, setSelectMode] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [removingPicked, setRemovingPicked] = useState(false);
+
+  function toggle(id: string) {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function exitSelect() {
+    setSelectMode(false);
+    setPicked(new Set());
+  }
+  async function handleRemovePicked() {
+    if (!user || picked.size === 0) return;
+    setRemovingPicked(true);
+    const ids = Array.from(picked);
+    try {
+      await deleteHistoryItems(user.uid, ids);
+      setHistory((h) => h.filter((e) => !picked.has(e.id)));
+      toast.success(`Removed ${ids.length} from your history.`);
+      exitSelect();
+    } catch {
+      toast.error("Couldn't remove those entries. Please try again.");
+    } finally {
+      setRemovingPicked(false);
+    }
+  }
 
   function load() {
     if (!user) {
@@ -195,8 +252,31 @@ export default function HistoryTab() {
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="font-syne text-sm font-semibold text-text">Reading History</h3>
-        {history.length > 0 && (
+        {history.length > 0 && selectMode && (
           <div className="flex flex-wrap items-center gap-2">
+            <span className="font-noto text-sm text-text" data-testid="history-selected-count">{picked.size} selected</span>
+            <button type="button" onClick={() => setPicked(new Set(history.map((e) => e.id)))} className="btn-ghost text-xs">
+              Select all
+            </button>
+            <button
+              type="button"
+              onClick={handleRemovePicked}
+              disabled={removingPicked || picked.size === 0}
+              data-testid="history-remove-selected"
+              className="inline-flex items-center gap-1.5 rounded-full bg-clay px-3.5 py-1.5 font-syne text-xs font-semibold text-ivory disabled:opacity-40"
+            >
+              {removingPicked ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />} Remove
+            </button>
+            <button type="button" onClick={exitSelect} aria-label="Cancel selection" className="text-muted hover:text-text">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+        {history.length > 0 && !selectMode && (
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" onClick={() => setSelectMode(true)} data-testid="history-select" className="btn-ghost inline-flex items-center gap-1.5 text-xs">
+              <CheckSquare className="h-3.5 w-3.5" /> Select
+            </button>
             <Select
               value=""
               onChange={(e) => handleClearOlderThan(e.target.value)}
@@ -235,6 +315,9 @@ export default function HistoryTab() {
                     entry={entry}
                     deleting={deletingId === entry.id}
                     onDelete={() => handleDeleteOne(entry.id)}
+                    selectMode={selectMode}
+                    checked={picked.has(entry.id)}
+                    onToggle={() => toggle(entry.id)}
                   />
                 ))}
               </div>

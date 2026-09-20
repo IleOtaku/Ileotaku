@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import { Toaster } from "react-hot-toast";
-import ReaderAdScript from "@/components/ads/ReaderAdScript";
 import AuthProvider from "@/components/layout/AuthProvider";
 import BannedGate from "@/components/layout/BannedGate";
 import BetaFeedback from "@/components/layout/BetaFeedback";
@@ -115,7 +114,6 @@ export default function RootLayout({
             </FeedAudioProvider>
           </AuthProvider>
         </ErrorBoundary>
-        <ReaderAdScript />
         <ServiceWorkerRegister />
         <Toaster
           position="top-center"

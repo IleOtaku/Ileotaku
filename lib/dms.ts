@@ -488,6 +488,43 @@ export async function makeGroupAdmin(conversationId: string, adminUid: string, t
   }
 }
 
+/** Beta feedback: "group founder can't de-admin other admins." Only the FOUNDER (creatorUid) can take
+ * admin rights away, and never from themselves — admins can promote, but demoting is the founder's call. */
+export async function removeGroupAdmin(conversationId: string, founderUid: string, targetUid: string): Promise<void> {
+  try {
+    const ref = doc(db, CONVERSATIONS, conversationId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) throw new Error("Group not found.");
+    const convo = snap.data() as Conversation;
+    if (convo.creatorUid !== founderUid) throw new Error("Only the group founder can remove an admin.");
+    if (targetUid === convo.creatorUid) throw new Error("The founder can't be demoted.");
+    if (!convo.adminUids?.includes(targetUid)) throw new Error("That person isn't an admin.");
+    await updateDoc(ref, { adminUids: arrayRemove(targetUid) });
+  } catch (error) {
+    await logError(error, { operation: "removeGroupAdmin", conversationId, founderUid, targetUid });
+    throw error;
+  }
+}
+
+export const MEMBER_TAG_MAX_LENGTH = 20;
+
+/** Sets (or, with an empty string, clears) a member's tag. Admins only. */
+export async function setMemberTag(conversationId: string, adminUid: string, targetUid: string, tag: string): Promise<void> {
+  try {
+    const ref = doc(db, CONVERSATIONS, conversationId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) throw new Error("Group not found.");
+    const convo = snap.data() as Conversation;
+    if (!convo.adminUids?.includes(adminUid)) throw new Error("Only a group admin can set member tags.");
+    if (!convo.participants.includes(targetUid)) throw new Error("That person isn't in this group.");
+    const clean = tag.trim().replace(/\s+/g, " ").slice(0, MEMBER_TAG_MAX_LENGTH);
+    await updateDoc(ref, { [`memberTags.${targetUid}`]: clean ? clean : deleteField() });
+  } catch (error) {
+    await logError(error, { operation: "setMemberTag", conversationId, adminUid, targetUid });
+    throw error;
+  }
+}
+
 export async function updateGroupInfo(
   conversationId: string,
   adminUid: string,

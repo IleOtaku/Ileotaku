@@ -57,7 +57,7 @@ export default async function PublicProfilePage({ params }: PublicProfilePagePro
     <ProfileVisitRecorder profileUid={profile.uid} />
     <div className="relative">
       <div
-        className="relative h-40 w-full overflow-hidden bg-bg2 sm:h-48"
+        className="relative aspect-[3/1] max-h-64 w-full overflow-hidden bg-bg2" data-testid="profile-cover"
         style={getCoverBackgroundStyle(profile.coverStyle, profile.coverPhotoURL)}
       >
         <div className="kente-bar absolute inset-x-0 top-0" />

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Mic, MicOff, PhoneOff, Volume2, VolumeX } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Tooltip } from "@/components/ui/Tooltip";
+import { useRingtone } from "@/hooks/useRingtone";
 import { cn } from "@/lib/utils";
 import { formatCallDuration } from "@/lib/groupCalls";
 import type { PeerState } from "@/lib/groupWebRTC";
@@ -56,6 +57,8 @@ export default function GroupCallScreen({
   onEnd,
 }: GroupCallScreenProps) {
   const [now, setNow] = useState(() => Date.now());
+  // The caller hears the ringback while nobody has picked up yet.
+  useRingtone(call && call.status === "ringing" && call.participants[localUid]?.status === "joined" ? "outgoing" : null);
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);

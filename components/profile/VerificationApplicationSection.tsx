@@ -7,7 +7,15 @@ import { CheckCircle2, Clock, Lock, Loader2, XCircle } from "lucide-react";
 import { Select } from "@/components/ui";
 import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import { useAuth } from "@/hooks/useAuth";
-import { purchaseWhiteVerification, WHITE_VERIFICATION_PRICE } from "@/lib/payments";
+import { getPostsByCreator } from "@/lib/creatorFeed";
+import { evaluateVerificationRequirements, type RequirementCheck } from "@/lib/verification";
+import {
+  purchaseWhiteVerification,
+  purchaseWhiteVerificationWithCard,
+  VERIFICATION_PRICES,
+  verificationIsPermanent,
+  verificationTierOf,
+} from "@/lib/payments";
 import {
   getVerificationApplication,
   isWhiteVerificationExpired,
@@ -41,13 +49,30 @@ export default function VerificationApplicationSection() {
   const [submitting, setSubmitting] = useState(false);
 
   const [renewing, setRenewing] = useState(false);
+  // "Simple but difficult" requirements — see VERIFICATION_REQUIREMENTS in lib/verification.ts.
+  const [requirements, setRequirements] = useState<RequirementCheck[] | null>(null);
+  const requirementsMet = requirements?.every((r) => r.met) ?? false;
 
   const isPlatinum = profile?.isPlatinum === true;
   // Paid "white" verification: approved without Platinum, so it has an expiry that needs coin
   // renewals. `verificationExpiresAt` is kept after it lapses (see the field's doc comment), so
   // this stays true for an expired account too — that's exactly who most needs the Renew button.
-  const hasRenewableVerification =
-    !isPlatinum && !profile?.verifiedType && !profile?.isFounder && !profile?.isAdmin && !!profile?.verificationExpiresAt;
+  const hasRenewableVerification = !!profile && !verificationIsPermanent(profile) && (!isPlatinum || profile.verifiedType === "creator" || profile.verifiedType === "publisher");
+  const tierPrices = VERIFICATION_PRICES[verificationTierOf(profile ?? {})];
+  const WHITE_VERIFICATION_PRICE = tierPrices.coins;
+  const WHITE_VERIFICATION_PRICE_NGN = tierPrices.ngn;
+
+  useEffect(() => {
+    if (!user || !profile || !isPlatinum) return;
+    let cancelled = false;
+    getPostsByCreator(user.uid).then((posts) => {
+      if (!cancelled) setRequirements(evaluateVerificationRequirements(profile, posts.filter((p) => !p.isDraft).map((p) => p.createdAt)));
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, isPlatinum, profile?.createdAt, profile?.followers?.length]);
 
   useEffect(() => {
     if (!user || !isPlatinum) {
@@ -69,6 +94,10 @@ export default function VerificationApplicationSection() {
 
   async function handleSubmit() {
     if (!user || !profile) return;
+    if (!requirementsMet) {
+      toast.error("You don't meet the requirements yet — see the checklist above the form.");
+      return;
+    }
     if (reason.trim().length < MIN_REASON_LENGTH) {
       toast.error(`Tell us a bit more — at least ${MIN_REASON_LENGTH} characters.`);
       return;
@@ -96,25 +125,42 @@ export default function VerificationApplicationSection() {
     }
   }
 
+  async function handleBuyWithCard() {
+    if (!user) return;
+    setRenewing(true);
+    try {
+      const result = await purchaseWhiteVerificationWithCard(user);
+      if (result.success) toast.success("Verified for 30 days!");
+      else toast.error(result.message ?? "Couldn't buy verification.");
+    } finally {
+      setRenewing(false);
+    }
+  }
+
   async function handleRenew() {
     if (!user) return;
     setRenewing(true);
     try {
       const result = await purchaseWhiteVerification(user.uid);
-      if (result.success) toast.success("Verification renewed for 30 days!");
+      if (result.success) toast.success("Verified for 30 days!");
       else toast.error(result.message ?? "Couldn't renew your verification.");
     } finally {
       setRenewing(false);
     }
   }
 
-  if (hasRenewableVerification && profile?.verificationExpiresAt) {
-    const expired = isWhiteVerificationExpired(profile);
-    const expiryLabel = new Date(profile.verificationExpiresAt).toLocaleDateString(undefined, {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-    });
+  if (hasRenewableVerification && profile) {
+    // Beta feedback: "White Verifications should be bought for 1k per month. No need for a
+    // verification appeal." — anyone (not just someone approved before) can buy it outright.
+    const hasExpiry = !!profile.verificationExpiresAt;
+    const expired = hasExpiry && isWhiteVerificationExpired(profile);
+    const expiryLabel = hasExpiry
+      ? new Date(profile.verificationExpiresAt as string).toLocaleDateString(undefined, {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        })
+      : "";
     const balance = profile.coins ?? 0;
     return (
       <section>
@@ -123,7 +169,11 @@ export default function VerificationApplicationSection() {
         </h3>
         <div className="flex flex-col gap-3 rounded-2xl border border-bg4 bg-bg2 p-5">
           <p className="flex items-center gap-2 font-noto text-sm text-text">
-            {expired ? (
+            {!hasExpiry ? (
+              <>
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-gold" /> Get the verified badge — no application needed.
+              </>
+            ) : expired ? (
               <>
                 <XCircle className="h-4 w-4 shrink-0 text-clay2" /> Your verification expired on {expiryLabel}.
               </>
@@ -134,18 +184,24 @@ export default function VerificationApplicationSection() {
               </>
             )}
           </p>
-          <button
-            type="button"
-            onClick={handleRenew}
-            disabled={renewing || balance < WHITE_VERIFICATION_PRICE}
-            className="btn-primary w-fit disabled:opacity-40"
-          >
-            {renewing ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              `Renew Verification — ${WHITE_VERIFICATION_PRICE.toLocaleString()} 🪙 per month`
-            )}
-          </button>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button type="button" onClick={handleBuyWithCard} disabled={renewing} className="btn-primary w-fit disabled:opacity-40" data-testid="verify-card">
+              {renewing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                `${hasExpiry ? "Renew" : "Get verified"} — ₦${WHITE_VERIFICATION_PRICE_NGN.toLocaleString()} per month`
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={handleRenew}
+              disabled={renewing || balance < WHITE_VERIFICATION_PRICE}
+              className="btn-ghost w-fit disabled:opacity-40"
+              data-testid="verify-coins"
+            >
+              {`or ${WHITE_VERIFICATION_PRICE.toLocaleString()} 🪙`}
+            </button>
+          </div>
           <p className="font-noto text-[11px] text-muted">
             {balance < WHITE_VERIFICATION_PRICE
               ? `You have ${balance.toLocaleString()} coins — you need ${WHITE_VERIFICATION_PRICE.toLocaleString()}. `
@@ -197,6 +253,24 @@ export default function VerificationApplicationSection() {
                 Reapplying — your previous application was rejected.
               </p>
             )}
+            {requirements && (
+              <div className="rounded-xl border border-bg4 bg-bg p-3" data-testid="verification-requirements">
+                <p className="mb-2 font-syne text-xs font-semibold text-text">To apply you need all four:</p>
+                <ul className="flex flex-col gap-1.5">
+                  {requirements.map((r) => (
+                    <li key={r.id} className="flex items-center justify-between gap-2 font-noto text-xs">
+                      <span className={`flex items-center gap-1.5 ${r.met ? "text-green2" : "text-muted"}`}>
+                        {r.met ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0" /> : <XCircle className="h-3.5 w-3.5 shrink-0" />}
+                        {r.label}
+                      </span>
+                      <span className="shrink-0 tabular-nums text-muted">
+                        {Math.min(r.current, r.target)}/{r.target}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <div>
               <label htmlFor="verify-reason" className="mb-1.5 block font-syne text-xs font-semibold text-muted">
                 Why do you want verification?
@@ -243,7 +317,7 @@ export default function VerificationApplicationSection() {
             <button
               type="button"
               onClick={handleSubmit}
-              disabled={submitting || reason.trim().length < MIN_REASON_LENGTH}
+              disabled={submitting || reason.trim().length < MIN_REASON_LENGTH || !requirementsMet}
               className="btn-primary w-fit disabled:opacity-40"
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit Application"}

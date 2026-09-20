@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef } from "react";
+import HouseAd from "./HouseAd";
 import { useAuth } from "@/hooks/useAuth";
 import { isAdsFree } from "@/lib/ads";
 
@@ -32,17 +33,10 @@ export default function AdSlot({ placement, className }: AdSlotProps) {
 
   // If not configured yet show a placeholder in development so the layout is still visible to
   // work against; in production an unconfigured slot just renders nothing.
+  // Beta feedback: ads are strictly between chapters. With no third-party zone configured, the slot shows
+  // ÍléOtaku's own creative (components/ads/HouseAd.tsx) instead of staying empty.
   if (!publisherId || !zoneId) {
-    if (process.env.NODE_ENV === "development") {
-      return (
-        <div
-          className={`flex items-center justify-center rounded-xl border border-dashed border-white/10 bg-bg3 p-4 font-noto text-xs text-muted ${className ?? ""}`}
-        >
-          Ad slot ({placement}) — configure PropellerAds IDs in .env.local
-        </div>
-      );
-    }
-    return null;
+    return <HouseAd linkable className={className} />;
   }
 
   return (

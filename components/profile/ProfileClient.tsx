@@ -193,7 +193,7 @@ export default function ProfileClient() {
   return (
     <div className="relative mx-auto max-w-5xl px-4 pb-16 sm:px-6">
       <div
-        className="relative h-[200px] w-full overflow-hidden rounded-2xl"
+        className="relative aspect-[3/1] w-full overflow-hidden rounded-2xl" data-testid="profile-cover"
         style={
           profile?.coverPhotoURL
             ? getCoverBackgroundStyle(profile.coverStyle, profile.coverPhotoURL)

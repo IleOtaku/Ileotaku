@@ -29,6 +29,8 @@ import { createNotification } from "./notifications";
 import { incrementSoundUsage } from "./sounds";
 import { NotificationType, type CreatorPost, type CreatorPostType, type EditingApp, type FeedComment, type Sound, type UserProfile } from "@/types";
 
+import { isConsistentPoster, reachTierOf, viewerSees } from "./feedAlgorithm";
+
 const FEED = "creatorFeed";
 
 /** Whether an author's role permits their posts to enter the algorithmic For You feed at all.
@@ -40,7 +42,10 @@ const FEED = "creatorFeed";
  * footing; `isPlatinum` only ever affects ranking indirectly, via the badges already denormalized
  * onto the post. */
 export function getForYouEligibility(profile: Pick<UserProfile, "isCreator" | "isPublisher" | "isBanned">): boolean {
-  return (profile.isCreator === true || profile.isPublisher === true) && profile.isBanned !== true;
+  // Beta feedback: "everyone can post on feed, just know what to do with the algorithm." Every non-banned
+  // poster's content is now IN the For You pool; lib/feedAlgorithm.ts decides how far each post travels
+  // (an unverified post mostly stays with its followers), so eligibility no longer needs a creator role.
+  return profile.isBanned !== true;
 }
 
 /** Firestore's `in` operator caps at 30 comparison values — following lists longer than that
@@ -71,6 +76,10 @@ export interface FeedPage {
   /** Cursor for the next getPosts()/getFollowingFeed()/getForYouFeed() call, or null once the
    * feed is exhausted. */
   lastDoc: QueryDocumentSnapshot<DocumentData> | null;
+  /** Set by getForYouFeed only: true once the whole candidate pool has been read. A For You page can come back
+   * SHORT without being the last one (the reach algorithm filters per viewer), so "fewer posts than a page"
+   * can't be used to decide there's no more — this says so directly. */
+  exhausted?: boolean;
 }
 
 /** Defaults applied to every document read back out of Firestore, so posts written before this
@@ -442,6 +451,26 @@ export async function createPost(input: CreatePostInput): Promise<string> {
         ? "image"
         : "none";
 
+  // Posting consistency at publish time — see lib/feedAlgorithm.ts. Best-effort: if the lookup fails the
+  // post is simply treated as consistent for a tier that needs it, never blocked.
+  let reachConsistent = true;
+  try {
+    const tier = reachTierOf({
+      isFounder: badges.isFounder,
+      isAdmin: badges.isAdmin,
+      isVerified: badges.isVerified,
+      verifiedType: badges.verifiedType,
+      isPublisher: badges.isPublisher,
+    });
+    const recent = await getDocs(query(collection(db, FEED), where("uid", "==", uid), orderBy("createdAt", "desc"), limit(15)));
+    reachConsistent = isConsistentPoster(
+      tier,
+      recent.docs.filter((d) => d.data().isDraft !== true).map((d) => d.data().createdAt as string)
+    );
+  } catch {
+    reachConsistent = true;
+  }
+
   try {
     const ref = await addDoc(collection(db, FEED), {
       uid,
@@ -486,6 +515,7 @@ export async function createPost(input: CreatePostInput): Promise<string> {
         : {}),
       ...(editingApp !== undefined ? { editingApp } : {}),
       isDraft: false,
+      reachConsistent,
       boostLevel: 0,
       boostExpiresAt: null,
       forYouScore: 0,
@@ -561,11 +591,37 @@ export async function getForYouFeed(
       where("forYouEligible", "==", true),
       orderBy("forYouScore", "desc")
     );
-    const q = lastDoc ? query(base, startAfter(lastDoc), limit(pageSize)) : query(base, limit(pageSize));
-    const snap = await getDocs(q);
-    const posts = snap.docs.map(toPost);
     const followingIds = userContext?.followingIds ?? [];
     const viewerUid = userContext?.viewerUid;
+
+    // The candidate pool is every eligible post, best score first; the reach algorithm (lib/feedAlgorithm.ts)
+    // then decides per viewer which of them this viewer is actually allowed to see. That can drop most of a
+    // page (an unverified post reaches almost nobody outside its followers), so keep pulling pages — up to 4
+    // — until there are enough posts to fill one, and hand back the cursor of the LAST page actually read so
+    // the next call continues from there.
+    let cursor = lastDoc;
+    let lastSnapDoc: QueryDocumentSnapshot<DocumentData> | null = lastDoc;
+    const posts: CreatorPost[] = [];
+    let exhausted = false;
+    let leftover = false;
+    for (let round = 0; round < 4 && posts.length < pageSize && !exhausted; round++) {
+      const q = cursor ? query(base, startAfter(cursor), limit(pageSize * 2)) : query(base, limit(pageSize * 2));
+      const snap = await getDocs(q);
+      if (snap.docs.length < pageSize * 2) exhausted = true;
+      if (snap.docs.length === 0) break;
+      cursor = snap.docs[snap.docs.length - 1];
+      // Consume docs one by one so the cursor stops right after the LAST post this page actually used; whatever
+      // is left over in the fetched batch is simply fetched again next time.
+      for (const d of snap.docs) {
+        lastSnapDoc = d;
+        const p = toPost(d);
+        if (viewerSees(p, viewerUid, followingIds.includes(p.uid))) posts.push(p);
+        if (posts.length === pageSize) {
+          leftover = d !== snap.docs[snap.docs.length - 1];
+          break;
+        }
+      }
+    }
 
     const rescored = viewerUid
       ? [...posts].sort(
@@ -583,7 +639,9 @@ export async function getForYouFeed(
 
     return {
       posts: rescored,
-      lastDoc: snap.docs.length > 0 ? snap.docs[snap.docs.length - 1] : null,
+      lastDoc: lastSnapDoc,
+      // Exhausted only when the last batch ran dry AND nothing fetched is left unread.
+      exhausted: exhausted && !leftover,
     };
   } catch (error) {
     await logError(error, { operation: "creatorFeed.getForYouFeed" });

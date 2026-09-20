@@ -66,7 +66,11 @@ export function isWhiteVerificationExpired(user: {
   verificationExpiresAt?: string | null;
 }): boolean {
   if (!user.verificationExpiresAt) return false;
-  if (user.isPlatinum || user.isFounder || user.isAdmin || user.isPublisher || user.verifiedType) return false;
+  if (user.isFounder || user.isAdmin) return false;
+  // Beta feedback: creator ₦1,500 / publisher ₦2,000 per month — a Creator or Publisher badge that carries an
+  // expiry lapses like the white one does. (One granted before monthly billing has no expiry, so it's untouched.)
+  const typed = user.verifiedType === "creator" || user.verifiedType === "publisher";
+  if (!typed && (user.isPlatinum || user.isPublisher)) return false;
   const expires = new Date(user.verificationExpiresAt).getTime();
   return Number.isFinite(expires) && expires <= Date.now();
 }
@@ -85,6 +89,75 @@ export async function enforceVerificationExpiry(
     return true;
   } catch (error) {
     await logError(error, { operation: "verification.enforceVerificationExpiry", uid });
+    return false;
+  }
+}
+
+/* ---------------------------- Creator/Publisher requirements ---------------------------- */
+
+/** Beta feedback: "make the verification requirements simple but difficult." Four plain, checkable rules —
+ * easy to understand, hard to fake, and only met by someone who has actually been building an audience.
+ * The numbers live here so they can be tuned in one place. */
+export const VERIFICATION_REQUIREMENTS = {
+  minAccountDays: 30,
+  minFollowers: 500,
+  minPosts: 25,
+  /** Posted in at least `minActiveWeeks` of the last `weeks` weeks. */
+  weeks: 4,
+  minActiveWeeks: 3,
+} as const;
+
+export interface RequirementCheck {
+  id: "age" | "followers" | "posts" | "consistency";
+  label: string;
+  current: number;
+  target: number;
+  met: boolean;
+}
+
+/** Evaluates the four requirements for an account, given the ISO dates of everything it has posted. */
+export function evaluateVerificationRequirements(
+  profile: { createdAt?: string; followers?: string[] },
+  postDates: string[],
+  now = Date.now()
+): RequirementCheck[] {
+  const R = VERIFICATION_REQUIREMENTS;
+  const ageDays = profile.createdAt ? Math.floor((now - new Date(profile.createdAt).getTime()) / 86_400_000) : 0;
+  const followers = profile.followers?.length ?? 0;
+  const activeWeeks = new Set(
+    postDates
+      .map((d) => Math.floor((now - new Date(d).getTime()) / (7 * 86_400_000)))
+      .filter((w) => w >= 0 && w < R.weeks)
+  ).size;
+  return [
+    { id: "age", label: `Account is at least ${R.minAccountDays} days old`, current: Math.max(0, ageDays), target: R.minAccountDays, met: ageDays >= R.minAccountDays },
+    { id: "followers", label: `${R.minFollowers} followers`, current: followers, target: R.minFollowers, met: followers >= R.minFollowers },
+    { id: "posts", label: `${R.minPosts} posts`, current: postDates.length, target: R.minPosts, met: postDates.length >= R.minPosts },
+    {
+      id: "consistency",
+      label: `Posted in ${R.minActiveWeeks} of the last ${R.weeks} weeks`,
+      current: activeWeeks,
+      target: R.minActiveWeeks,
+      met: activeWeeks >= R.minActiveWeeks,
+    },
+  ];
+}
+
+/** Hourly Platinum (lib/payments.ts) is the one Platinum that ends on its own: when its window has
+ * run out, the owner's own load flips isPlatinum back off. Monthly/annual plans, admins and
+ * founders are deliberately left alone. Returns true if it changed anything. */
+export async function enforcePlatinumExpiry(
+  uid: string,
+  profile: { isPlatinum?: boolean; platinumTier?: string; platinumUntil?: string; isAdmin?: boolean; isFounder?: boolean }
+): Promise<boolean> {
+  if (!profile.isPlatinum || profile.platinumTier !== "hourly" || profile.isAdmin || profile.isFounder) return false;
+  const until = profile.platinumUntil ? new Date(profile.platinumUntil).getTime() : NaN;
+  if (!Number.isFinite(until) || until > Date.now()) return false;
+  try {
+    await updateDoc(doc(db, "users", uid), { isPlatinum: false });
+    return true;
+  } catch (error) {
+    await logError(error, { operation: "verification.enforcePlatinumExpiry", uid });
     return false;
   }
 }
@@ -217,9 +290,11 @@ export async function approveApplication(
     // A "white" (no creator/publisher type) approval for an account that isn't Platinum is paid,
     // recurring verification — it starts with 30 days, then needs a coin renewal. Platinum,
     // Creator and Publisher verification stays permanent (no expiry stored).
+    // Creator and Publisher verification is now a monthly paid status too (₦1,500 / ₦2,000 — see
+    // VERIFICATION_PRICES in lib/payments.ts): approval starts a 30-day window, then it needs renewing.
     const applicantIsPlatinum = (await getDoc(doc(db, "users", uid))).data()?.isPlatinum === true;
     const expiresAt =
-      !verifiedType && !applicantIsPlatinum ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() : null;
+      verifiedType || !applicantIsPlatinum ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() : null;
     await updateUserPrefs(uid, {
       isVerified: true,
       verifiedType: verifiedType ?? null,

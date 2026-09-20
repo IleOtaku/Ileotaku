@@ -96,10 +96,15 @@ export async function signInSocial(providerName: SocialProviderName): Promise<Us
   // flags must never be clobbered back to defaults on a returning user's later logins.
   const existing = await getUserProfile(cred.user.uid);
   if (existing) {
+    // Beta feedback bug: "When I update display name... it should remain that name and stop switching to
+    // the old one." Root cause: this branch used to write the PROVIDER's name and photo (Google's) over the
+    // profile on every single sign-in, so any name or picture the user had chosen in ÍléOtaku was reverted
+    // the next time they logged in (which is what a fresh deploy makes everyone do). The provider's values
+    // are only ever a starting point — used to fill a field that's genuinely empty, never to overwrite one.
     await updateUserPrefs(cred.user.uid, {
-      displayName: cred.user.displayName ?? existing.displayName,
-      email: cred.user.email ?? existing.email,
-      photoURL: cred.user.photoURL ?? existing.photoURL ?? "",
+      displayName: existing.displayName || cred.user.displayName || "ÍléOtaku Fan",
+      email: existing.email || cred.user.email || "",
+      photoURL: existing.photoURL || cred.user.photoURL || "",
     });
   } else {
     await upsertUserProfile(cred.user.uid, {

@@ -27,6 +27,7 @@ import { BirthdayBadge } from "@/components/ui/BirthdayBadge";
 import MentionText from "@/components/ui/MentionText";
 import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import { getOptimizedImageUrl, getVideoThumbnail } from "@/lib/cloudinary";
+import { tierImageUrl, tierVideoUrl } from "@/lib/mediaQuality";
 import { deletePost, incrementPostViews, incrementViewCount, likePost, trackWatchTime } from "@/lib/creatorFeed";
 import { useAuth } from "@/hooks/useAuth";
 import { usePostDownload } from "@/hooks/usePostDownload";
@@ -67,21 +68,27 @@ function formatDuration(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-function ImageGrid({ images, resLabel }: { images: string[]; resLabel?: string }) {
+/** A feed photo shown at its resolution tier (AI-enhanced or scaled down to the tier — see lib/mediaQuality.ts).
+ * If the derived version fails for any reason it quietly falls back to the plain 800px one. */
+function TierImage({ src, tier, className }: { src: string; tier?: CreatorPost["imageResolution"]; className: string }) {
+  const [failed, setFailed] = useState(false);
+  const plain = getOptimizedImageUrl(src, 800);
+  const derived = tier && tier !== "standard" ? tierImageUrl(src, tier) : plain;
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img loading="lazy" src={failed ? plain : derived} alt="" className={className} data-tier={tier ?? "standard"} onError={() => setFailed(true)} />;
+}
+
+function ImageGrid({ images, resLabel, tier }: { images: string[]; resLabel?: string; tier?: CreatorPost["imageResolution"] }) {
   if (images.length === 0) return null;
   const grid =
     images.length === 1 ? (
       <div className="mt-3 overflow-hidden rounded-xl border border-bg4">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-            loading="lazy" src={getOptimizedImageUrl(images[0], 800)} alt="" className="max-h-[420px] w-full object-cover" />
+        <TierImage src={images[0]} tier={tier} className="max-h-[420px] w-full object-cover" />
       </div>
     ) : (
       <div className="mt-3 grid grid-cols-2 gap-1.5 overflow-hidden rounded-xl border border-bg4">
         {images.slice(0, 4).map((src, i) => (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            loading="lazy" key={src + i} src={getOptimizedImageUrl(src, 800)} alt="" className="aspect-square w-full object-cover" />
+          <TierImage key={src + i} src={src} tier={tier} className="aspect-square w-full object-cover" />
         ))}
       </div>
     );
@@ -123,6 +130,7 @@ function FeedPostCard({ post, onDeleted }: FeedPostCardProps) {
   const isMilestone = post.type === "milestone";
   const isPreview = post.type === "preview";
   const isVideo = post.mediaType === "video" && !!post.videoUrl;
+  const [videoTierFailed, setVideoTierFailed] = useState(false);
   const viewCounted = useRef(false);
   const watchTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const viewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -399,7 +407,9 @@ function FeedPostCard({ post, onDeleted }: FeedPostCardProps) {
           {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
           <video
             ref={videoRef}
-            src={post.videoUrl}
+            src={videoTierFailed ? post.videoUrl : tierVideoUrl(post.videoUrl ?? "", post.videoResolution)}
+            onError={() => setVideoTierFailed(true)}
+            data-tier={post.videoResolution ?? "original"}
             poster={post.videoUrl ? getVideoThumbnail(post.videoUrl) : post.videoPosterUrl}
             className="max-h-[480px] w-full object-contain"
             muted
@@ -428,7 +438,7 @@ function FeedPostCard({ post, onDeleted }: FeedPostCardProps) {
           )}
         </div>
       ) : (
-        <ImageGrid images={post.attachments ?? []} resLabel={imageResLabel} />
+        <ImageGrid images={post.attachments ?? []} resLabel={imageResLabel} tier={post.imageResolution} />
       )}
 
       <div className="mt-4 flex items-center gap-5 border-t border-bg4 pt-3">

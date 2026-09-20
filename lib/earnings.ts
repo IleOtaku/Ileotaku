@@ -39,6 +39,8 @@ export interface CreatorEarnings {
   finalPayoutNGN: number;
   payoutStatus: "pending";
   hasBankDetails: boolean;
+  /** True when the account isn't a verified creator, so no cash earnings apply (see earnsMoney). */
+  notEligible?: boolean;
   bankName?: string;
   accountLast4?: string;
   accountName?: string;
@@ -51,6 +53,17 @@ interface UserLite {
   photoURL?: string;
   isPlatinum: boolean;
   isCreator: boolean;
+  /** Beta feedback: "Only verified creators earn. The rest don't." — see earnsMoney(). */
+  earnsMoney: boolean;
+}
+
+/** Cash earnings are only for VERIFIED creators (a verified Creator or Publisher, or the Founder/Admin
+ * accounts). Everyone else can still be tipped and can still sell chapters for coins, but no naira accrues
+ * to them and no payout is computed. */
+export function earnsMoney(u: Record<string, unknown>): boolean {
+  if (u.isFounder === true || u.isAdmin === true) return true;
+  const type = (u.verifiedType as string | null | undefined) ?? (u.isPublisher === true ? "publisher" : undefined);
+  return u.isVerified === true && (type === "creator" || type === "publisher");
 }
 
 /** Everything one period's calculation needs, fetched once and shared across every creator. */
@@ -94,6 +107,7 @@ export async function loadPeriodData(periodStart: Date, periodEnd: Date, db: Fir
       photoURL: u.photoURL as string | undefined,
       isPlatinum: u.isPlatinum === true,
       isCreator: u.isCreator === true || u.isPublisher === true,
+      earnsMoney: earnsMoney(u),
     });
   });
 
@@ -160,12 +174,34 @@ export function getAllCreatorUids(data: PeriodData): string[] {
   data.users.forEach((u) => u.isCreator && uids.add(u.uid));
   data.seriesAuthor.forEach((author) => uids.add(author));
   data.tipCoinsByCreator.forEach((_, uid) => uids.add(uid));
-  return Array.from(uids).filter((uid) => data.users.has(uid));
+  return Array.from(uids).filter((uid) => data.users.get(uid)?.earnsMoney === true);
 }
 
 /** Pure math for one creator against already-loaded period data. */
 export function computeCreatorEarnings(data: PeriodData, uid: string): CreatorEarnings {
   const user = data.users.get(uid);
+  if (user && !user.earnsMoney) {
+    // Not a verified creator: nothing accrues. (Coins from tips/unlocks still land in their coin balance.)
+    return {
+      uid,
+      displayName: user.displayName,
+      handle: user.handle,
+      photoURL: user.photoURL,
+      coinUnlocksCoins: 0,
+      tipsCoins: 0,
+      coinUnlocksNGN: 0,
+      tipsNGN: 0,
+      adRevenueNGN: 0,
+      platinumShareNGN: 0,
+      totalNetNGN: 0,
+      grossNGN: 0,
+      adjustmentNGN: 0,
+      finalPayoutNGN: 0,
+      payoutStatus: "pending",
+      hasBankDetails: false,
+      notEligible: true,
+    };
+  }
   const coinUnlocksCoins = data.unlockCoinsByCreator.get(uid) ?? 0;
   const tipsCoins = data.tipCoinsByCreator.get(uid) ?? 0;
   const adGross = data.adRevenueByCreator.get(uid) ?? 0;

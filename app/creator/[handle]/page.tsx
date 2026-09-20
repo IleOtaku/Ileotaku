@@ -86,7 +86,7 @@ export default async function CreatorProfilePage({ params }: CreatorProfilePageP
     <ProfileVisitRecorder profileUid={creator.uid} />
     <div className="relative">
       <div
-        className="relative h-48 w-full overflow-hidden bg-bg2 sm:h-64"
+        className="relative aspect-[3/1] max-h-80 w-full overflow-hidden bg-bg2" data-testid="profile-cover"
         style={getCoverBackgroundStyle(creator.coverStyle, creator.coverPhotoURL)}
       >
         <div className="kente-bar absolute inset-x-0 top-0" />

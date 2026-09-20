@@ -1,6 +1,6 @@
 import type { User } from "firebase/auth";
 import { addDoc, collection, doc, getDoc, setDoc } from "firebase/firestore";
-import type { CoinTransaction } from "@/types";
+import type { CoinTransaction, PlatinumTier } from "@/types";
 import { checkAndAwardAchievements } from "./achievements";
 import { logError } from "./errorLogger";
 import { db } from "./firebase";
@@ -37,7 +37,7 @@ export const COIN_PACKS: CoinPack[] = [
   { id: "pack-800", coins: 800, bonus: 80, priceNGN: 3500, priceUSD: 2.33, label: "800 + 80 coins" },
 ];
 
-export type PlatinumTier = "monthly" | "annual" | "student" | "family";
+export type { PlatinumTier };
 
 export interface PlatinumPlan {
   tier: PlatinumTier;
@@ -225,52 +225,223 @@ export async function purchasePlatinumWithCoins(
 /* ---------------------------- White verification ---------------------------- */
 
 /** Beta feedback: white (general) verification for non-Platinum accounts is a paid, recurring
- * status — 1,000 coins buys 30 more days. Platinum, Creator and Publisher verification is
+ * status — 100 coins (₦1,000 by card) buys 30 more days. Platinum, Creator and Publisher verification is
  * permanent and never goes through this. */
-export const WHITE_VERIFICATION_PRICE = 1000;
+export const WHITE_VERIFICATION_PRICE = 100;
+/** Card price of the same 30 days. Coins are scaled to ~₦10 each (the same rate Platinum uses:
+ * 200 coins = ₦2,000/month), so 100 coins = ₦1,000. */
+export const WHITE_VERIFICATION_PRICE_NGN = 1000;
 export const WHITE_VERIFICATION_DAYS = 30;
 
-/** Deducts WHITE_VERIFICATION_PRICE coins and extends `verificationExpiresAt` by 30 days —
- * from the current expiry if it's still in the future (renewing early stacks rather than wastes
- * the remainder), otherwise from now. Re-sets isVerified in the same write, since an expired
- * account had it flipped off by the expiry check (see lib/verification.ts). */
+export type VerificationTierKey = "white" | "creator" | "publisher";
+
+/** Beta feedback: "verifications should cost 1000 per month for each white verification user... 1500 for
+ * creators, and 2000 for publishers." Coins at the ₦10/coin rate used everywhere else. */
+export const VERIFICATION_PRICES: Record<VerificationTierKey, { ngn: number; coins: number; label: string }> = {
+  white: { ngn: 1000, coins: 100, label: "Verified" },
+  creator: { ngn: 1500, coins: 150, label: "Verified Creator" },
+  publisher: { ngn: 2000, coins: 200, label: "Verified Publisher" },
+};
+
+export function verificationTierOf(profile: { verifiedType?: string | null; isPublisher?: boolean }): VerificationTierKey {
+  if (profile.verifiedType === "publisher") return "publisher";
+  if (profile.verifiedType === "creator") return "creator";
+  return "white";
+}
+
+/** Whether a verification can be bought/renewed for money at all: Founder/Admin never; a Platinum or
+ * Creator/Publisher badge that was granted BEFORE monthly billing (no expiry stored) stays permanent. */
+export function verificationIsPermanent(profile: {
+  isFounder?: boolean;
+  isAdmin?: boolean;
+  isPlatinum?: boolean;
+  verifiedType?: string | null;
+  verificationExpiresAt?: string | null;
+}): boolean {
+  if (profile.isFounder || profile.isAdmin) return true;
+  const typed = profile.verifiedType === "creator" || profile.verifiedType === "publisher";
+  if (typed) return !profile.verificationExpiresAt;
+  return profile.isPlatinum === true; // Platinum members keep the plain (white) badge with no renewals
+}
+
+function extendedExpiry(profile: { verificationExpiresAt?: string | null }): string {
+  const current = profile.verificationExpiresAt ? new Date(profile.verificationExpiresAt).getTime() : NaN;
+  const base = Number.isFinite(current) ? Math.max(Date.now(), current) : Date.now();
+  return new Date(base + WHITE_VERIFICATION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+}
+
+/** Deducts the tier's coin price and extends `verificationExpiresAt` by 30 days — from the current expiry
+ * if it's still in the future (renewing early stacks rather than wastes the remainder), otherwise from now.
+ * The account keeps its type (white / creator / publisher). Anyone who isn't permanently verified can buy it
+ * straight away — no application needed for the white tier. */
 export async function purchaseWhiteVerification(uid: string): Promise<PaymentResult> {
   const profile = await getUserProfile(uid);
   if (!profile) return { success: false, message: "Couldn't load your account. Please try again." };
-  if (profile.isPlatinum || profile.verifiedType || profile.isFounder || profile.isAdmin) {
+  if (verificationIsPermanent(profile)) {
     return { success: false, message: "Your verification is permanent — there's nothing to renew." };
   }
-  if (!profile.verificationExpiresAt) {
-    return { success: false, message: "Only accounts approved for verification can renew it." };
-  }
+  const tier = verificationTierOf(profile);
+  const price = VERIFICATION_PRICES[tier].coins;
   const balance = profile.coins ?? 0;
-  if (balance < WHITE_VERIFICATION_PRICE) {
-    return { success: false, message: `You need ${(WHITE_VERIFICATION_PRICE - balance).toLocaleString()} more coins for this.` };
+  if (balance < price) {
+    return { success: false, message: `You need ${(price - balance).toLocaleString()} more coins for this.` };
   }
 
-  const newBalance = balance - WHITE_VERIFICATION_PRICE;
-  const currentExpiry = new Date(profile.verificationExpiresAt).getTime();
-  const base = Number.isFinite(currentExpiry) ? Math.max(Date.now(), currentExpiry) : Date.now();
-  const expiresAt = new Date(base + WHITE_VERIFICATION_DAYS * 24 * 60 * 60 * 1000).toISOString();
-
+  const newBalance = balance - price;
   try {
     await updateUserPrefs(uid, {
       coins: newBalance,
       isVerified: true,
-      verifiedType: null,
-      verificationExpiresAt: expiresAt,
+      verifiedType: tier === "white" ? null : tier,
+      verificationExpiresAt: extendedExpiry(profile),
     });
     await addTransaction(uid, {
       type: "spend",
-      amount: -WHITE_VERIFICATION_PRICE,
+      amount: -price,
       balanceAfter: newBalance,
-      description: "Renewed verification (30 days)",
+      description: "Verification (30 days)",
       category: "verification",
     });
     return { success: true };
   } catch (error) {
     await logError(error, { operation: "purchaseWhiteVerification", uid });
     return { success: false, message: "Couldn't renew your verification. Please try again." };
+  }
+}
+
+/** Beta feedback: "White Verifications should be bought for 1k per month. No need for a verification
+ * appeal." Same 30-day extension as the coin route, paid by card at the tier's naira price. */
+export async function purchaseWhiteVerificationWithCard(user: User): Promise<PaymentResult> {
+  const profile = await getUserProfile(user.uid);
+  if (!profile) return { success: false, message: "Couldn't load your account. Please try again." };
+  if (verificationIsPermanent(profile)) {
+    return { success: false, message: "Your verification is permanent — there's nothing to buy." };
+  }
+  const tier = verificationTierOf(profile);
+  const priceNGN = VERIFICATION_PRICES[tier].ngn;
+  let reference: string;
+  try {
+    const result = await initializePaystackPayment(user.email ?? "", priceNGN, "NGN", {
+      type: "verification",
+      tier,
+      uid: user.uid,
+    });
+    reference = result.reference;
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : "Payment was cancelled." };
+  }
+  try {
+    await updateUserPrefs(user.uid, {
+      isVerified: true,
+      verifiedType: tier === "white" ? null : tier,
+      verificationExpiresAt: extendedExpiry(profile),
+    });
+    await addTransaction(user.uid, {
+      type: "purchase",
+      amount: 0,
+      balanceAfter: profile.coins ?? 0,
+      description: "Verification (30 days)",
+      category: "verification",
+      amountNGN: priceNGN,
+      paystackRef: reference,
+    });
+    return { success: true };
+  } catch (error) {
+    await logError(error, { operation: "purchaseWhiteVerificationWithCard", uid: user.uid, reference });
+    return { success: false, message: "Payment succeeded but activating verification failed — contact support with reference " + reference };
+  }
+}
+
+/* ---------------------------- Hourly Platinum ---------------------------- */
+
+/** Beta feedback: "there's also time based platinum... 1hr is 200 naira, maximum allowed hours per
+ * week is 5 hours." Coins at the same ₦10/coin rate as everything else (200 coins = ₦2,000/month). */
+export const PLATINUM_HOUR_PRICE_NGN = 200;
+export const PLATINUM_HOUR_COIN_PRICE = 20;
+export const PLATINUM_MAX_HOURS_PER_WEEK = 5;
+
+/** The Monday (UTC) of the week containing `date`, as YYYY-MM-DD — the key the weekly cap resets on. */
+export function weekStartKey(date: Date = new Date()): string {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+  return d.toISOString().slice(0, 10);
+}
+
+export function platinumHoursLeftThisWeek(profile: { platinumHours?: { week: string; hours: number } } | null | undefined): number {
+  const used = profile?.platinumHours?.week === weekStartKey() ? profile.platinumHours.hours : 0;
+  return Math.max(0, PLATINUM_MAX_HOURS_PER_WEEK - used);
+}
+
+/** Buys `hours` of Platinum (by card or coins). Stacks onto a running hourly window; refuses if
+ * the account already has a real Platinum plan or would go over 5 hours this week. */
+export async function purchasePlatinumHours(user: User, hours: number, method: "card" | "coins"): Promise<PaymentResult> {
+  if (!Number.isInteger(hours) || hours < 1) return { success: false, message: "Pick how many hours you want." };
+  const profile = await getUserProfile(user.uid);
+  if (!profile) return { success: false, message: "Couldn't load your account. Please try again." };
+
+  const stillPlatinum = profile.isPlatinum && (!profile.platinumUntil || new Date(profile.platinumUntil).getTime() > Date.now());
+  if (stillPlatinum && profile.platinumTier !== "hourly") {
+    return { success: false, message: "You already have Platinum — no need to buy hours." };
+  }
+  const left = platinumHoursLeftThisWeek(profile);
+  if (hours > left) {
+    return {
+      success: false,
+      message:
+        left === 0
+          ? "You've used all 5 Platinum hours for this week — it resets on Monday."
+          : `You can only buy ${left} more hour${left === 1 ? "" : "s"} this week.`,
+    };
+  }
+
+  let reference: string | undefined;
+  let newBalance = profile.coins ?? 0;
+  if (method === "coins") {
+    const cost = hours * PLATINUM_HOUR_COIN_PRICE;
+    if (newBalance < cost) return { success: false, message: `Not enough coins — you need ${cost}.` };
+    newBalance -= cost;
+  } else {
+    try {
+      const result = await initializePaystackPayment(user.email ?? "", hours * PLATINUM_HOUR_PRICE_NGN, "NGN", {
+        type: "platinum_hours",
+        hours,
+        uid: user.uid,
+      });
+      reference = result.reference;
+    } catch (error) {
+      return { success: false, message: error instanceof Error ? error.message : "Payment was cancelled." };
+    }
+  }
+
+  try {
+    const week = weekStartKey();
+    const usedBefore = profile.platinumHours?.week === week ? profile.platinumHours.hours : 0;
+    const currentUntil = stillPlatinum && profile.platinumUntil ? new Date(profile.platinumUntil).getTime() : 0;
+    const until = new Date(Math.max(Date.now(), currentUntil) + hours * 60 * 60 * 1000).toISOString();
+    await updateUserPrefs(user.uid, {
+      isPlatinum: true,
+      platinumTier: "hourly",
+      platinumUntil: until,
+      platinumHours: { week, hours: usedBefore + hours },
+      ...(method === "coins" ? { coins: newBalance } : {}),
+    });
+    await addTransaction(user.uid, {
+      type: method === "coins" ? "spend" : "purchase",
+      amount: method === "coins" ? -(hours * PLATINUM_HOUR_COIN_PRICE) : 0,
+      balanceAfter: newBalance,
+      description: `Platinum for ${hours} hour${hours === 1 ? "" : "s"}`,
+      category: "platinum",
+      ...(method === "card" ? { amountNGN: hours * PLATINUM_HOUR_PRICE_NGN, paystackRef: reference } : {}),
+    });
+    return { success: true };
+  } catch (error) {
+    await logError(error, { operation: "purchasePlatinumHours", uid: user.uid, hours, method, reference });
+    return {
+      success: false,
+      message: reference
+        ? "Payment succeeded but activating Platinum failed — contact support with reference " + reference
+        : "Couldn't activate Platinum. Please try again.",
+    };
   }
 }
 

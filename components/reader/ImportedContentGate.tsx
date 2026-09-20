@@ -1,25 +1,21 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import toast from "react-hot-toast";
 import { AnimatePresence, motion } from "framer-motion";
-import { Coins, Loader2, Lock, SkipForward, Sparkles } from "lucide-react";
+import { Clapperboard, Coins, Loader2, Lock, Sparkles } from "lucide-react";
+import RewardedAdModal from "@/components/ads/RewardedAdModal";
+import { AD_CONFIG, type AdStatus } from "@/lib/adConfig";
+import { fetchAdStatus, type ClaimResult } from "@/lib/rewardedAds";
 import {
   getLockConfig,
   isChapterUnlocked,
-  unlockChapterWithAd,
   unlockChapterWithCoins,
   type LockConfig,
 } from "@/lib/contentLocking";
 import { proxyImg } from "@/lib/manga-api";
 import type { UserProfile } from "@/types";
-
-/** Total simulated-ad length, and how far into it "Skip Ad" becomes available — mirrors the
- * familiar skippable-preroll pattern (YouTube etc.): the button appears after 5s of *watching*,
- * not when 5s remain. */
-const AD_SECONDS = 30;
-const SKIP_AFTER_SECONDS = 5;
 
 export interface ImportedContentGateProps {
   mangaId: string;
@@ -119,6 +115,9 @@ export default function ImportedContentGate({
       <AdGate
         mangaTitle={mangaTitle}
         chapterLabel={chapterLabel}
+        mangaId={mangaId}
+        chapterId={chapterId}
+        signedIn={!!userProfile?.uid}
         coinPrice={userProfile?.uid ? state.config.coinPrice : undefined}
         balance={balance}
         onUnlockWithCoins={async () => {
@@ -133,8 +132,8 @@ export default function ImportedContentGate({
           setState({ status: "open" });
           return true;
         }}
-        onUnlocked={async () => {
-          if (userProfile?.uid) await unlockChapterWithAd(userProfile.uid, mangaId, chapterId);
+        onUnlocked={() => {
+          // The server already wrote the unlock when the third ad was counted.
           setState({ status: "open" });
         }}
       >
@@ -166,9 +165,16 @@ export default function ImportedContentGate({
 
 /* ---------------------------- Ad gate ---------------------------- */
 
+/** Beta feedback (instructed by Zamyilton): "a watch 3 ads to unlock the next chapter (2 chapters a day)."
+ * Each ad is opened and verified by the server (app/api/ads/*): the browser can't skip, fast-forward or forge
+ * one, and the 3-ads-per-chapter / 2-chapters-per-day rules are enforced there. The third ad's claim writes
+ * the unlock itself. */
 function AdGate({
   mangaTitle,
   chapterLabel,
+  mangaId,
+  chapterId,
+  signedIn,
   coinPrice,
   balance,
   onUnlockWithCoins,
@@ -177,7 +183,10 @@ function AdGate({
 }: {
   mangaTitle: string;
   chapterLabel: string;
-  /** Price of skipping the ad with coins; undefined hides the option (e.g. signed-out readers). */
+  mangaId: string;
+  chapterId: string;
+  signedIn: boolean;
+  /** Price of skipping the ads with coins; undefined hides the option (e.g. signed-out readers). */
   coinPrice?: number;
   balance: number;
   onUnlockWithCoins: () => Promise<boolean>;
@@ -185,35 +194,30 @@ function AdGate({
   children: ReactNode;
 }) {
   const [payingCoins, setPayingCoins] = useState(false);
-  const [secondsLeft, setSecondsLeft] = useState(AD_SECONDS);
-  const [finishing, setFinishing] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const [status, setStatus] = useState<AdStatus | null>(null);
   const [fading, setFading] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    timerRef.current = setInterval(() => {
-      setSecondsLeft((s) => Math.max(0, s - 1));
-    }, 1000);
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, []);
+    if (signedIn) fetchAdStatus().then(setStatus).catch(() => setStatus(null));
+  }, [signedIn]);
 
-  useEffect(() => {
-    if (secondsLeft === 0 && !finishing) finish();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [secondsLeft]);
+  const perChapter = AD_CONFIG.chapter.adsPerChapter;
+  const watched = status?.chapter.progress[chapterId] ?? 0;
+  const chaptersLeft = status ? status.chapter.perDay - status.chapter.unlockedToday : AD_CONFIG.chapter.chaptersPerDay;
+  const capped = chaptersLeft <= 0;
 
-  async function finish() {
-    if (timerRef.current) clearInterval(timerRef.current);
-    setFinishing(true);
-    await onUnlocked();
-    setFading(true);
+  async function handleDone(result: ClaimResult) {
+    setPlaying(false);
+    setStatus(result.status);
+    if (result.chapterUnlocked) {
+      toast.success("Chapter unlocked!");
+      setFading(true);
+      await onUnlocked();
+    } else {
+      toast.success(`Ad ${result.chapterProgress} of ${perChapter} done`);
+    }
   }
-
-  const watched = AD_SECONDS - secondsLeft;
-  const canSkip = watched >= SKIP_AFTER_SECONDS;
-  const progressPct = (watched / AD_SECONDS) * 100;
 
   return (
     <div className="relative flex flex-1 overflow-hidden bg-bg">
@@ -223,38 +227,53 @@ function AdGate({
             initial={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.4 }}
-            className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-6 bg-black px-6 text-center"
+            data-testid="ad-gate"
+            className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-5 bg-black px-6 text-center"
           >
             <div>
               <p className="font-cinzel text-lg tracking-wide text-gold">ÍléOtaku</p>
               <p className="mt-1 font-noto text-xs text-ivory/70">{mangaTitle}</p>
             </div>
 
-            <h2 className="font-cinzel text-xl text-ivory">Watch a short ad to unlock this chapter</h2>
+            <h2 className="font-cinzel text-xl text-ivory">Watch {perChapter} short ads to unlock this chapter</h2>
 
-            <div className="flex w-full max-w-sm flex-col items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-6">
-              <span className="text-4xl">📺</span>
-              <p className="font-syne text-3xl font-bold text-ivory">
-                {finishing ? "Unlocking..." : secondsLeft}
-              </p>
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
-                <div
-                  className="h-full rounded-full bg-clay transition-[width] duration-1000 ease-linear"
-                  style={{ width: `${progressPct}%` }}
-                />
+            <div className="flex w-full max-w-sm flex-col items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-5">
+              <div className="flex items-center gap-2" data-testid="ad-gate-progress" aria-label={`${watched} of ${perChapter} ads watched`}>
+                {Array.from({ length: perChapter }, (_, i) => (
+                  <span
+                    key={i}
+                    className={`flex h-9 w-9 items-center justify-center rounded-full border-2 text-sm font-bold ${
+                      i < watched ? "border-clay bg-clay text-ivory" : "border-white/25 text-ivory/50"
+                    }`}
+                  >
+                    {i < watched ? "✓" : i + 1}
+                  </span>
+                ))}
               </div>
-              {canSkip && !finishing && (
-                <button
-                  type="button"
-                  onClick={finish}
-                  className="mt-1 flex items-center gap-1.5 rounded-full bg-white/10 px-4 py-1.5 font-noto text-xs font-semibold text-ivory hover:bg-white/20"
-                >
-                  <SkipForward className="h-3.5 w-3.5" /> Skip Ad
-                </button>
+              {!signedIn ? (
+                <Link href="/auth/login" className="btn-primary">Sign in to unlock with ads</Link>
+              ) : capped ? (
+                <p className="font-noto text-xs text-ivory/70" data-testid="ad-gate-capped">
+                  You&apos;ve unlocked {AD_CONFIG.chapter.chaptersPerDay} chapters with ads today. The limit resets tomorrow — or unlock this one with coins.
+                </p>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setPlaying(true)}
+                    data-testid="ad-gate-watch"
+                    className="flex items-center gap-2 rounded-full bg-clay px-5 py-2 font-syne text-sm font-semibold text-ivory hover:bg-clay2"
+                  >
+                    <Clapperboard className="h-4 w-4" /> Watch ad {Math.min(watched + 1, perChapter)} of {perChapter}
+                  </button>
+                  <p className="font-noto text-[11px] text-ivory/50">
+                    {AD_CONFIG.adSeconds}s each · {chaptersLeft} of {AD_CONFIG.chapter.chaptersPerDay} ad-unlocks left today
+                  </p>
+                </>
               )}
             </div>
 
-            {coinPrice !== undefined && !finishing && (
+            {coinPrice !== undefined && (
               <button
                 type="button"
                 disabled={payingCoins || balance < coinPrice}
@@ -262,23 +281,16 @@ function AdGate({
                   setPayingCoins(true);
                   const ok = await onUnlockWithCoins();
                   setPayingCoins(false);
-                  if (ok) {
-                    if (timerRef.current) clearInterval(timerRef.current);
-                    setFinishing(true);
-                    setFading(true);
-                  }
+                  if (ok) setFading(true);
                 }}
                 className="flex items-center gap-1.5 rounded-full border border-gold/50 px-4 py-1.5 font-noto text-xs font-semibold text-gold hover:bg-gold/10 disabled:opacity-50"
               >
                 {payingCoins ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Coins className="h-3.5 w-3.5" />}
-                {balance < coinPrice ? `Skip the ad — ${coinPrice} 🪙 (you have ${balance})` : `Skip the ad — unlock for ${coinPrice} 🪙`}
+                {balance < coinPrice ? `Skip the ads — ${coinPrice} 🪙 (you have ${balance})` : `Skip the ads — unlock for ${coinPrice} 🪙`}
               </button>
             )}
 
-            <Link
-              href="/pricing"
-              className="flex items-center gap-1.5 font-noto text-xs font-semibold text-plat2 hover:underline"
-            >
+            <Link href="/pricing" className="flex items-center gap-1.5 font-noto text-xs font-semibold text-plat2 hover:underline">
               Or go Platinum for unlimited reading 💎
             </Link>
 
@@ -286,6 +298,14 @@ function AdGate({
           </motion.div>
         )}
       </AnimatePresence>
+      <RewardedAdModal
+        open={playing}
+        purpose="chapter"
+        target={{ mangaId, chapterId }}
+        onClose={() => setPlaying(false)}
+        onDone={handleDone}
+        onError={(m) => toast.error(m)}
+      />
       {children}
     </div>
   );
