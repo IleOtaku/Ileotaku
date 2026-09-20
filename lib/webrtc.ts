@@ -53,7 +53,8 @@ const TURN_SERVERS: RTCIceServer[] =
         { urls: "turn:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" },
       ];
 
-const ICE_CONFIG: RTCConfiguration = {
+/** Shared with lib/groupWebRTC.ts so group calls use the exact same STUN + TURN config. */
+export const ICE_CONFIG: RTCConfiguration = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },

@@ -903,6 +903,51 @@ service cloud.firestore {
       }
     }
 
+    // ---------------------------- group voice calls ----------------------------
+    // groupCalls/{callId}: one mesh WebRTC call inside a group conversation. `participantUids` is a
+    // top-level array of every conversation member at call start — it exists so these rules (and the
+    // app's live queries, which all filter `participantUids array-contains <me>`) can PROVE a reader
+    // is allowed to see a call; the richer `participants` map can't be proven against a query.
+    //  - create: only a member of the group, as initiator, in the "ringing" state, listing only
+    //    members of that group, and never more than 6 entries in `participants`.
+    //  - update: a listed member may change `participants` (only THEIR OWN entry — joining, leaving,
+    //    declining, muting), the status/timing fields, and the heartbeat. Never who's listed, who
+    //    started it, or which conversation it belongs to, and never an ended call again.
+    //  - delete: never (call history is the record).
+    match /groupCalls/{callId} {
+      allow read: if isSignedIn() && request.auth.uid in resource.data.participantUids;
+
+      allow create: if isSignedIn()
+        && request.resource.data.initiatorUid == request.auth.uid
+        && request.resource.data.status == "ringing"
+        && request.auth.uid in request.resource.data.participantUids
+        && request.auth.uid in get(/databases/$(database)/documents/conversations/$(request.resource.data.conversationId)).data.participants
+        && get(/databases/$(database)/documents/conversations/$(request.resource.data.conversationId)).data.type == "group"
+        && request.resource.data.participantUids.hasOnly(get(/databases/$(database)/documents/conversations/$(request.resource.data.conversationId)).data.participants)
+        && request.resource.data.participants.keys().hasOnly(request.resource.data.participantUids)
+        && request.resource.data.participants.size() <= 6;
+
+      allow update: if isSignedIn()
+        && request.auth.uid in resource.data.participantUids
+        && resource.data.status != "ended"
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(["participants", "status", "activeAt", "heartbeatAt", "endedAt", "duration"])
+        && request.resource.data.status in ["ringing", "active", "ended"]
+        && request.resource.data.participants.diff(resource.data.participants).affectedKeys().hasOnly([request.auth.uid])
+        && request.resource.data.participants.size() <= 6;
+
+      // groupCalls/{callId}/signals/{uid}: that participant's offers/answers/ICE candidates for
+      // everyone else. Anyone on the call reads all of them (each client picks out what's addressed
+      // to it); only the owner writes their own, so nobody can inject signaling as someone else.
+      match /signals/{sigUid} {
+        allow read: if isSignedIn()
+          && request.auth.uid in get(/databases/$(database)/documents/groupCalls/$(callId)).data.participants;
+        allow create, update, delete: if isSignedIn()
+          && request.auth.uid == sigUid
+          && request.auth.uid in get(/databases/$(database)/documents/groupCalls/$(callId)).data.participants;
+      }
+    }
+
     // ---------------------------- typing indicators (Part 10) ----------------------------
     // One doc per conversation, a map of participant uid -> timestamp (or null once they stop).
     // Not scoped to actual conversation membership — a get() on the conversation doc on every

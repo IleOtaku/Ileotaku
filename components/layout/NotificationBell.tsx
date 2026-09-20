@@ -23,6 +23,7 @@ import {
   MessageCircle,
   PartyPopper,
   Phone,
+  PhoneMissed,
   RefreshCw,
   Trophy,
   Unlock,
@@ -70,6 +71,7 @@ const TYPE_ICON: Record<NotificationType, LucideIcon> = {
   [NotificationType.PROFILE_VISIT]: Eye,
   [NotificationType.BIRTHDAY]: Cake,
   [NotificationType.INCOMING_CALL]: Phone,
+  [NotificationType.MISSED_CALL]: PhoneMissed,
   [NotificationType.NEW_MESSAGE]: MessageCircle,
 };
 

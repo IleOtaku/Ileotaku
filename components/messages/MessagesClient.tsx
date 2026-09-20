@@ -48,6 +48,8 @@ import GifPicker from "./GifPicker";
 import GroupInfoPanel from "./GroupInfoPanel";
 import InAppCamera from "./InAppCamera";
 import { useActiveCall } from "@/hooks/useActiveCall";
+import { useGroupCall } from "@/hooks/useGroupCall";
+import { GROUP_CALL_MAX, isGroupCallLive, subscribeToLiveGroupCalls, type CallUser } from "@/lib/groupCalls";
 import { saveSticker } from "@/lib/stickers";
 import { checkMicrophonePermission, newCallId, WebRTCCall } from "@/lib/webrtc";
 import SharePickerModal, { type SharedManga, type SharedPost } from "./SharePickerModal";
@@ -90,7 +92,7 @@ import { subscribeToStories } from "@/lib/stories";
 import type { TenorGif } from "@/lib/tenor";
 import SpotifyMiniPlayer from "@/components/spotify/SpotifyMiniPlayer";
 import { contrastTextColor, formatExactTime, formatPostTimestamp, formatTime, initials, stringToColor, truncate } from "@/lib/utils";
-import type { Conversation, DMMessage, MessageReplyTo, UserProfile } from "@/types";
+import type { Conversation, DMMessage, GroupCall, MessageReplyTo, UserProfile } from "@/types";
 
 const MAX_TEXTAREA_HEIGHT = 112; // ~4 lines at this input's font/line-height + padding
 /** How long to wait after the last keystroke before clearing our own typing flag. */
@@ -173,7 +175,7 @@ export default function MessagesClient() {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const handledWithParam = useRef(false);
-  const handledOpenParam = useRef(false);
+  const handledOpenParam = useRef<string | null>(null);
   // uid -> currently-playing, for the sidebar's green dot. Deliberately a plain poll (not a
   // real-time listener) — a conversation list can show many contacts at once, and this only
   // needs to be roughly fresh, not instant.
@@ -319,12 +321,14 @@ export default function MessagesClient() {
 
   // ?open=[conversationId] — from the invite-link join page (app/invite/[code]), right after it
   // adds the visitor as a participant server-side. Just selects it; subscribeToConversations'
-  // own live listener is what actually makes the new group show up in the sidebar.
+  // own live listener is what actually makes the new group show up in the sidebar. Also reacts to a
+  // CHANGED value (accepting a group call from the global overlay navigates here even when /messages
+  // is already open on a different chat), and accepts ?conversation= as an alias.
   useEffect(() => {
-    if (!user || handledOpenParam.current) return;
-    const openId = searchParams.get("open");
-    if (!openId) return;
-    handledOpenParam.current = true;
+    if (!user) return;
+    const openId = searchParams.get("open") ?? searchParams.get("conversation");
+    if (!openId || handledOpenParam.current === openId) return;
+    handledOpenParam.current = openId;
     setSelectedId(openId);
   }, [user, searchParams]);
 
@@ -638,6 +642,70 @@ export default function MessagesClient() {
   const selectedGroup = conversations.find((c) => c.id === selectedId && c.type === "group");
   const isGroupAdmin = selectedGroup && user ? (selectedGroup.adminUids ?? []).includes(user.uid) : false;
   const groupParticipantsKey = selectedGroup?.participants.join(",") ?? "";
+
+  // Group voice calls: a live (ringing/active, heartbeat still fresh) call in the open group drives
+  // the "Group call in progress — Join" banner and turns the phone icon into a Join button.
+  const [liveGroupCalls, setLiveGroupCalls] = useState<GroupCall[]>([]);
+  const [callPickerOpen, setCallPickerOpen] = useState(false);
+  const [callPicked, setCallPicked] = useState<Set<string>>(new Set());
+  const [callBusy, setCallBusy] = useState(false);
+  const [callClock, setCallClock] = useState(() => Date.now());
+  const groupCallPhase = useGroupCall((s) => s.phase);
+  const myGroupCallId = useGroupCall((s) => s.callId);
+  const selectedGroupId = selectedGroup?.id ?? null;
+  useEffect(() => {
+    if (!user || !selectedGroupId) {
+      setLiveGroupCalls([]);
+      return;
+    }
+    return subscribeToLiveGroupCalls(user.uid, selectedGroupId, setLiveGroupCalls);
+  }, [user, selectedGroupId]);
+  useEffect(() => {
+    if (!selectedGroupId) return;
+    const t = setInterval(() => setCallClock(Date.now()), 5000);
+    return () => clearInterval(t);
+  }, [selectedGroupId]);
+  const liveGroupCall = liveGroupCalls.find((c) => isGroupCallLive(c, callClock)) ?? null;
+
+  const groupCallUser: CallUser | null = user
+    ? {
+        uid: user.uid,
+        displayName: profile?.displayName || user.displayName || "Member",
+        photoURL: profile?.photoURL || user.photoURL || undefined,
+      }
+    : null;
+
+  async function runGroupCall(action: () => Promise<void>) {
+    setCallBusy(true);
+    try {
+      await action();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't start the call.");
+    } finally {
+      setCallBusy(false);
+    }
+  }
+
+  /** The phone icon in a group's header: joins the call already running here, or starts one. */
+  function handleGroupCallButton() {
+    if (!selectedGroup || !groupCallUser || callBusy) return;
+    if (groupCallPhase !== "idle") {
+      toast.error("You're already on a group call.");
+      return;
+    }
+    if (liveGroupCall) {
+      runGroupCall(() => useGroupCall.getState().join(liveGroupCall.callId, groupCallUser));
+      return;
+    }
+    const others = selectedGroup.participants.filter((uid) => uid !== groupCallUser.uid);
+    if (others.length + 1 > GROUP_CALL_MAX) {
+      // Mesh calls top out at six people, so in a bigger group the caller picks who to ring.
+      setCallPicked(new Set());
+      setCallPickerOpen(true);
+      return;
+    }
+    runGroupCall(() => useGroupCall.getState().start(selectedGroup, groupCallUser));
+  }
 
   // 5-tier verification overhaul: fetches full profiles for the group roster's badges — see
   // participantProfiles' own doc comment above for why this is on-demand rather than denormalized.
@@ -1518,7 +1586,8 @@ export default function MessagesClient() {
                         }
                       />
                     )}
-                    {/* PART 5 — voice calls: direct conversations only, not groups yet. */}
+                    {/* PART 5 — voice calls: a 1:1 call from a direct conversation (groups get their
+                        own mesh call button below). */}
                     {otherUid && !blockingMe && (
                       <button
                         type="button"
@@ -1530,6 +1599,25 @@ export default function MessagesClient() {
                       </button>
                     )}
                   </>
+                )}
+
+                {/* Group voice calls: rings every member (up to six on the call), or joins the call
+                    already running in this group. */}
+                {isGroupThread && (
+                  <Tooltip content={liveGroupCall ? "Join group call" : "Start group voice call"}>
+                    <button
+                      type="button"
+                      onClick={handleGroupCallButton}
+                      disabled={callBusy}
+                      aria-label={liveGroupCall ? "Join group call" : "Group voice call"}
+                      data-testid="group-call-button"
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full hover:bg-bg4 disabled:opacity-50 ${
+                        liveGroupCall ? "text-green-500" : "text-muted hover:text-text"
+                      }`}
+                    >
+                      {callBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Phone className="h-4 w-4" />}
+                    </button>
+                  </Tooltip>
                 )}
 
                 {/* DM Feature Overhaul (Part H): "Show a timer icon in thread header when
@@ -1605,6 +1693,30 @@ export default function MessagesClient() {
                   )}
                 </div>
               </div>
+
+              {/* Group voice calls: a call is running in this group and I'm not on it. */}
+              {isGroupThread && liveGroupCall && myGroupCallId !== liveGroupCall.callId && (
+                <div
+                  data-testid="group-call-banner"
+                  className="flex items-center justify-between gap-3 border-b border-bg4 bg-green-600/15 px-4 py-2"
+                >
+                  <p className="flex min-w-0 items-center gap-2 font-noto text-sm text-text">
+                    <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-green-500" />
+                    <span className="truncate">
+                      Group call in progress · {Object.values(liveGroupCall.participants).filter((p) => p.status === "joined").length} on the call
+                    </span>
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleGroupCallButton}
+                    disabled={callBusy || groupCallPhase !== "idle"}
+                    data-testid="group-call-join"
+                    className="shrink-0 rounded-full bg-green-600 px-3.5 py-1 font-noto text-xs font-semibold text-ivory hover:bg-green-500 disabled:opacity-50"
+                  >
+                    Join
+                  </button>
+                </div>
+              )}
 
               {/* DM Feature Overhaul (Part B): the wallpaper (same for every participant, live via
                   onSnapshot on the conversation doc itself) renders as this container's own
@@ -2381,6 +2493,61 @@ export default function MessagesClient() {
             </div>
           </>
         )}
+      </Modal>
+
+      {/* Group voice calls: a group with more than six members can't all be on a mesh call, so the
+          caller picks up to five people to ring. */}
+      <Modal open={callPickerOpen && !!selectedGroup} onClose={() => setCallPickerOpen(false)} title="Who do you want to call?">
+        <p className="mb-3 font-noto text-xs text-muted">
+          Group calls fit {GROUP_CALL_MAX} people including you. Pick up to {GROUP_CALL_MAX - 1}.
+        </p>
+        <div className="flex max-h-72 flex-col gap-1 overflow-y-auto">
+          {selectedGroup?.participants
+            .filter((uid) => uid !== user?.uid)
+            .map((uid) => {
+              const picked = callPicked.has(uid);
+              const name = selectedGroup.participantNames?.[uid] ?? "Member";
+              const full = !picked && callPicked.size >= GROUP_CALL_MAX - 1;
+              return (
+                <button
+                  key={uid}
+                  type="button"
+                  disabled={full}
+                  onClick={() =>
+                    setCallPicked((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(uid)) next.delete(uid);
+                      else next.add(uid);
+                      return next;
+                    })
+                  }
+                  className="flex items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-bg4 disabled:opacity-40"
+                >
+                  <Avatar uid={uid} photoURL={selectedGroup.participantPhotos?.[uid]} displayName={name} size={32} />
+                  <span className="min-w-0 flex-1 truncate font-noto text-sm text-text">{name}</span>
+                  <span
+                    className={`flex h-5 w-5 items-center justify-center rounded-full border ${
+                      picked ? "border-green-500 bg-green-500 text-ivory" : "border-bg4"
+                    }`}
+                  >
+                    {picked && <Check className="h-3 w-3" />}
+                  </span>
+                </button>
+              );
+            })}
+        </div>
+        <button
+          type="button"
+          disabled={callPicked.size === 0 || callBusy}
+          onClick={() => {
+            if (!selectedGroup || !groupCallUser) return;
+            setCallPickerOpen(false);
+            runGroupCall(() => useGroupCall.getState().start(selectedGroup, groupCallUser, Array.from(callPicked)));
+          }}
+          className="btn-primary mt-4 w-full disabled:opacity-50"
+        >
+          Call {callPicked.size > 0 ? `${callPicked.size} ${callPicked.size === 1 ? "person" : "people"}` : ""}
+        </button>
       </Modal>
 
       {selectedGroup && (

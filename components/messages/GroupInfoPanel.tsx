@@ -48,7 +48,8 @@ import {
 import { searchUsers } from "@/lib/firestore";
 import { subscribeToUserStatus, type OnlineStatus } from "@/lib/onlineStatus";
 import { formatTime, getUserProfileUrl, initials, stringToColor } from "@/lib/utils";
-import type { Conversation, DMMessage, UserProfile } from "@/types";
+import { formatCallDuration, getGroupCallHistory } from "@/lib/groupCalls";
+import type { Conversation, DMMessage, GroupCall, UserProfile } from "@/types";
 import WallpaperPicker from "./WallpaperPicker";
 
 export interface GroupInfoPanelProps {
@@ -118,6 +119,8 @@ export default function GroupInfoPanel({
 
   const [media, setMedia] = useState<DMMessage[]>([]);
   const [mediaLoading, setMediaLoading] = useState(true);
+  const [callHistory, setCallHistory] = useState<GroupCall[]>([]);
+  const [callsLoading, setCallsLoading] = useState(true);
 
   const [memberSearch, setMemberSearch] = useState("");
   const [memberActionUid, setMemberActionUid] = useState<string | null>(null);
@@ -152,6 +155,17 @@ export default function GroupInfoPanel({
       .then(setMedia)
       .finally(() => setMediaLoading(false));
   }, [open, conversation.id]);
+
+  // Group voice calls: the last few finished calls. Loaded when the panel opens (a call that ends
+  // while it's open shows up the next time it is).
+  useEffect(() => {
+    if (!open || !user) return;
+    setCallsLoading(true);
+    getGroupCallHistory(conversation.id, user.uid, 5)
+      .then(setCallHistory)
+      .catch(() => setCallHistory([]))
+      .finally(() => setCallsLoading(false));
+  }, [open, conversation.id, user]);
 
   useEffect(() => {
     if (!open) return;
@@ -512,6 +526,45 @@ export default function GroupInfoPanel({
                     >
                       {conversation.description || (isGroupAdmin ? "Add group description" : "No description yet.")}
                     </button>
+                  )}
+                </div>
+
+                {/* ---- Call history (group voice calls) ---- */}
+                <div data-testid="call-history">
+                  <p className="mb-1.5 font-syne text-xs font-semibold uppercase tracking-wide text-muted">Call history</p>
+                  {callsLoading ? (
+                    <div className="flex justify-center py-4">
+                      <Loader2 className="h-4 w-4 animate-spin text-muted" />
+                    </div>
+                  ) : callHistory.length === 0 ? (
+                    <p className="font-noto text-xs text-muted">No calls yet</p>
+                  ) : (
+                    <ul className="flex flex-col gap-1.5">
+                      {callHistory.map((c) => {
+                        const answered = !!c.activeAt;
+                        // You first, then in the order people joined (the caller is always first to join).
+                        const who = Object.values(c.participants)
+                          .filter((p) => p.joinedAt)
+                          .sort((x, y) => (x.uid === user?.uid ? -1 : y.uid === user?.uid ? 1 : (x.joinedAt ?? "").localeCompare(y.joinedAt ?? "")));
+                        return (
+                          <li key={c.callId} data-testid="call-history-item" className="rounded-xl border border-bg4 bg-bg px-3 py-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-noto text-xs font-semibold text-text">
+                                {new Date(c.startedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                                {" · "}
+                                {new Date(c.startedAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+                              </span>
+                              <span className={`font-noto text-xs ${answered ? "text-muted" : "text-clay2"}`}>
+                                {answered ? formatCallDuration(c.duration ?? 0) : "Missed"}
+                              </span>
+                            </div>
+                            <p className="mt-0.5 truncate font-noto text-[11px] text-muted">
+                              {who.map((p) => (p.uid === user?.uid ? "You" : p.displayName)).join(", ")}
+                            </p>
+                          </li>
+                        );
+                      })}
+                    </ul>
                   )}
                 </div>
 

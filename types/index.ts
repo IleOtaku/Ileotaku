@@ -764,6 +764,9 @@ export enum NotificationType {
    * or ever, if they weren't signed in on any tab) surfaced the actual full-screen incoming-call
    * UI — a fallback trail, not the primary "phone is ringing" experience. */
   INCOMING_CALL = "INCOMING_CALL",
+  /** Group voice calls (lib/groupCalls.ts) — a quiet bell entry for whoever was invited but never
+   * picked up, so a call they missed while away is still visible afterwards. */
+  MISSED_CALL = "MISSED_CALL",
   /** Beta feedback: "push notifications to devices like WhatsApp" — a push-only heads-up (no bell
    * entry) that a DM/group message arrived while the recipient wasn't caught up; see lib/dms.ts. */
   NEW_MESSAGE = "NEW_MESSAGE",
@@ -1470,4 +1473,46 @@ export interface PayoutRun {
   lastError?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/* ---------------------------- Group voice calls ---------------------------- */
+
+export type GroupCallStatus = "ringing" | "active" | "ended";
+export type CallParticipantStatus = "invited" | "joined" | "declined" | "left";
+
+export interface CallParticipant {
+  uid: string;
+  displayName: string;
+  photoURL?: string;
+  status: CallParticipantStatus;
+  joinedAt?: string;
+  leftAt?: string;
+  isMuted: boolean;
+}
+
+/** `groupCalls/{callId}` — one mesh WebRTC call inside a group conversation (max 6 people, every
+ * participant connects directly to every other; see lib/groupWebRTC.ts). */
+export interface GroupCall {
+  callId: string;
+  conversationId: string;
+  /** Group name at the time the call started — shown on the incoming-call screen and in history. */
+  conversationName?: string;
+  initiatorUid: string;
+  status: GroupCallStatus;
+  /** Only the people who were invited or joined — at most `maxParticipants` entries. */
+  participants: Record<string, CallParticipant>;
+  /** Every member of the conversation when the call started. Exists only so security rules (and
+   * the live queries) can prove a reader is allowed to see the call: `participants` is a map, and
+   * Firestore can't prove a query against a map key. */
+  participantUids: string[];
+  maxParticipants: number;
+  startedAt: string;
+  /** When a second person first joined — call duration is measured from here, not from ringing. */
+  activeAt?: string;
+  /** Bumped every ~30s by every joined client; a call whose heartbeat has stopped (everyone's
+   * browser crashed / lost network) is treated as over instead of showing "in progress" forever. */
+  heartbeatAt?: string;
+  endedAt?: string;
+  /** Seconds. */
+  duration?: number;
 }
