@@ -2,8 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, Play, X } from "lucide-react";
+import { getVideoThumbnail } from "@/lib/cloudinary";
 import { getConversationMedia } from "@/lib/dms";
+import { DMVideoMessage } from "@/components/messages/DMVideoMessage";
+import ImageViewer from "@/components/messages/ImageViewer";
 import type { DMMessage } from "@/types";
 
 export interface ConversationMediaClientProps {
@@ -15,6 +18,9 @@ export interface ConversationMediaClientProps {
 export default function ConversationMediaClient({ conversationId }: ConversationMediaClientProps) {
   const [media, setMedia] = useState<DMMessage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [imageViewer, setImageViewer] = useState<number | null>(null);
+  const [videoViewer, setVideoViewer] = useState<DMMessage | null>(null);
+  const imageMessages = media.filter((m) => m.mediaType !== "video");
 
   useEffect(() => {
     let cancelled = false;
@@ -45,12 +51,38 @@ export default function ConversationMediaClient({ conversationId }: Conversation
         <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
           {media.map((m) =>
             m.mediaType === "video" ? (
-              <video key={m.id} src={m.mediaUrl} controls className="aspect-square w-full rounded-lg bg-bg3 object-cover" />
+              // A poster tile with a play button — tapping opens our own player, never the browser's controls.
+              <button key={m.id} type="button" onClick={() => setVideoViewer(m)} aria-label="Play video" className="relative aspect-square w-full overflow-hidden rounded-lg bg-bg3">
+                {m.mediaUrl && getVideoThumbnail(m.mediaUrl) !== m.mediaUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img loading="lazy" src={getVideoThumbnail(m.mediaUrl)} alt="" className="h-full w-full object-cover" />
+                )}
+                <span className="absolute inset-0 flex items-center justify-center">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-black/55 text-white">
+                    <Play className="ml-0.5 h-4 w-4" fill="currentColor" />
+                  </span>
+                </span>
+              </button>
             ) : (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img key={m.id} loading="lazy" src={m.mediaUrl} alt="" className="aspect-square w-full rounded-lg bg-bg3 object-cover" />
+              <button key={m.id} type="button" onClick={() => setImageViewer(imageMessages.findIndex((x) => x.id === m.id))} aria-label="Open photo" className="block aspect-square w-full overflow-hidden rounded-lg bg-bg3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img loading="lazy" src={m.mediaUrl} alt="" className="h-full w-full object-cover" />
+              </button>
             )
           )}
+        </div>
+      )}
+      {imageViewer !== null && (
+        <ImageViewer urls={imageMessages.map((m) => m.mediaUrl ?? "")} startIndex={Math.max(0, imageViewer)} onClose={() => setImageViewer(null)} />
+      )}
+      {videoViewer && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/90 p-4" onClick={() => setVideoViewer(null)}>
+          <button type="button" onClick={() => setVideoViewer(null)} aria-label="Close" className="absolute right-4 top-4 text-white">
+            <X className="h-6 w-6" />
+          </button>
+          <div onClick={(e) => e.stopPropagation()}>
+            <DMVideoMessage url={videoViewer.mediaUrl ?? ""} duration={videoViewer.mediaDuration} width={videoViewer.mediaWidth} height={videoViewer.mediaHeight} isOwn={false} />
+          </div>
         </div>
       )}
     </div>

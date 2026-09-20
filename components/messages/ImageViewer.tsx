@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, X } from "lucide-react";
+import { downloadMediaDirect } from "@/lib/videoDownload";
 
 const MIN_SCALE = 1;
 const MAX_SCALE = 6;
@@ -156,7 +157,14 @@ export default function ImageViewer({ urls, startIndex = 0, onClose }: { urls: s
           <X className="h-6 w-6" />
         </button>
         {urls.length > 1 && <span className="font-noto text-sm tabular-nums">{index + 1} / {urls.length}</span>}
-        <span className="w-10" />
+        <button
+          type="button"
+          onClick={() => void downloadMediaDirect(urls[index], `photo-${index + 1}.jpg`)}
+          aria-label="Download photo"
+          className="flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 font-noto text-xs hover:bg-white/20"
+        >
+          <Download className="h-4 w-4" /> Download
+        </button>
       </div>
 
       <div

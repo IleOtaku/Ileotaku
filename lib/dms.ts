@@ -12,6 +12,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -592,9 +593,10 @@ export function subscribeToConversation(
       // infrastructure exists on this project today — see BUGS_FIXED.md); for now this is the
       // full disappearing-messages experience from every viewer's perspective, since a message
       // with no one left able to see it is functionally gone even before it's physically deleted.
+      // A message someone chose to "Keep" (isKept) never expires, whatever its expiresAt says.
       const messages = snap.docs
         .map((d) => ({ id: d.id, ...d.data() }) as DMMessage)
-        .filter((m) => !m.expiresAt || new Date(m.expiresAt).getTime() > now);
+        .filter((m) => m.isKept === true || !m.expiresAt || new Date(m.expiresAt).getTime() > now);
       callback(messages);
     },
     onError
@@ -603,6 +605,43 @@ export function subscribeToConversation(
 
 function messageRef(conversationId: string, messageId: string) {
   return doc(db, CONVERSATIONS, conversationId, "messages", messageId);
+}
+
+/** "Keep Message" — only offered in conversations with disappearing messages on. Adds `uid` to the
+ * message's `keptBy` and marks it `isKept`, which exempts it from the disappearing timer for everyone (see
+ * subscribeToConversation). Done in a transaction so two people keeping/unkeeping at once can't leave
+ * `isKept` disagreeing with `keptBy`. */
+export async function keepMessage(conversationId: string, messageId: string, uid: string): Promise<void> {
+  try {
+    await runTransaction(db, async (tx) => {
+      const ref = messageRef(conversationId, messageId);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) throw new Error("Message not found.");
+      const keptBy = new Set<string>((snap.data().keptBy as string[] | undefined) ?? []);
+      keptBy.add(uid);
+      tx.update(ref, { isKept: true, keptBy: Array.from(keptBy) });
+    });
+  } catch (error) {
+    await logError(error, { operation: "keepMessage", conversationId, messageId });
+    throw error;
+  }
+}
+
+/** Removes `uid` from `keptBy`; the message only stops being kept (isKept false, so the disappearing timer
+ * applies again) once NOBODY is keeping it any more. */
+export async function unkeepMessage(conversationId: string, messageId: string, uid: string): Promise<void> {
+  try {
+    await runTransaction(db, async (tx) => {
+      const ref = messageRef(conversationId, messageId);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) return;
+      const remaining = ((snap.data().keptBy as string[] | undefined) ?? []).filter((id) => id !== uid);
+      tx.update(ref, { keptBy: remaining, isKept: remaining.length > 0 });
+    });
+  } catch (error) {
+    await logError(error, { operation: "unkeepMessage", conversationId, messageId });
+    throw error;
+  }
 }
 
 /** Edits a message's own text — the sender only (enforced in firestore.rules, not just here). */

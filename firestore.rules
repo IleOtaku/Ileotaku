@@ -587,6 +587,14 @@ service cloud.firestore {
             || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["deletedFor"])
             // React / un-react — any participant.
             || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["reactions"])
+            // Keep / unkeep a message in a disappearing chat (lib/dms.ts keepMessage/unkeepMessage) — any
+            // participant, touching only isKept/keptBy, and only ever adding or removing THEIR OWN uid
+            // in keptBy (nobody can "keep" on someone else's behalf), with isKept staying a boolean.
+            || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(["isKept", "keptBy"])
+              && request.resource.data.isKept is bool
+              && request.resource.data.keptBy is list
+              && request.resource.data.keptBy.toSet().difference(resource.data.get("keptBy", []).toSet()).hasOnly([request.auth.uid])
+              && resource.data.get("keptBy", []).toSet().difference(request.resource.data.keptBy.toSet()).hasOnly([request.auth.uid]))
           );
       }
     }

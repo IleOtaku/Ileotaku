@@ -236,7 +236,7 @@ export default function SettingsTab() {
     }
   }
 
-  /** PART 8 — video watermarking toggle. */
+  /** "Add watermark to downloads" toggle (applied at download time — see lib/videoDownload.ts). */
   async function handleVideoWatermark(value: boolean) {
     if (!user || !profile?.isCreator) return;
     try {
@@ -761,16 +761,18 @@ export default function SettingsTab() {
               share to the feed from now on.
             </p>
 
-            {/* PART 8 — video watermarking. Default ON (absent reads as true — see
-                creatorSettings.videoWatermark's own doc comment in types/index.ts). */}
+            {/* Default ON (absent reads as true — see creatorSettings.videoWatermark's own doc
+                comment in types/index.ts). Applied when someone DOWNLOADS the video, never at upload. */}
             <Toggle
               checked={profile?.creatorSettings?.videoWatermark !== false}
               onChange={handleVideoWatermark}
-              label="Add ÍléOtaku watermark to my videos"
+              label="Add watermark to downloads"
             />
             <p className="font-noto text-[11px] text-muted">
-              Stamps a small ÍléOtaku mark onto every feed video you upload from now on. Turn this
-              off if you already add your own watermark.
+              When someone downloads one of your feed videos, the ÍléOtaku eye and your @handle are
+              stamped in the corner of their copy. Your uploaded video is never changed, and downloads
+              from private messages are never watermarked. Turn this off to let people save the
+              clean original.
             </p>
           </div>
         </section>

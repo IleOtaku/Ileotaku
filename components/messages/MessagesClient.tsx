@@ -7,10 +7,12 @@ import toast from "react-hot-toast";
 import {
   Archive,
   ArrowLeft,
+  Bookmark,
   Check,
   ChevronRight,
   Clock,
   Copy,
+  Download,
   ImagePlus,
   Loader2,
   MoreHorizontal,
@@ -50,7 +52,9 @@ import { saveSticker } from "@/lib/stickers";
 import { checkMicrophonePermission, newCallId, WebRTCCall } from "@/lib/webrtc";
 import SharePickerModal, { type SharedManga, type SharedPost } from "./SharePickerModal";
 import StickerPicker from "./StickerPicker";
+import KeptMessagesPanel from "./KeptMessagesPanel";
 import MediaPreviewModal, { type MediaPreviewResult } from "./MediaPreviewModal";
+import { downloadMediaDirect } from "@/lib/videoDownload";
 import PendingBubble, { type PendingSend } from "./PendingBubble";
 import { VoiceMicButton, VoicePreviewBar, VoiceRecordingBar } from "./VoiceNoteBars";
 import { useVoiceNote, type VoiceDraft } from "@/hooks/useVoiceNote";
@@ -66,6 +70,7 @@ import {
   deleteMessage,
   editMessage,
   hideConversationForUser,
+  keepMessage,
   markDMRead,
   removeReaction,
   sendDM,
@@ -75,6 +80,7 @@ import {
   subscribeToConversations,
   subscribeToTyping,
   unarchiveConversation,
+  unkeepMessage,
   type SendDMOptions,
 } from "@/lib/dms";
 import { getUserProfile, searchUsers } from "@/lib/firestore";
@@ -233,6 +239,7 @@ export default function MessagesClient() {
   // Beta feedback: "...and also a clear conversation button" — a small menu on the open thread's
   // own header, distinct from the sidebar row's hide/delete-conversation icon.
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+  const [keptPanelOpen, setKeptPanelOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
   // 5-tier verification overhaul: the group roster only denormalizes participantNames/Photos
   // (strings) onto the Conversation doc, not verification data — fetched on demand instead of a
@@ -1092,6 +1099,32 @@ export default function MessagesClient() {
     textareaRef.current?.focus();
   }
 
+  /** "Keep Message": exempts one message from the disappearing timer (only offered in chats with disappearing
+   * messages on). If someone else already kept it, this adds you to the keepers rather than toggling it off. */
+  async function handleToggleKeep(m: DMMessage) {
+    closeMenu();
+    if (!user || !selectedId) return;
+    const keptByMe = m.keptBy?.includes(user.uid) ?? false;
+    try {
+      if (keptByMe) await unkeepMessage(selectedId, m.id, user.uid);
+      else await keepMessage(selectedId, m.id, user.uid);
+      toast.success(keptByMe ? "Unkept." : "Kept — it won't disappear.");
+    } catch {
+      toast.error("Couldn't update that message.");
+    }
+  }
+
+  /** DM downloads are ALWAYS the plain original — no watermark, ever: private conversations stay private. */
+  async function handleDownloadMessage(m: DMMessage) {
+    closeMenu();
+    const urls = m.mediaUrls && m.mediaUrls.length > 0 ? m.mediaUrls : m.mediaUrl ? [m.mediaUrl] : [];
+    const ext = m.mediaType === "video" ? "mp4" : m.mediaType === "voice" ? "webm" : "jpg";
+    for (let i = 0; i < urls.length; i++) {
+      const name = m.mediaType === "file" && m.mediaFileName ? m.mediaFileName : `${m.mediaType ?? "media"}-${m.id.slice(0, 6)}${urls.length > 1 ? `-${i + 1}` : ""}.${ext}`;
+      await downloadMediaDirect(urls[i], name);
+    }
+  }
+
   async function handleCopy(m: DMMessage) {
     closeMenu();
     try {
@@ -1533,6 +1566,19 @@ export default function MessagesClient() {
                         >
                           <Settings className="h-4 w-4" /> Chat Settings
                         </button>
+                        {/* Only when disappearing messages are on — otherwise there is nothing to keep. */}
+                        {selected?.disappearingMessages?.enabled && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setHeaderMenuOpen(false);
+                              setKeptPanelOpen(true);
+                            }}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-noto text-sm text-text hover:bg-bg4"
+                          >
+                            <Bookmark className="h-4 w-4" /> Kept Messages
+                          </button>
+                        )}
                         {/* DM Feature Overhaul (Part I). */}
                         <button
                           type="button"
@@ -1655,6 +1701,11 @@ export default function MessagesClient() {
                     // text on the near-black chat background. For those the chosen color becomes the
                     // text/outline color itself. `--bubble-color` feeds style 9's glow.
                     const isOutlineStyle = bubbleStyleNum === 6 || bubbleStyleNum === 10;
+                    // Telegram-style media: a photo/video is the bubble itself (edge to edge, its caption laid
+                    // over it) instead of sitting inside a padded text bubble. `captionInMedia` = the caption
+                    // text is drawn by the media component, so it isn't rendered a second time below.
+                    const captionInMedia = m.mediaType === "image" || m.mediaType === "video";
+                    const isVisualMedia = captionInMedia && !m.replyTo;
                     const bubbleInlineStyle = bubbleColor
                       ? ({
                           background: bubbleColor,
@@ -1697,7 +1748,13 @@ export default function MessagesClient() {
                             onTouchEnd={handleTouchEnd}
                             onTouchMove={handleTouchEnd}
                             style={bubbleInlineStyle}
-                            className={`relative w-full px-4 py-2 font-noto text-sm ${bubbleShape}`}
+                            data-testid="dm-bubble"
+                            data-message-id={m.id}
+                            className={`relative w-full font-noto text-sm ${
+                              isVisualMedia
+                                ? `overflow-hidden rounded-2xl ${isOwn ? "rounded-tr-sm bg-clay text-ivory" : "rounded-tl-sm bg-bg3 text-text"}`
+                                : `px-4 py-2 ${bubbleShape}`
+                            }`}
                           >
                             {m.replyTo && (
                               <div
@@ -1738,21 +1795,40 @@ export default function MessagesClient() {
                             ) : (
                               <>
                                 <DMMediaContent message={m} isOwn={isOwn} />
-                                {m.text && <MentionText text={m.text} />}
+                                {m.text && !captionInMedia && <MentionText text={m.text} />}
                                 {/* Beta feedback: "Links should be clickable, show the preview
                                     and should be formatted to be shorter." Clickable+shortened is
                                     MentionText's own job above; this is the preview itself. */}
-                                {m.text && extractFirstUrl(m.text) && (
+                                {m.text && !captionInMedia && extractFirstUrl(m.text) && (
                                   <LinkPreviewCard url={extractFirstUrl(m.text)!} className="mt-1.5" />
                                 )}
-                                <span className="mt-1 flex items-center gap-1 text-[10px]">
+                                <span className={`flex items-center gap-1 text-[10px] ${isVisualMedia ? "px-3 pb-1.5 pt-0.5" : "mt-1"}`}>
                                   {/* Beta feedback bug: "Show exact time stamps of messages, not
                                       'about 2 minutes ago'." A day separator already labels which
                                       day each group of messages is from (see dayLabel below), so
                                       a per-message clock time is unambiguous on its own. */}
                                   <span className={isOwn ? "text-inherit opacity-70" : "text-muted"}>{formatExactTime(m.createdAt)}</span>
                                   {m.isEdited && <span className={isOwn ? "text-inherit opacity-70" : "text-muted"}>(edited)</span>}
-                                  {m.expiresAt && <Clock className="h-2.5 w-2.5 opacity-60" />}
+                                  {m.expiresAt && !m.isKept && <Clock className="h-2.5 w-2.5 opacity-60" />}
+                                  {/* Kept-message bookmark: ONLY in chats with disappearing messages on, never anywhere
+                                      else. Solid = kept (tap to unkeep); outline (on hover) = tap to keep. */}
+                                  {selected?.disappearingMessages?.enabled &&
+                                    (m.isKept ? (
+                                      <Tooltip content="Kept — won't disappear">
+                                        <button type="button" onClick={() => handleToggleKeep(m)} aria-label="Kept — won't disappear" className="ml-auto opacity-90" data-testid="kept-bookmark">
+                                          <Bookmark className="h-3 w-3" fill="currentColor" />
+                                        </button>
+                                      </Tooltip>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleToggleKeep(m)}
+                                        aria-label="Keep message"
+                                        className="ml-auto opacity-0 transition-opacity group-hover:opacity-60"
+                                      >
+                                        <Bookmark className="h-3 w-3" />
+                                      </button>
+                                    ))}
                                 </span>
                               </>
                             )}
@@ -1834,6 +1910,35 @@ export default function MessagesClient() {
                               >
                                 <Copy className="h-4 w-4" /> Copy
                               </button>
+                              {/* Download — media only, always the plain original (never watermarked). */}
+                              {(m.mediaType === "image" || m.mediaType === "video" || m.mediaType === "voice" || m.mediaType === "file" || m.mediaType === "gif") &&
+                                (m.mediaUrl || (m.mediaUrls?.length ?? 0) > 0) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDownloadMessage(m)}
+                                    className="flex items-center gap-2 rounded-lg px-3 py-2 text-left font-noto text-sm text-text hover:bg-bg4"
+                                  >
+                                    <Download className="h-4 w-4" /> Download
+                                  </button>
+                                )}
+                              {/* Keep Message — ONLY in conversations with disappearing messages on. */}
+                              {selected?.disappearingMessages?.enabled && !m.isSystem && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleKeep(m)}
+                                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-left font-noto text-sm text-text hover:bg-bg4"
+                                >
+                                  {m.keptBy?.includes(user.uid) ? (
+                                    <>
+                                      <Bookmark className="h-4 w-4" fill="currentColor" /> Unkeep Message
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Bookmark className="h-4 w-4" /> Keep Message
+                                    </>
+                                  )}
+                                </button>
+                              )}
                               {/* PART 6 — sticker packs: "Long press on received sticker →
                                   'Save Sticker' option." */}
                               {m.mediaType === "sticker" && m.mediaUrl && (
@@ -2077,6 +2182,16 @@ export default function MessagesClient() {
             </>
           )}
 
+          {selected?.disappearingMessages?.enabled && (
+            <KeptMessagesPanel
+              open={keptPanelOpen}
+              onClose={() => setKeptPanelOpen(false)}
+              messages={messages}
+              currentUid={user.uid}
+              nameFor={(id) => (id === user.uid ? "You" : isGroupThread ? (selected?.participantNames?.[id] ?? "Someone") : displayName)}
+              onUnkeep={handleToggleKeep}
+            />
+          )}
           <MediaPreviewModal files={previewFiles} kind={previewKind} onCancel={() => setPreviewFiles(null)} onSend={handlePreviewSend} />
           <InAppCamera open={cameraOpen} onClose={() => setCameraOpen(false)} onCapture={handleCameraCapture} />
           <GifPicker open={gifPickerOpen} onClose={() => setGifPickerOpen(false)} onSelect={handleGifSelected} />

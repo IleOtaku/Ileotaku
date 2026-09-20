@@ -8,6 +8,8 @@ import {
   Eye,
   Heart,
   MessageCircle,
+  Download,
+  Loader2,
   MoreHorizontal,
   Rocket,
   Share2,
@@ -27,6 +29,7 @@ import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import { getOptimizedImageUrl, getVideoThumbnail } from "@/lib/cloudinary";
 import { deletePost, incrementPostViews, incrementViewCount, likePost, trackWatchTime } from "@/lib/creatorFeed";
 import { useAuth } from "@/hooks/useAuth";
+import { usePostDownload } from "@/hooks/usePostDownload";
 import { useFeedAudio } from "@/lib/audioContext";
 import { formatPostTimestamp } from "@/lib/utils";
 import ReportButton from "@/components/social/ReportButton";
@@ -111,6 +114,7 @@ function FeedPostCard({ post, onDeleted }: FeedPostCardProps) {
   const [boostLevel, setBoostLevel] = useState(post.boostLevel ?? 0);
   const [boostExpiresAt, setBoostExpiresAt] = useState(post.boostExpiresAt);
   const [videoProgress, setVideoProgress] = useState(0);
+  const { download: downloadPost, downloading: downloadingPost, canDownload } = usePostDownload(post);
   const cardRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -324,6 +328,19 @@ function FeedPostCard({ post, onDeleted }: FeedPostCardProps) {
           </button>
           {menuOpen && (
             <div className="absolute right-0 top-9 z-10 w-44 overflow-hidden rounded-xl border border-bg4 bg-bg2 p-1 shadow-xl">
+              {canDownload && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    void downloadPost();
+                  }}
+                  disabled={downloadingPost}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-noto text-xs text-text hover:bg-bg3 disabled:opacity-50"
+                >
+                  {downloadingPost ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Download
+                </button>
+              )}
               {isOwnPost ? (
                 <>
                   <button

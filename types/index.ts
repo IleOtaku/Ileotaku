@@ -194,9 +194,10 @@ export interface UserProfile {
   /** Per-creator settings that aren't specific to any one work — kept as its own nested object
    * (rather than flat top-level fields) so it reads as one clearly-creator-only bundle. */
   creatorSettings?: {
-    /** Beta feedback: "downloaded videos should have our own unique watermark." Default ON
-     * (absent/undefined reads as true) so a creator who never visits this setting is still
-     * protected; an explicit `false` opts out for a creator who applies their own watermark. */
+    /** Beta feedback: "downloaded videos should have our own unique watermark." Applied when a
+     * video is DOWNLOADED (lib/videoDownload.ts), never at upload. Default ON (absent/undefined
+     * reads as true) so a creator who never visits this setting is still protected; an explicit
+     * `false` lets people download the clean original. */
     videoWatermark?: boolean;
   };
 
@@ -991,6 +992,11 @@ export interface DMMessage {
   mediaType?: DMMediaType;
   /** Cloudinary secure_url for image/video/voice/file/sticker; the GIF's own url for `gif`. */
   mediaUrl?: string;
+  /** "Keep Message" (disappearing chats only): true while at least one participant has kept this
+   * message. A kept message ignores the conversation's disappearing timer — it never expires. */
+  isKept?: boolean;
+  /** Uids of everyone who kept it; it stays kept until this is empty. */
+  keptBy?: string[];
   /** A photo message with SEVERAL images: all of their urls, in order (`mediaUrl` stays the first, so
    * anything that only knows about one image keeps working). Rendered as a 2x2 grid. */
   mediaUrls?: string[];

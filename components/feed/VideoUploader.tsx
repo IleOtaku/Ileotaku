@@ -4,7 +4,6 @@ import { useRef, useState } from "react";
 import toast from "react-hot-toast";
 import { Loader2, Video, X } from "lucide-react";
 import { uploadPostVideo, type UploadedVideo } from "@/lib/creatorFeed";
-import { addWatermarkToVideo } from "@/lib/videoWatermark";
 import { useAuth } from "@/hooks/useAuth";
 
 export interface VideoUploaderProps {
@@ -12,22 +11,17 @@ export interface VideoUploaderProps {
   onChange: (video: UploadedVideo | null) => void;
 }
 
-/** Video-attach control for the post composer — picks a local file, uploads it (plus a derived
- * poster frame) to Storage via uploadPostVideo(), and hands the resulting {url, posterUrl,
+/** Video-attach control for the post composer — picks a local file, uploads it AS-IS (no processing, no
+ * watermark: that only happens when someone downloads it, see lib/videoDownload.ts) plus a derived
+ * poster frame to Storage via uploadPostVideo(), and hands the resulting {url, posterUrl,
  * duration} back to the composer once done. Shows a local <video> preview immediately (from an
  * object URL) so the creator sees their clip while the upload is still in flight. */
 export default function VideoUploader({ value, onChange }: VideoUploaderProps) {
-  const { user, profile } = useAuth();
+  const { user } = useAuth();
   const [localPreview, setLocalPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
-  // PART 8 — video watermarking: "Adding ÍléOtaku watermark... 45%" vs the plain upload-percent
-  // label, so a creator can tell which of the two (sequential) phases is actually in progress.
-  const [watermarking, setWatermarking] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  // Default ON — an absent creatorSettings.videoWatermark (every account before this setting
-  // existed) reads as "watermark on", matching the type's own doc comment in types/index.ts.
-  const watermarkEnabled = profile?.creatorSettings?.videoWatermark !== false;
 
   async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -39,22 +33,7 @@ export default function VideoUploader({ value, onChange }: VideoUploaderProps) {
     setUploading(true);
     setProgress(0);
     try {
-      let fileToUpload: File = file;
-      if (watermarkEnabled) {
-        setWatermarking(true);
-        try {
-          const watermarked = await addWatermarkToVideo(file, "ÍléOtaku", setProgress);
-          fileToUpload = new File([watermarked], file.name.replace(/\.[^.]+$/, ".webm"), { type: "video/webm" });
-        } catch {
-          // Best-effort — a watermarking failure (an unsupported browser, mainly) shouldn't block
-          // the post itself; falls back to uploading the original, unwatermarked file.
-          toast.error("Couldn't add a watermark — uploading the original video instead.");
-        } finally {
-          setWatermarking(false);
-        }
-      }
-      setProgress(0);
-      const uploaded = await uploadPostVideo(user.uid, fileToUpload, setProgress);
+      const uploaded = await uploadPostVideo(user.uid, file, setProgress);
       onChange(uploaded);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't upload this video.");
@@ -87,7 +66,7 @@ export default function VideoUploader({ value, onChange }: VideoUploaderProps) {
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/60">
             <Loader2 className="h-6 w-6 animate-spin text-ivory" />
             <span className="font-noto text-xs text-ivory">
-              {watermarking ? `Adding ÍléOtaku watermark... ${progress}%` : `Uploading… ${progress}%`}
+              Uploading… {progress}%
             </span>
           </div>
         )}
@@ -114,9 +93,6 @@ export default function VideoUploader({ value, onChange }: VideoUploaderProps) {
       >
         <Video className="h-4 w-4" /> Add video
       </button>
-      {watermarkEnabled && (
-        <p className="font-noto text-[11px] text-muted">A watermark is added to protect your content.</p>
-      )}
       <input
         ref={fileInputRef}
         type="file"

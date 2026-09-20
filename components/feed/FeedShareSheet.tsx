@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { BookImage, Check, Copy, Download, Link2, Loader2, Send, Users, X } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { useAuth } from "@/hooks/useAuth";
+import { usePostDownload } from "@/hooks/usePostDownload";
 import { getConversations, sendDM, startConversation } from "@/lib/dms";
 import { searchUsers } from "@/lib/firestore";
 import { createStory } from "@/lib/stories";
@@ -29,7 +30,6 @@ export default function FeedShareSheet({ post, open, onClose }: FeedShareSheetPr
   const [sendingTo, setSendingTo] = useState<string | null>(null);
   const [postingStory, setPostingStory] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [downloading, setDownloading] = useState(false);
   // Beta feedback: "Sharing to users should also have share to group feature." A simple tab next
   // to the people search rather than a second search box — most accounts are in only a handful
   // of groups, so a plain list is faster to scan than typing a group name.
@@ -38,11 +38,10 @@ export default function FeedShareSheet({ post, open, onClose }: FeedShareSheetPr
   const [sendingToGroup, setSendingToGroup] = useState<string | null>(null);
 
   const shareUrl = typeof window !== "undefined" ? `${window.location.origin}/feed/${post.id}` : "";
-  // Beta feedback: "Creators should be able to stop people from downloading their videos, pics,
-  // or posts by toggling it in profile settings." The author's own downloads are never blocked —
-  // this only hides the button for other viewers.
-  const downloadsAllowed = !post.disableDownloads || post.uid === user?.uid;
-  const downloadUrl = downloadsAllowed ? post.videoUrl || post.attachments?.[0] : undefined;
+  // Same download path as the post's three-dot menu (usePostDownload): honours "downloads disabled"
+  // (the author's own downloads are never blocked) and adds the watermark to videos at download time
+  // unless the creator turned it off — so this can't be used to get an unmarked copy.
+  const { download: handleDownload, downloading, canDownload: downloadUrl } = usePostDownload(post);
 
   useEffect(() => {
     if (!open) {
@@ -102,32 +101,6 @@ export default function FeedShareSheet({ post, open, onClose }: FeedShareSheetPr
       toast.error("Couldn't send that.");
     } finally {
       setSendingToGroup(null);
-    }
-  }
-
-  /** Beta feedback: "Share post: add Download button... uses browser download API for
-   * images/videos." Fetches the media as a blob rather than a plain `<a download>` — Cloudinary
-   * URLs are cross-origin, and a browser only honors the `download` attribute on a same-origin
-   * (or explicitly CORS-permissive) resource; a blob: URL is always same-origin to the page that
-   * created it, so this works regardless of what the origin server sends. */
-  async function handleDownload() {
-    if (!downloadUrl) return;
-    setDownloading(true);
-    try {
-      const res = await fetch(downloadUrl);
-      const blob = await res.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = `ileotaku-${post.id}${post.videoUrl ? ".mp4" : ".jpg"}`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(blobUrl);
-    } catch {
-      toast.error("Couldn't download this.");
-    } finally {
-      setDownloading(false);
     }
   }
 
