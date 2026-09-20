@@ -117,9 +117,14 @@ service cloud.firestore {
       allow update: if (isOwner(uid) || isAdmin() ||
         (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followers', 'following'])))
         && (request.resource.data.get('handle', null) == resource.data.get('handle', null)
+          // existsAfter/getAfter, not exists/get: claimHandle() (lib/handles.ts) reserves the new handle and updates
+          // this profile in ONE transaction, and exists()/get() only see the database as it was BEFORE that commit —
+          // so the reservation it was creating never counted and every handle change was refused. The *After
+          // versions read the state the commit would leave behind, which still requires a reservation that exists
+          // and belongs to this uid (a handle nobody reserved, or someone else's, is still refused).
           || (request.resource.data.get('handle', null) != null
-            && exists(/databases/$(database)/documents/handles/$(request.resource.data.handle.lower()))
-            && get(/databases/$(database)/documents/handles/$(request.resource.data.handle.lower())).data.uid == uid));
+            && existsAfter(/databases/$(database)/documents/handles/$(request.resource.data.handle.lower()))
+            && getAfter(/databases/$(database)/documents/handles/$(request.resource.data.handle.lower())).data.uid == uid));
       // Sprint 9d: self-service account deletion (deleteMyAccount() in lib/auth.ts) needs the
       // owner to be able to delete their own profile document, not just an admin moderating
       // someone else's — confirmed live during testing that this was previously owner-deletion's
@@ -520,7 +525,12 @@ service cloud.firestore {
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(
             ["lastMessage", "lastMessageAt", "lastSenderId", "unreadCounts",
              "name", "description", "photoURL", "participants", "participantNames",
-             "participantPhotos", "adminUids", "hiddenFor", "inviteCode", "memberTags"])
+             "participantPhotos", "adminUids", "hiddenFor", "inviteCode", "memberTags",
+             // sendDM() clears archivedBy in the SAME write that bumps lastMessage/unreadCounts (a new message
+             // brings an archived chat back). `archivedBy` was only ever allowed on its own (branch below), so once
+             // ANY member had archived a chat, every message sent in it saved fine but its follow-up conversation
+             // update was refused — stale preview, no unread badges, the chat never un-archived.
+             "archivedBy"])
           || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["archivedBy"])
           || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["nicknames"])
           || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["mutedBy"])

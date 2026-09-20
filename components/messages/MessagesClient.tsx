@@ -1623,7 +1623,7 @@ export default function MessagesClient() {
                 {/* Group voice calls: rings every member (up to six on the call), or joins the call
                     already running in this group. */}
                 {isGroupThread && (
-                  <Tooltip content={liveGroupCall ? "Join group call" : "Start group voice call"}>
+                  <Tooltip position="bottom" content={liveGroupCall ? "Join group call" : "Start group voice call"}>
                     <button
                       type="button"
                       onClick={handleGroupCallButton}
@@ -1642,7 +1642,7 @@ export default function MessagesClient() {
                 {/* DM Feature Overhaul (Part H): "Show a timer icon in thread header when
                     disappearing messages is active." */}
                 {selected?.disappearingMessages?.enabled && (
-                  <Tooltip content="Disappearing messages are on">
+                  <Tooltip position="bottom" content="Disappearing messages are on">
                     <span className="shrink-0 text-muted">
                       <Clock className="h-4 w-4" />
                     </span>
