@@ -695,7 +695,9 @@ export default function MessagesClient() {
   function handleGroupCallButton() {
     if (!selectedGroup || !groupCallUser || callBusy) return;
     if (groupCallPhase !== "idle") {
-      toast.error("You're already on a group call.");
+      // Already on THIS call (it's just minimized): bring it back instead of complaining.
+      if (liveGroupCall && myGroupCallId === liveGroupCall.callId) useGroupCall.getState().setMinimized(false);
+      else toast.error("You're already on a group call.");
       return;
     }
     if (liveGroupCall) {

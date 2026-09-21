@@ -8,6 +8,8 @@ import { useActiveCall } from "@/hooks/useActiveCall";
 import { useGroupCall } from "@/hooks/useGroupCall";
 import { shouldRingFor, subscribeToLiveGroupCalls, type CallUser } from "@/lib/groupCalls";
 import type { GroupCall } from "@/types";
+import { useRingtone } from "@/hooks/useRingtone";
+import GroupCallPip from "./GroupCallPip";
 import GroupCallScreen from "./GroupCallScreen";
 import IncomingGroupCall from "./IncomingGroupCall";
 
@@ -28,6 +30,7 @@ export default function GroupCallHost() {
   const muted = useGroupCall((s) => s.muted);
   const speakerOn = useGroupCall((s) => s.speakerOn);
   const dismissed = useGroupCall((s) => s.dismissedRings);
+  const minimized = useGroupCall((s) => s.minimized);
   const inDirectCall = useActiveCall((s) => !!s.callId);
 
   const [liveCalls, setLiveCalls] = useState<GroupCall[]>([]);
@@ -65,6 +68,9 @@ export default function GroupCallHost() {
     if (!user && useGroupCall.getState().phase !== "idle") useGroupCall.getState().leave().catch(() => {});
   }, [user]);
 
+  // The caller hears the ringback until somebody picks up — whether the call is full-screen or minimized.
+  useRingtone(call && call.status === "ringing" && user && call.participants[user.uid]?.status === "joined" ? "outgoing" : null);
+
   const ringing =
     user && phase === "idle" && !inDirectCall
       ? liveCalls.find((c) => !dismissed.includes(c.callId) && shouldRingFor(c, user.uid, now))
@@ -92,7 +98,19 @@ export default function GroupCallHost() {
           onTimeout={() => useGroupCall.getState().dismissRing(ringing.callId)}
         />
       )}
-      {phase !== "idle" && user && (
+      {phase !== "idle" && user && minimized && (
+        <GroupCallPip
+          call={call}
+          localUid={user.uid}
+          speaking={speaking}
+          peerStates={peerStates}
+          muted={muted}
+          onToggleMute={() => useGroupCall.getState().toggleMute()}
+          onEnd={() => useGroupCall.getState().leave()}
+          onExpand={() => useGroupCall.getState().setMinimized(false)}
+        />
+      )}
+      {phase !== "idle" && user && !minimized && (
         <GroupCallScreen
           call={call}
           localUid={user.uid}
@@ -103,6 +121,7 @@ export default function GroupCallHost() {
           onToggleMute={() => useGroupCall.getState().toggleMute()}
           onToggleSpeaker={() => useGroupCall.getState().toggleSpeaker()}
           onEnd={() => useGroupCall.getState().leave()}
+          onMinimize={() => useGroupCall.getState().setMinimized(true)}
         />
       )}
     </>

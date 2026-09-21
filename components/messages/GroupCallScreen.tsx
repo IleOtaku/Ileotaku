@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Mic, MicOff, PhoneOff, Volume2, VolumeX } from "lucide-react";
+import { Mic, MicOff, Minimize2, PhoneOff, Volume2, VolumeX } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Tooltip } from "@/components/ui/Tooltip";
-import { useRingtone } from "@/hooks/useRingtone";
 import { cn } from "@/lib/utils";
 import { formatCallDuration } from "@/lib/groupCalls";
 import type { PeerState } from "@/lib/groupWebRTC";
@@ -21,6 +20,8 @@ interface GroupCallScreenProps {
   onToggleMute: () => void;
   onToggleSpeaker: () => void;
   onEnd: () => void;
+  /** Shrinks the call to the floating bar so the rest of the app is usable while it runs. */
+  onMinimize: () => void;
 }
 
 /** What to print under a participant's name. */
@@ -55,10 +56,15 @@ export default function GroupCallScreen({
   onToggleMute,
   onToggleSpeaker,
   onEnd,
+  onMinimize,
 }: GroupCallScreenProps) {
   const [now, setNow] = useState(() => Date.now());
-  // The caller hears the ringback while nobody has picked up yet.
-  useRingtone(call && call.status === "ringing" && call.participants[localUid]?.status === "joined" ? "outgoing" : null);
+  // Escape tucks the call away, the same as the minimize button.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onMinimize();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onMinimize]);
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
@@ -100,6 +106,15 @@ export default function GroupCallScreen({
             )}
           </p>
         </div>
+        <button
+          type="button"
+          onClick={onMinimize}
+          aria-label="Minimize call"
+          data-testid="group-call-minimize"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-bg4 text-text hover:bg-bg3"
+        >
+          <Minimize2 className="h-5 w-5" />
+        </button>
       </header>
 
       <div className="flex-1 overflow-y-auto px-4 pb-4">

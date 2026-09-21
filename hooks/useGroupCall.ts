@@ -30,6 +30,9 @@ import type { Conversation, GroupCall } from "@/types";
  */
 interface GroupCallState {
   phase: "idle" | "connecting" | "in-call";
+  /** Showing the small floating bar instead of the full-screen call. Purely a view state: the mic, the peer
+   * connections and the signaling live in this store and keep running either way. */
+  minimized: boolean;
   callId: string | null;
   call: GroupCall | null;
   peerStates: Record<string, PeerState>;
@@ -45,6 +48,7 @@ interface GroupCallState {
   leave: () => Promise<void>;
   decline: (call: GroupCall, user: CallUser) => Promise<void>;
   dismissRing: (callId: string) => void;
+  setMinimized: (minimized: boolean) => void;
   toggleMute: () => void;
   toggleSpeaker: () => void;
 }
@@ -72,6 +76,7 @@ async function teardownLocal(): Promise<void> {
   await m?.destroy();
   useGroupCall.setState({
     phase: "idle",
+    minimized: false,
     callId: null,
     call: null,
     peerStates: {},
@@ -93,7 +98,7 @@ async function openSession(user: CallUser, enter: () => Promise<{ callId: string
   }
 
   localUser = user;
-  useGroupCall.setState({ phase: "connecting", muted: false, speakerOn: true, peerStates: {}, speaking: {} });
+  useGroupCall.setState({ phase: "connecting", minimized: false, muted: false, speakerOn: true, peerStates: {}, speaking: {} });
   const m = new GroupCallManager(user.uid, {
     onPeerStates: (peerStates) => useGroupCall.setState({ peerStates }),
     onSpeaking: (speaking) => useGroupCall.setState({ speaking }),
@@ -166,6 +171,7 @@ function onCallSnapshot(callId: string, call: GroupCall | null): void {
 
 export const useGroupCall = create<GroupCallState>((set, get) => ({
   phase: "idle",
+  minimized: false,
   callId: null,
   call: null,
   peerStates: {},
@@ -198,6 +204,8 @@ export const useGroupCall = create<GroupCallState>((set, get) => ({
     set((s) => ({ dismissedRings: [...s.dismissedRings, call.callId] }));
     await declineGroupCall(call.callId, user).catch((e) => console.error("[groupCall] decline failed:", e));
   },
+
+  setMinimized: (minimized) => set({ minimized }),
 
   dismissRing: (callId) => set((s) => (s.dismissedRings.includes(callId) ? s : { dismissedRings: [...s.dismissedRings, callId] })),
 
