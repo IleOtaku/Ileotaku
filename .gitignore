@@ -9,6 +9,9 @@
 # testing
 /coverage
 
+# real-data backups from admin/wipe scripts — never commit live user data
+/scripts/selective-wipe-backup-*.json
+
 # next.js
 /.next/
 /out/

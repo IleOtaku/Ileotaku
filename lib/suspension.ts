@@ -6,10 +6,12 @@ type SuspendableProfile = Pick<UserProfile, "suspendedUntil"> | null | undefined
  * A suspension (set by a moderator via suspendUserFor(), lib/admin.ts) is a TIME-BOXED, PARTIAL
  * restriction — distinct from isBanned, which is a full, indefinite lockout enforced by
  * BannedGate before the app ever renders. A suspended account can still sign in, read manga/prose,
- * and view profiles; every other content-creating action (posting, DMs, comments, uploads, tips)
- * checks this and refuses with suspensionMessage() below. `suspendedUntil` in the past (or absent)
- * means not suspended — liftSuspension()/unbanUser() clear the field outright, but a suspension
- * that simply expired is just as inert without anyone having to run a cleanup job for it.
+ * view profiles, and make purchases (coins, Platinum, the hourly ad-free unlock — nothing about a
+ * suspension is meant to cut off revenue); every content-CREATING action (posting, DMs, comments,
+ * uploads, tips) checks this and refuses with suspensionMessage() below. `suspendedUntil` in the
+ * past (or absent) means not suspended — liftSuspension()/unbanUser() clear the field outright,
+ * but a suspension that simply expired is just as inert without anyone having to run a cleanup job
+ * for it.
  */
 export function isSuspended(profile: SuspendableProfile): boolean {
   if (!profile?.suspendedUntil) return false;

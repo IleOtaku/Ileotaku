@@ -20,7 +20,7 @@ export default function SuspensionBanner() {
       className="sticky top-0 z-[90] flex items-center justify-center gap-2 bg-clay px-4 py-2 text-center font-noto text-xs font-semibold text-ivory"
     >
       <AlertTriangle className="h-4 w-4 shrink-0" />
-      <span>{suspensionMessage(profile)}. You can still read content but other features are restricted.</span>
+      <span>{suspensionMessage(profile)}. You can still read content and make purchases, but posting and messaging are restricted.</span>
     </div>
   );
 }
