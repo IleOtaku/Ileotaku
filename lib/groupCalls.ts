@@ -1,7 +1,7 @@
 /**
  * Group voice calls — the Firestore side (who's invited, who joined, when it ends, the system
- * messages/notifications around it). The audio side (mesh WebRTC, speaking detection) lives in
- * lib/groupWebRTC.ts; the two only meet in hooks/useGroupCall.ts.
+ * messages/notifications around it). The audio side (a LiveKit SFU room, speaking detection) lives
+ * in lib/livekitGroupCall.ts; the two only meet in hooks/useGroupCall.ts.
  *
  * Every state change here is a transaction against `groupCalls/{callId}` rather than a blind
  * write built from whatever the client last saw: with up to six people joining, declining and
@@ -26,14 +26,16 @@ import {
 import { db } from "./firebase";
 import { addSystemMessage } from "./dms";
 import { logError } from "./errorLogger";
+import { createLiveKitRoom } from "./livekitGroupCall";
 import { createNotification } from "./notifications";
 import { NotificationType, type CallParticipant, type Conversation, type GroupCall } from "@/types";
 
 const GROUP_CALLS = "groupCalls";
 
-/** Mesh WebRTC uploads one audio stream per peer, so it stops being sensible past ~6 people;
- * a server-side mixer/SFU is the way past that (Phase 2). */
-export const GROUP_CALL_MAX = 6;
+/** Audio runs through a LiveKit SFU room (lib/livekitGroupCall.ts), not a peer-to-peer mesh, so
+ * this is a sanity ceiling rather than a real technical limit — LiveKit itself comfortably hosts
+ * far more than this per room. */
+export const GROUP_CALL_MAX = 500;
 /** How long the initiator's phone rings before the call is given up as unanswered. */
 export const GROUP_CALL_RING_MS = 45_000;
 /** How often every joined client bumps `heartbeatAt`. */
@@ -145,6 +147,7 @@ export async function startGroupCall(
     heartbeatAt: now,
   };
   await setDoc(groupCallRef(callId), call);
+  createLiveKitRoom(callId, GROUP_CALL_MAX).catch(() => {});
 
   const label = conversationLabel(conversation);
   for (const uid of invitees) {

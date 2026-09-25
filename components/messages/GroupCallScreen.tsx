@@ -6,7 +6,7 @@ import { Avatar } from "@/components/ui/Avatar";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { cn } from "@/lib/utils";
 import { formatCallDuration } from "@/lib/groupCalls";
-import type { PeerState } from "@/lib/groupWebRTC";
+import type { PeerState } from "@/lib/livekitGroupCall";
 import type { CallParticipant, GroupCall } from "@/types";
 
 interface GroupCallScreenProps {
@@ -83,7 +83,16 @@ export default function GroupCallScreen({
   const seconds = isActive && call?.activeAt ? Math.max(0, Math.floor((now - Date.parse(call.activeAt)) / 1000)) : 0;
   const headline = !call ? "Connecting…" : isActive ? formatCallDuration(seconds) : "Ringing…";
   const dotClass = connectedPeers > 0 ? "bg-green-500" : "animate-pulse bg-amber-400";
-  const cols = participants.length <= 2 ? "grid-cols-2" : participants.length <= 4 ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3";
+  // LiveKit removed the old 6-person mesh ceiling, so this now needs to keep working well past
+  // that instead of just the handful of tiles the mesh implementation ever had to lay out.
+  const cols =
+    participants.length <= 4
+      ? "grid-cols-2"
+      : participants.length <= 9
+        ? "grid-cols-2 sm:grid-cols-3"
+        : participants.length <= 16
+          ? "grid-cols-3 sm:grid-cols-4"
+          : "grid-cols-3 sm:grid-cols-4 lg:grid-cols-5";
 
   return (
     <div

@@ -14,7 +14,7 @@ import {
   subscribeToGroupCall,
   type CallUser,
 } from "@/lib/groupCalls";
-import { GroupCallManager, type PeerState } from "@/lib/groupWebRTC";
+import { LiveKitGroupCallManager as GroupCallManager, type PeerState } from "@/lib/livekitGroupCall";
 import { checkMicrophonePermission } from "@/lib/webrtc";
 import { useActiveCall } from "@/hooks/useActiveCall";
 import type { Conversation, GroupCall } from "@/types";

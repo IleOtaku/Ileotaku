@@ -53,7 +53,8 @@ const TURN_SERVERS: RTCIceServer[] =
         { urls: "turn:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" },
       ];
 
-/** Shared with lib/groupWebRTC.ts so group calls use the exact same STUN + TURN config. */
+/** 1:1 calls only now — group calls moved to a LiveKit SFU room (lib/livekitGroupCall.ts), which
+ * negotiates its own media path and doesn't use this config at all. */
 export const ICE_CONFIG: RTCConfiguration = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },

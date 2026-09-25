@@ -1501,8 +1501,8 @@ export interface CallParticipant {
   isMuted: boolean;
 }
 
-/** `groupCalls/{callId}` — one mesh WebRTC call inside a group conversation (max 6 people, every
- * participant connects directly to every other; see lib/groupWebRTC.ts). */
+/** `groupCalls/{callId}` — one LiveKit SFU call inside a group conversation (see
+ * lib/livekitGroupCall.ts); Firestore only tracks who's ringing/joined/left. */
 export interface GroupCall {
   callId: string;
   conversationId: string;

@@ -918,12 +918,15 @@ service cloud.firestore {
     }
 
     // ---------------------------- group voice calls ----------------------------
-    // groupCalls/{callId}: one mesh WebRTC call inside a group conversation. `participantUids` is a
-    // top-level array of every conversation member at call start — it exists so these rules (and the
-    // app's live queries, which all filter `participantUids array-contains <me>`) can PROVE a reader
-    // is allowed to see a call; the richer `participants` map can't be proven against a query.
+    // groupCalls/{callId}: one LiveKit SFU call inside a group conversation (audio itself is an SFU
+    // room, not signaled through Firestore — see lib/livekitGroupCall.ts; this doc is still the
+    // source of truth for who's ringing/joined/left). `participantUids` is a top-level array of
+    // every conversation member at call start — it exists so these rules (and the app's live
+    // queries, which all filter `participantUids array-contains <me>`) can PROVE a reader is
+    // allowed to see a call; the richer `participants` map can't be proven against a query.
     //  - create: only a member of the group, as initiator, in the "ringing" state, listing only
-    //    members of that group, and never more than 6 entries in `participants`.
+    //    members of that group, and up to GROUP_CALL_MAX entries in `participants` (see
+    //    lib/groupCalls.ts — the SFU is what raised this past the old mesh WebRTC cap of 6).
     //  - update: a listed member may change `participants` (only THEIR OWN entry — joining, leaving,
     //    declining, muting), the status/timing fields, and the heartbeat. Never who's listed, who
     //    started it, or which conversation it belongs to, and never an ended call again.
@@ -939,7 +942,7 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/conversations/$(request.resource.data.conversationId)).data.type == "group"
         && request.resource.data.participantUids.hasOnly(get(/databases/$(database)/documents/conversations/$(request.resource.data.conversationId)).data.participants)
         && request.resource.data.participants.keys().hasOnly(request.resource.data.participantUids)
-        && request.resource.data.participants.size() <= 6;
+        && request.resource.data.participants.size() <= 500;
 
       allow update: if isSignedIn()
         && request.auth.uid in resource.data.participantUids
@@ -948,18 +951,7 @@ service cloud.firestore {
              .hasOnly(["participants", "status", "activeAt", "heartbeatAt", "endedAt", "duration"])
         && request.resource.data.status in ["ringing", "active", "ended"]
         && request.resource.data.participants.diff(resource.data.participants).affectedKeys().hasOnly([request.auth.uid])
-        && request.resource.data.participants.size() <= 6;
-
-      // groupCalls/{callId}/signals/{uid}: that participant's offers/answers/ICE candidates for
-      // everyone else. Anyone on the call reads all of them (each client picks out what's addressed
-      // to it); only the owner writes their own, so nobody can inject signaling as someone else.
-      match /signals/{sigUid} {
-        allow read: if isSignedIn()
-          && request.auth.uid in get(/databases/$(database)/documents/groupCalls/$(callId)).data.participants;
-        allow create, update, delete: if isSignedIn()
-          && request.auth.uid == sigUid
-          && request.auth.uid in get(/databases/$(database)/documents/groupCalls/$(callId)).data.participants;
-      }
+        && request.resource.data.participants.size() <= 500;
     }
 
     // ---------------------------- group verification ----------------------------

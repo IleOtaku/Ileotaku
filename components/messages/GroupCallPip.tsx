@@ -5,7 +5,7 @@ import { Maximize2, Mic, MicOff, PhoneOff } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { cn } from "@/lib/utils";
 import { formatCallDuration } from "@/lib/groupCalls";
-import type { PeerState } from "@/lib/groupWebRTC";
+import type { PeerState } from "@/lib/livekitGroupCall";
 import type { GroupCall } from "@/types";
 
 interface GroupCallPipProps {
