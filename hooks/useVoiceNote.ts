@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import toast from "react-hot-toast";
 import { computeWaveform, formatDuration, VoiceRecorder } from "@/lib/voiceRecorder";
+import type { ViewSettingsChoice } from "@/components/messages/ViewSettingsPicker";
 
 export type VoiceNoteState = "idle" | "recording" | "preview";
 
@@ -25,7 +26,13 @@ const LEVEL_BARS = 28;
  *   never by a pointer release, so lifting a finger can't cut a recording short.
  * - The swipe tracker works from the initial press AND from a fresh drag on the recording bar.
  * - Nothing here touches the network; `onSend` receives the finished draft and the caller uploads. */
-export function useVoiceNote({ maxSeconds, onSend }: { maxSeconds: number; onSend: (draft: VoiceDraft) => void }) {
+export function useVoiceNote({
+  maxSeconds,
+  onSend,
+}: {
+  maxSeconds: number;
+  onSend: (draft: VoiceDraft, viewSettings?: ViewSettingsChoice) => void;
+}) {
   const [state, setState] = useState<VoiceNoteState>("idle");
   const [seconds, setSeconds] = useState(0);
   const [levels, setLevels] = useState<number[]>(() => Array(LEVEL_BARS).fill(0));
@@ -171,11 +178,11 @@ export function useVoiceNote({ maxSeconds, onSend }: { maxSeconds: number; onSen
     setSeconds(0);
   }, [revokeDraft]);
 
-  const sendDraft = useCallback(() => {
+  const sendDraft = useCallback((viewSettings?: ViewSettingsChoice) => {
     const current = draftRef.current;
     if (!current) return;
     // Ownership of the object URL passes to the caller's pending bubble; don't revoke here.
-    onSendRef.current(current);
+    onSendRef.current(current, viewSettings);
     setDraft(null);
     setState("idle");
     setSeconds(0);

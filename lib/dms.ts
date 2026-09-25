@@ -8,6 +8,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  increment,
   limit,
   onSnapshot,
   orderBy,
@@ -29,9 +30,17 @@ import { NotificationType, type Conversation, type DMMediaType, type DMMessage, 
 /** DM overhaul: the conversation-list preview text for a media/share message with no caption
  * (a bare GIF, a shared manga, ...) — mirrors how every chat app shows "📷 Photo" etc. instead of
  * a blank last-message line. */
-function mediaPreviewLabel(options: { mediaType?: DMMediaType; mediaUrls?: string[]; sharedMangaId?: string; sharedPostId?: string } | undefined): string {
+function mediaPreviewLabel(
+  options: { mediaType?: DMMediaType; mediaUrls?: string[]; sharedMangaId?: string; sharedPostId?: string; viewSettings?: DMMessage["viewSettings"] } | undefined
+): string {
   if (options?.sharedMangaId) return "📖 Shared a manga";
   if (options?.sharedPostId) return "📤 Shared a post";
+  // View-once/expiry media never reveals what it is in the conversation list — just that it's
+  // there and under what rule, same as the bubble's own locked-card treatment.
+  if (options?.viewSettings) {
+    const kind = options.mediaType === "voice" ? "Voice note" : options.mediaType === "video" ? "Video" : "Photo";
+    return `👁 ${kind}`;
+  }
   switch (options?.mediaType) {
     case "image":
       return options.mediaUrls && options.mediaUrls.length > 1 ? `📷 ${options.mediaUrls.length} photos` : "📷 Photo";
@@ -130,6 +139,9 @@ export interface SendDMOptions {
   sharedPostAuthorName?: string;
   sharedPostPreviewText?: string;
   sharedPostMediaUrl?: string;
+  /** View-once/timed/multi-view/daily — see ViewSettingsPicker and DMMessage's own doc comment.
+   * Media/voice notes only; `viewCount` is always sent as 0 (nobody's opened it yet). */
+  viewSettings?: DMMessage["viewSettings"];
 }
 
 /**
@@ -186,12 +198,13 @@ export async function sendDM(
 
     const { replyTo, ...media } = options ?? {};
     const mediaFields = Object.fromEntries(Object.entries(media).filter(([, v]) => v !== undefined));
+    const now = new Date().toISOString();
 
     await addDoc(collection(convoRef, "messages"), {
       conversationId,
       senderId,
       text: trimmed,
-      createdAt: new Date().toISOString(),
+      createdAt: now,
       ...(replyTo ? { replyTo } : {}),
       ...mediaFields,
       ...(expiresAt ? { expiresAt } : {}),
@@ -203,8 +216,10 @@ export async function sendDM(
     const previewText = trimmed || mediaPreviewLabel(options);
     await updateDoc(convoRef, {
       lastMessage: previewText,
-      lastMessageAt: new Date().toISOString(),
+      lastMessageAt: now,
       lastSenderId: senderId,
+      // Read receipts: a fresh message is, by definition, unseen by anyone yet.
+      lastMessageSeenBy: [],
       ...unreadUpdates,
       // A fresh message means the conversation is active again for everyone — clears it back
       // into whoever had hidden it (see hideConversationForUser's own doc comment) rather than
@@ -852,6 +867,63 @@ export async function markDMRead(conversationId: string, uid: string): Promise<v
   await updateDoc(doc(db, CONVERSATIONS, conversationId), { [`unreadCounts.${uid}`]: 0 });
 }
 
+/* ============================== Read receipts (Platinum) ============================== */
+
+/** A message only ever gets a `seenBy` write when its SENDER is Platinum — read receipts are that
+ * sender's paid feature, not something a free recipient's own status affects. Within that, the
+ * VIEWER's own "Send read receipts" toggle (Platinum-only setting; a free viewer has no such
+ * choice and always sends) can still suppress the write. */
+function shouldRecordSeen(message: Pick<DMMessage, "senderId" | "seenBy">, viewerUid: string, senderIsPlatinum: boolean, viewerSendsReceipts: boolean): boolean {
+  if (message.senderId === viewerUid) return false;
+  if (!senderIsPlatinum || !viewerSendsReceipts) return false;
+  return !message.seenBy?.some((s) => s.uid === viewerUid);
+}
+
+export async function markMessageSeen(
+  conversationId: string,
+  messageId: string,
+  viewerUid: string
+): Promise<void> {
+  await updateDoc(doc(db, CONVERSATIONS, conversationId, "messages", messageId), {
+    seenBy: arrayUnion({ uid: viewerUid, seenAt: new Date().toISOString() }),
+  });
+}
+
+/**
+ * Beta feedback: "Where's the platinum members read receipts feature?" Marks every message in
+ * `messages` that `viewerUid` hasn't already seen, as seen — skipping anything the viewer sent
+ * themselves, anything whose sender isn't Platinum (no receipt to send), and everything if the
+ * viewer has their own read-receipt sending turned off. `isPlatinumSender` is a lookup rather than
+ * a fetch per message — callers already have every sender's profile loaded (MessagesClient's own
+ * senderProfiles map) for bubble styling, so this reuses that instead of re-querying Firestore.
+ */
+export async function markAllMessagesSeen(
+  conversationId: string,
+  viewerUid: string,
+  messages: DMMessage[],
+  isPlatinumSender: (senderId: string) => boolean,
+  viewerSendsReceipts: boolean
+): Promise<void> {
+  const unseen = messages.filter((m) => shouldRecordSeen(m, viewerUid, isPlatinumSender(m.senderId), viewerSendsReceipts));
+  if (unseen.length === 0) return;
+  const batch = writeBatch(db);
+  const seenAt = new Date().toISOString();
+  unseen.forEach((m) => {
+    batch.update(doc(db, CONVERSATIONS, conversationId, "messages", m.id), {
+      seenBy: arrayUnion({ uid: viewerUid, seenAt }),
+    });
+  });
+  // Conversation-list tick: `messages` is already the whole loaded thread in createdAt-ascending
+  // order (subscribeToConversation), so its last entry is the same one lastMessageAt/lastSenderId
+  // describe — if that happens to be one of the messages just marked seen, mirror it onto the
+  // conversation doc too, so the sidebar row's tick can turn blue without loading this thread.
+  const newest = messages[messages.length - 1];
+  if (newest && unseen.some((m) => m.id === newest.id)) {
+    batch.update(doc(db, CONVERSATIONS, conversationId), { lastMessageSeenBy: arrayUnion(viewerUid) });
+  }
+  await batch.commit();
+}
+
 /** Beta feedback: "...and also a clear conversation button." Distinct from
  * hideConversationForUser above — this empties the thread's history for `uid` (via the same
  * per-user `deletedFor` mechanism deleteMessage's "delete for me" already uses on a single
@@ -957,7 +1029,7 @@ export async function setConversationBubbleStyle(conversationId: string, uid: st
  * bubbleStyle/bubbleColor/universalBubble isn't included in that particular write. */
 export async function setUserDmPreference(
   uid: string,
-  key: "bubbleStyle" | "bubbleColor" | "universalBubble",
+  key: "bubbleStyle" | "bubbleColor" | "universalBubble" | "sendReadReceipts",
   value: number | string | boolean
 ): Promise<void> {
   await updateDoc(doc(db, "users", uid), { [`dmPreferences.${key}`]: value });
@@ -1073,4 +1145,83 @@ export function subscribeToTyping(
     },
     () => callback([])
   );
+}
+
+/* ============================== View-once / custom-expiry media ============================== */
+
+/**
+ * Beta feedback: "WHERE'S THE VIEW ONCE INTEGRATION? FOR IMAGES, VIDEOS, TEXTS THAT WAS
+ * REQUESTED!?" Whether `viewerUid` may currently see this message's content — a message with no
+ * `viewSettings` is always viewable (every existing message keeps working unchanged). Every mode
+ * is judged from server-written state only (viewCount, firstOpenedAt, viewedBy), never from a
+ * local clock guess, since two different viewers' devices are never in perfect agreement about
+ * "now".
+ */
+export function isMessageViewable(message: Pick<DMMessage, "viewSettings">, viewerUid: string): boolean {
+  const settings = message.viewSettings;
+  if (!settings) return true;
+  const { mode, maxViews, viewCount, firstOpenedAt, deleteAfterMinutes, viewedBy } = settings;
+  const viewerRecord = viewedBy?.find((v) => v.uid === viewerUid);
+
+  switch (mode) {
+    case "view_once":
+      // Viewable only for whoever hasn't opened it yet — once ANYONE has (a group could have
+      // several members), it's spent for everyone else too; see recordMessageView's isDeleted set.
+      return !viewerRecord;
+
+    case "timed": {
+      // Not yet opened by anyone: the countdown hasn't started, so it's still there to open.
+      if (!firstOpenedAt || !deleteAfterMinutes) return true;
+      const expiryTime = new Date(firstOpenedAt).getTime() + deleteAfterMinutes * 60 * 1000;
+      return Date.now() < expiryTime;
+    }
+
+    case "multi_view":
+      // The rule is N views TOTAL across everyone, not N per person (a 1:1's "view once" already
+      // covers the per-person case) — recordMessageView marks it deleted once this trips.
+      return (viewCount ?? 0) < (maxViews ?? 1);
+
+    case "daily":
+      // Viewable once per calendar day per viewer — today's first open is always allowed;
+      // anything after that same viewer's most recent open, same day, is not.
+      if (!viewerRecord) return true;
+      return new Date(viewerRecord.viewedAt).toDateString() !== new Date().toDateString();
+
+    default:
+      return true;
+  }
+}
+
+/**
+ * Records `viewerUid` opening a view-controlled message, and — for view_once/multi_view — marks
+ * it expired for everyone the instant that trips. Callers must check isMessageViewable() BEFORE
+ * calling this (it doesn't re-check), since opening the media is what "spends" a view.
+ */
+export async function recordMessageView(
+  conversationId: string,
+  messageId: string,
+  viewerUid: string,
+  message: Pick<DMMessage, "viewSettings">
+): Promise<void> {
+  const settings = message.viewSettings;
+  if (!settings) return;
+  const ref = doc(db, CONVERSATIONS, conversationId, "messages", messageId);
+  const now = new Date().toISOString();
+
+  const updates: Record<string, unknown> = {
+    "viewSettings.viewCount": increment(1),
+    "viewSettings.viewedBy": arrayUnion({ uid: viewerUid, viewedAt: now }),
+  };
+  if (!settings.firstOpenedAt) {
+    updates["viewSettings.firstOpenedAt"] = now;
+    if (settings.mode === "timed" && settings.deleteAfterMinutes) {
+      updates["viewSettings.expiresAt"] = new Date(Date.now() + settings.deleteAfterMinutes * 60 * 1000).toISOString();
+    }
+  }
+  await updateDoc(ref, updates);
+
+  const newTotalViews = (settings.viewCount ?? 0) + 1;
+  if (settings.mode === "view_once" || (settings.mode === "multi_view" && newTotalViews >= (settings.maxViews ?? 1))) {
+    await updateDoc(ref, { isDeleted: true, deletedAt: now, text: "This message has expired" });
+  }
 }

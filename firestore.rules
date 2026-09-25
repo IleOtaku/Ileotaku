@@ -523,7 +523,7 @@ service cloud.firestore {
       allow update: if isSignedIn() && request.auth.uid in resource.data.participants
         && (
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(
-            ["lastMessage", "lastMessageAt", "lastSenderId", "unreadCounts",
+            ["lastMessage", "lastMessageAt", "lastSenderId", "lastMessageSeenBy", "unreadCounts",
              "name", "description", "photoURL", "participants", "participantNames",
              "participantPhotos", "adminUids", "hiddenFor", "inviteCode", "memberTags",
              // sendDM() clears archivedBy in the SAME write that bumps lastMessage/unreadCounts (a new message
@@ -598,10 +598,25 @@ service cloud.firestore {
             || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(["text", "isDeleted", "deletedAt"])
               && (resource.data.senderId == request.auth.uid
                 || get(/databases/$(database)/documents/conversations/$(conversationId)).data.get("adminUids", []).hasAny([request.auth.uid])))
+            // View-once/multi-view auto-expiry (recordMessageView, lib/dms.ts) — the VIEWER who
+            // just spent the last view triggers this, not necessarily the sender, so it needs its
+            // own branch distinct from the sender-only one above. Scoped tightly: only this exact
+            // expiry text, and only on a message that actually carries viewSettings, so it can
+            // never be used as a generic "delete someone else's message" loophole.
+            || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(["text", "isDeleted", "deletedAt"])
+              && request.resource.data.text == "This message has expired"
+              && resource.data.get("viewSettings", null) != null)
             // Delete for me — any participant, and only their OWN view is affected.
             || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["deletedFor"])
             // React / un-react — any participant.
             || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["reactions"])
+            // Read receipts (Platinum) — markMessageSeen/markAllMessagesSeen, lib/dms.ts. Any
+            // participant; trusts the calling app to only ever arrayUnion its own uid, same
+            // precedent as the reactions branch just above (no per-entry validation there either).
+            || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["seenBy"])
+            // View-once/timed/multi-view/daily bookkeeping (recordMessageView) — any participant,
+            // since the recipient opening it is exactly who needs to write this.
+            || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["viewSettings"])
             // Keep / unkeep a message in a disappearing chat (lib/dms.ts keepMessage/unkeepMessage) — any
             // participant, touching only isKept/keptBy, and only ever adding or removing THEIR OWN uid
             // in keptBy (nobody can "keep" on someone else's behalf), with isKept staying a boolean.

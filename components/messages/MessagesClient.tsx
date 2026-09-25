@@ -15,6 +15,7 @@ import {
   Clock,
   Copy,
   Download,
+  Eye,
   Forward,
   ImagePlus,
   Loader2,
@@ -45,7 +46,8 @@ import MentionText, { extractFirstUrl } from "@/components/ui/MentionText";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { isBirthdayToday } from "@/lib/birthday";
 import AttachmentTray from "./AttachmentTray";
-import DMMediaContent from "./DMMediaContent";
+import ViewControlledMedia from "./ViewControlledMedia";
+import MessageTicks from "./MessageTicks";
 import DMSettingsPanel from "./DMSettingsPanel";
 import GifPicker from "./GifPicker";
 import GroupInfoPanel from "./GroupInfoPanel";
@@ -60,6 +62,7 @@ import StickerPicker from "./StickerPicker";
 import KeptMessagesPanel from "./KeptMessagesPanel";
 import MediaPreviewModal, { type MediaPreviewResult } from "./MediaPreviewModal";
 import ForwardMessageModal from "./ForwardMessageModal";
+import type { ViewSettingsChoice } from "./ViewSettingsPicker";
 import { downloadMediaDirect } from "@/lib/videoDownload";
 import PendingBubble, { type PendingSend } from "./PendingBubble";
 import { VoiceMicButton, VoicePreviewBar, VoiceRecordingBar } from "./VoiceNoteBars";
@@ -79,6 +82,7 @@ import {
   hideConversationForUser,
   isAwaitingFirstReply,
   keepMessage,
+  markAllMessagesSeen,
   markDMRead,
   removeReaction,
   sendDM,
@@ -173,6 +177,13 @@ export default function MessagesClient() {
   // "Cached per-session to avoid excessive Firestore reads" per the feature spec — additive-only,
   // same pattern as otherParticipantProfiles above.
   const [senderProfiles, setSenderProfiles] = useState<Map<string, UserProfile>>(new Map());
+  // Read by markAllMessagesSeen's effect below without needing either in that effect's own
+  // dependency array (which would re-subscribe the whole conversation just because a sender
+  // profile finished loading).
+  const senderProfilesRef = useRef(senderProfiles);
+  senderProfilesRef.current = senderProfiles;
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   // Beta feedback bug: "The emoji button doesn't work" — it rendered with no onClick at all,
@@ -237,6 +248,7 @@ export default function MessagesClient() {
   const [replyingTo, setReplyingTo] = useState<MessageReplyTo | null>(null);
   const [forwardingMessage, setForwardingMessage] = useState<DMMessage | null>(null);
   const [reactionViewer, setReactionViewer] = useState<{ emoji: string; uids: string[] } | null>(null);
+  const [seenByFor, setSeenByFor] = useState<DMMessage | null>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressFiredRef = useRef(false);
 
@@ -396,12 +408,44 @@ export default function MessagesClient() {
       (msgs) => {
         setMessages(msgs);
         if (user) markDMRead(selectedId, user.uid).catch(() => {});
+        // Beta feedback: "Where's the platinum members read receipts feature?" Auto-marks seen —
+        // on open AND on every new message while this conversation stays the one on screen (same
+        // snapshot this effect already re-fires markDMRead from) — but only while the tab is
+        // actually visible, never for a backgrounded/minimized window.
+        if (user && document.visibilityState === "visible") {
+          markAllMessagesSeen(
+            selectedId,
+            user.uid,
+            msgs,
+            (senderId) => senderProfilesRef.current.get(senderId)?.isPlatinum === true,
+            profileRef.current?.dmPreferences?.sendReadReceipts !== false
+          ).catch(() => {});
+        }
       },
       () => setMessages([])
     );
     if (user) markDMRead(selectedId, user.uid).catch(() => {});
     return unsub;
   }, [selectedId, user]);
+
+  // Beta feedback: "Only mark seen if the conversation is actively visible (not minimized)" —
+  // covers the flip side too: coming BACK to a backgrounded tab with this same conversation still
+  // open re-marks whatever arrived while it was hidden, instead of waiting on the next message.
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState !== "visible" || !user || !selectedId) return;
+      markAllMessagesSeen(
+        selectedId,
+        user.uid,
+        messages,
+        (senderId) => senderProfilesRef.current.get(senderId)?.isPlatinum === true,
+        profileRef.current?.dmPreferences?.sendReadReceipts !== false
+      ).catch(() => {});
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, user, messages]);
 
   // DM Feature Overhaul (Part C/D): fetches (additively) every message sender's profile, for
   // their bubbleStyle/bubbleColor — see senderProfiles' own doc comment above.
@@ -985,6 +1029,8 @@ export default function MessagesClient() {
       return c;
     };
 
+    const viewSettings = result.viewSettings;
+
     if (kind === "file") {
       const file = files[0];
       const text = takeCaption();
@@ -994,7 +1040,7 @@ export default function MessagesClient() {
         exec: async (onProgress) => {
           const { secureUrl } = await uploadAnyFile(file, folder, onProgress);
           if (!secureUrl) throw new Error("Upload returned no URL.");
-          await sendDM(convo, uid, text, { mediaType: "file", mediaUrl: secureUrl, mediaFileName: file.name, mediaSize: file.size });
+          await sendDM(convo, uid, text, { mediaType: "file", mediaUrl: secureUrl, mediaFileName: file.name, mediaSize: file.size, viewSettings });
         },
       });
       return;
@@ -1020,6 +1066,7 @@ export default function MessagesClient() {
             mediaType: "image",
             mediaUrl: urls[0],
             ...(urls.length > 1 ? { mediaUrls: urls } : { mediaWidth: images[0].width, mediaHeight: images[0].height }),
+            viewSettings,
           });
         },
       });
@@ -1039,6 +1086,7 @@ export default function MessagesClient() {
             mediaDuration: video.duration,
             mediaWidth: video.width,
             mediaHeight: video.height,
+            viewSettings,
           });
         },
       });
@@ -1047,7 +1095,7 @@ export default function MessagesClient() {
 
   /** The voice preview's Send button: the recording is already finished and sitting in memory; this is
    * the first moment anything touches the network. */
-  function handleVoiceDraftSend(draft: VoiceDraft) {
+  function handleVoiceDraftSend(draft: VoiceDraft, viewSettings?: ViewSettingsChoice) {
     if (!user || !selectedId || blockedFromSending()) {
       URL.revokeObjectURL(draft.url);
       return;
@@ -1067,6 +1115,7 @@ export default function MessagesClient() {
           mediaUrl: secureUrl,
           mediaDuration: draft.seconds,
           ...(draft.waveform.length > 0 ? { mediaWaveform: draft.waveform } : {}),
+          viewSettings,
         });
       },
     });
@@ -1277,8 +1326,8 @@ export default function MessagesClient() {
 
   if (authLoading || !user) {
     return (
-      <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
-        <Skeleton className="h-[600px] w-full rounded-2xl" />
+      <div className="flex h-[100dvh] flex-col p-4">
+        <Skeleton className="h-full w-full rounded-2xl" />
       </div>
     );
   }
@@ -1335,20 +1384,24 @@ export default function MessagesClient() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-      <div className="mb-6 flex items-center justify-between gap-4">
-        <h1 className="font-cinzel text-2xl text-text">Messages</h1>
-        <button
-          type="button"
-          onClick={() => setComposeOpen(true)}
-          className="btn-primary"
-          aria-label="New message"
-        >
+    <div className="flex h-[100dvh] flex-col overflow-hidden bg-bg">
+      {/* Beta feedback: "make the whole page the dm thing, redo the UI... make everything
+          responsive too." A slim, borderless top bar — SiteChrome no longer renders the site
+          Navbar on this route (same immersive treatment /feed and /reader already get), so this
+          is also this page's only way back to the rest of the site now. */}
+      <div className={`flex shrink-0 items-center justify-between gap-4 px-4 py-3 ${selectedId ? "hidden sm:flex" : "flex"}`}>
+        <div className="flex items-center gap-3">
+          <Link href="/" aria-label="Back to home" className="text-muted hover:text-text">
+            <ArrowLeft className="h-5 w-5" />
+          </Link>
+          <h1 className="font-cinzel text-xl text-text">Messages</h1>
+        </div>
+        <button type="button" onClick={() => setComposeOpen(true)} className="btn-primary text-sm" aria-label="New message">
           <Plus className="h-4 w-4" /> New
         </button>
       </div>
-      <div className="grid h-[600px] overflow-hidden rounded-2xl border border-bg4 sm:grid-cols-[280px_1fr]">
-        <div className={`flex-col overflow-y-auto overscroll-contain border-r border-bg4 bg-bg2 ${selectedId ? "hidden sm:flex" : "flex"}`}>
+      <div className="grid min-h-0 flex-1 sm:grid-cols-[260px_1fr]">
+        <div className={`flex-col overflow-y-auto overscroll-contain border-r border-bg4 ${selectedId ? "hidden sm:flex" : "flex"}`}>
           <div className="sticky top-0 z-10 border-b border-bg4 bg-bg2 p-3">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
@@ -1447,17 +1500,30 @@ export default function MessagesClient() {
                     </div>
                     <div className="flex items-center justify-between gap-2">
                       <span
-                        className={`truncate font-noto text-xs ${typingHere ? "italic text-text" : "text-muted"}`}
+                        className={`flex min-w-0 items-center gap-1 truncate font-noto text-xs ${typingHere ? "italic text-text" : "text-muted"}`}
                       >
-                        {typingHere
-                          ? typingLabel
-                          : isGroup
-                            ? c.lastMessage
-                              ? `${c.participantNames?.[c.lastSenderId] ?? ""}: ${truncate(c.lastMessage, 30)}`
-                              : `${(c.participants ?? []).length} members`
-                            : c.lastMessage
-                              ? truncate(c.lastMessage, 40)
-                              : "Say hello 👋"}
+                        {/* Beta feedback: "Show tick indicators next to last message in
+                            conversation list" — only for a message the viewer themselves sent. */}
+                        {!typingHere && c.lastMessage && c.lastSenderId === user.uid && (
+                          <MessageTicks
+                            message={{ senderId: c.lastSenderId, seenBy: (c.lastMessageSeenBy ?? []).map((uid) => ({ uid, seenAt: "" })) }}
+                            isSenderPlatinum={profile?.isPlatinum === true}
+                            isOtherOnline={!isGroup ? statusByUid[other]?.isOnline : undefined}
+                            isGroup={isGroup}
+                            className="shrink-0"
+                          />
+                        )}
+                        <span className="truncate">
+                          {typingHere
+                            ? typingLabel
+                            : isGroup
+                              ? c.lastMessage
+                                ? `${c.participantNames?.[c.lastSenderId] ?? ""}: ${truncate(c.lastMessage, 30)}`
+                                : `${(c.participants ?? []).length} members`
+                              : c.lastMessage
+                                ? truncate(c.lastMessage, 40)
+                                : "Say hello 👋"}
+                        </span>
                       </span>
                       {unread > 0 && (
                         <span className="flex h-4 min-w-[16px] shrink-0 items-center justify-center rounded-full bg-clay px-1 font-syne text-[10px] font-bold text-ivory">
@@ -1942,7 +2008,11 @@ export default function MessagesClient() {
                         <div key={m.id} className={`flex items-end gap-2 ${isOwn ? "justify-end" : "justify-start"}`}>
                           {isGroupThread && !isOwn && <Avatar uid={m.senderId} photoURL={senderPhoto} displayName={senderName} size={32} />}
                           <div className="max-w-[75%] rounded-2xl bg-bg3 px-4 py-2 font-noto text-sm italic text-muted">
-                            This message was deleted
+                            {/* recordMessageView (lib/dms.ts) sets this exact text for an expired
+                                view-once/multi-view message — everything else that sets isDeleted
+                                ("delete for everyone") leaves text alone, so this still falls back
+                                correctly. */}
+                            {m.text === "This message has expired" ? m.text : "This message was deleted"}
                           </div>
                         </div>
                       );
@@ -2016,7 +2086,13 @@ export default function MessagesClient() {
                               </div>
                             ) : (
                               <>
-                                <DMMediaContent message={m} isOwn={isOwn} accentColor={bubbleColor && bubbleColor.startsWith("#") ? bubbleColor : undefined} />
+                                <ViewControlledMedia
+                                  message={m}
+                                  isOwn={isOwn}
+                                  accentColor={bubbleColor && bubbleColor.startsWith("#") ? bubbleColor : undefined}
+                                  conversationId={selectedId!}
+                                  viewerUid={user.uid}
+                                />
                                 {m.text && !captionInMedia && <MentionText text={m.text} />}
                                 {/* Beta feedback: "Links should be clickable, show the preview
                                     and should be formatted to be shorter." Clickable+shortened is
@@ -2032,6 +2108,18 @@ export default function MessagesClient() {
                                   <span className={isOwn ? "text-inherit opacity-70" : "text-muted"}>{formatExactTime(m.createdAt)}</span>
                                   {m.isEdited && <span className={isOwn ? "text-inherit opacity-70" : "text-muted"}>(edited)</span>}
                                   {m.expiresAt && !m.isKept && <Clock className="h-2.5 w-2.5 opacity-60" />}
+                                  {/* Beta feedback: "Where's the platinum members read receipts
+                                      feature?" Own messages only — you check whether THEY read
+                                      yours, not the reverse. Long-press for the group "Seen by"
+                                      detail — see the message menu below. */}
+                                  {isOwn && !m.isSystem && (
+                                    <MessageTicks
+                                      message={m}
+                                      isSenderPlatinum={profile?.isPlatinum === true}
+                                      isOtherOnline={otherUid ? statusByUid[otherUid]?.isOnline : undefined}
+                                      isGroup={isGroupThread}
+                                    />
+                                  )}
                                   {/* Kept-message bookmark: ONLY in chats with disappearing messages on, never anywhere
                                       else. Solid = kept (tap to unkeep); outline (on hover) = tap to keep. */}
                                   {selected?.disappearingMessages?.enabled &&
@@ -2184,6 +2272,20 @@ export default function MessagesClient() {
                                       <Bookmark className="h-4 w-4" /> Keep Message
                                     </>
                                   )}
+                                </button>
+                              )}
+                              {/* Beta feedback: "'Seen by' detail in group chats... Only visible
+                                  to the message sender." */}
+                              {isGroupThread && isOwn && !m.isSystem && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    closeMenu();
+                                    setSeenByFor(m);
+                                  }}
+                                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-left font-noto text-sm text-text hover:bg-bg4"
+                                >
+                                  <Eye className="h-4 w-4" /> Seen by
                                 </button>
                               )}
                               {/* PART 6 — sticker packs: "Long press on received sticker →
@@ -2501,6 +2603,32 @@ export default function MessagesClient() {
               </div>
             );
           })}
+        </div>
+      </Modal>
+
+      {/* Beta feedback: "'Seen by' detail in group chats... Shows list of group members who have
+          seen it with their avatar and time seen. Only visible to the message sender." — reached
+          only from the sender's own long-press menu (isOwn && isGroupThread), so that's already
+          enforced by who can ever open it. */}
+      <Modal open={seenByFor !== null} onClose={() => setSeenByFor(null)} title="Seen by">
+        <div className="flex flex-col gap-2">
+          {(seenByFor?.seenBy ?? []).filter((s) => s.uid !== seenByFor?.senderId).length === 0 ? (
+            <p className="py-4 text-center font-noto text-sm text-muted">Nobody&apos;s seen this yet.</p>
+          ) : (
+            (seenByFor?.seenBy ?? [])
+              .filter((s) => s.uid !== seenByFor?.senderId)
+              .map((s) => {
+                const name = (user && selected?.nicknames?.[user.uid]?.[s.uid]) ?? selected?.participantNames?.[s.uid] ?? "Reader";
+                const photo = selected?.participantPhotos?.[s.uid];
+                return (
+                  <div key={s.uid} className="flex items-center gap-3">
+                    <Avatar uid={s.uid} photoURL={photo} displayName={name} size={32} />
+                    <span className="flex-1 font-noto text-sm text-text">{name}</span>
+                    <span className="font-noto text-xs text-muted">{formatExactTime(s.seenAt)}</span>
+                  </div>
+                );
+              })
+          )}
         </div>
       </Modal>
 

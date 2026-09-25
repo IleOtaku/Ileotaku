@@ -14,6 +14,11 @@ import Navbar from "./Navbar";
  *                    reading-theme background, which a global navbar bar would visually clash
  *                    with). /story/[workId] itself is the details/landing page (mirrors
  *                    /manga/[id]) and keeps the normal site chrome.
+ * - /messages      — beta feedback: "The fact that the dm section is in one big card is
+ *                    tiring... make the whole page the dm thing." A DM thread needs the full
+ *                    viewport height to feel like iMessage/Telegram instead of a bordered box
+ *                    squeezed under the site navbar; it draws its own compact top bar (with its
+ *                    own back-to-home link) instead.
  * - /banned        — the full-page ban notice, which shouldn't offer normal site navigation away
  *                    from itself
  */
@@ -25,6 +30,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     /^\/story\/[^/]+\/read(\/|$)/.test(pathname ?? "") ||
     pathname?.startsWith("/banned") ||
     pathname?.startsWith("/feed") ||
+    pathname?.startsWith("/messages") ||
     false;
 
   if (isImmersiveRoute) {

@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { File as FileIcon, FileArchive, FileAudio, FileText, Pause, Play, Plus, Volume2, VolumeX, X } from "lucide-react";
+import { Eye, File as FileIcon, FileArchive, FileAudio, FileText, Pause, Play, Plus, Volume2, VolumeX, X } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
 import { formatDuration } from "@/lib/voiceRecorder";
+import ViewSettingsPicker, { viewSettingsLabel, type ViewSettingsChoice } from "./ViewSettingsPicker";
 
 export const MAX_PREVIEW_ITEMS = 10;
 
@@ -19,6 +21,8 @@ export interface PreviewedMedia {
 export interface MediaPreviewResult {
   items: PreviewedMedia[];
   caption: string;
+  /** Platinum-only — see ViewSettingsPicker. Undefined for a standard, non-expiring message. */
+  viewSettings?: ViewSettingsChoice;
 }
 
 interface Item {
@@ -72,9 +76,13 @@ export default function MediaPreviewModal({
   onCancel: () => void;
   onSend: (result: MediaPreviewResult) => void;
 }) {
+  const { profile } = useAuth();
+  const isPlatinum = profile?.isPlatinum === true;
   const [items, setItems] = useState<Item[]>([]);
   const [index, setIndex] = useState(0);
   const [caption, setCaption] = useState("");
+  const [viewSettings, setViewSettings] = useState<ViewSettingsChoice>(undefined);
+  const [viewPickerOpen, setViewPickerOpen] = useState(false);
   const galleryRef = useRef<HTMLDivElement>(null);
   const addInputRef = useRef<HTMLInputElement>(null);
   const itemsRef = useRef<Item[]>([]);
@@ -96,7 +104,10 @@ export default function MediaPreviewModal({
 
   useEffect(() => () => itemsRef.current.forEach((i) => URL.revokeObjectURL(i.url)), []);
   useEffect(() => {
-    if (files) setCaption("");
+    if (files) {
+      setCaption("");
+      setViewSettings(undefined);
+    }
   }, [files]);
 
   useEffect(() => {
@@ -142,13 +153,14 @@ export default function MediaPreviewModal({
 
   function handleSend() {
     if (kind === "file" && files?.[0]) {
-      onSend({ items: [{ file: files[0], kind: "image" }], caption: caption.trim() });
+      onSend({ items: [{ file: files[0], kind: "image" }], caption: caption.trim(), viewSettings });
       return;
     }
     if (items.length === 0) return;
     onSend({
       items: items.map(({ file, kind: k, width, height, duration }) => ({ file, kind: k, width, height, duration })),
       caption: caption.trim(),
+      viewSettings,
     });
   }
 
@@ -189,19 +201,25 @@ export default function MediaPreviewModal({
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2 bg-black/60 p-4" style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}>
-          <input
-            value={caption}
-            onChange={(e) => setCaption(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSend()}
-            placeholder="Add a caption..."
-            aria-label="Caption"
-            className="min-w-0 flex-1 rounded-full bg-white/10 px-4 py-2.5 text-white placeholder:text-white/50 focus:outline-none"
-          />
-          <button type="button" onClick={handleSend} className="max-w-[45%] shrink-0 truncate rounded-full bg-clay px-5 py-2.5 font-syne text-sm font-semibold text-white">
-            Send {file.name.length > 14 ? "file" : file.name}
-          </button>
+        <div className="flex flex-col gap-2 bg-black/60 p-4" style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}>
+          {isPlatinum && (
+            <ViewSettingsButton value={viewSettings} onClick={() => setViewPickerOpen(true)} />
+          )}
+          <div className="flex items-center gap-2">
+            <input
+              value={caption}
+              onChange={(e) => setCaption(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSend()}
+              placeholder="Add a caption..."
+              aria-label="Caption"
+              className="min-w-0 flex-1 rounded-full bg-white/10 px-4 py-2.5 text-white placeholder:text-white/50 focus:outline-none"
+            />
+            <button type="button" onClick={handleSend} className="max-w-[45%] shrink-0 truncate rounded-full bg-clay px-5 py-2.5 font-syne text-sm font-semibold text-white">
+              Send {file.name.length > 14 ? "file" : file.name}
+            </button>
+          </div>
         </div>
+        <ViewSettingsPicker open={viewPickerOpen} onClose={() => setViewPickerOpen(false)} onSelect={setViewSettings} />
       </div>,
       document.body
     );
@@ -302,7 +320,8 @@ export default function MediaPreviewModal({
         </div>
       )}
 
-      <div className="bg-black/60 p-4" style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}>
+      <div className="flex flex-col gap-2 bg-black/60 p-4" style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}>
+        {isPlatinum && <ViewSettingsButton value={viewSettings} onClick={() => setViewPickerOpen(true)} />}
         <input
           value={caption}
           onChange={(e) => setCaption(e.target.value)}
@@ -313,8 +332,27 @@ export default function MediaPreviewModal({
           className="w-full rounded-full bg-white/10 px-4 py-2.5 text-white placeholder:text-white/50 focus:outline-none"
         />
       </div>
+      <ViewSettingsPicker open={viewPickerOpen} onClose={() => setViewPickerOpen(false)} onSelect={setViewSettings} />
     </div>,
     document.body
+  );
+}
+
+/** Beta feedback: "In MediaPreviewModal.tsx: add a '👁 View settings' button in the toolbar."
+ * Shows the current pick as a pill (viewSettingsLabel) once something other than Standard is
+ * chosen — Platinum-only, so this is never rendered for a free account at all. */
+function ViewSettingsButton({ value, onClick }: { value: ViewSettingsChoice; onClick: () => void }) {
+  const label = viewSettingsLabel(value);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-fit items-center gap-1.5 self-start rounded-full px-3 py-1.5 font-noto text-xs font-semibold ${
+        label ? "bg-clay/20 text-clay2" : "bg-white/10 text-white/70 hover:bg-white/15"
+      }`}
+    >
+      <Eye className="h-3.5 w-3.5" /> {label ? label : "View settings"}
+    </button>
   );
 }
 

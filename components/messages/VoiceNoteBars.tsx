@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Mic, Pause, Play, Send, Square, Trash2, X } from "lucide-react";
+import { Eye, Mic, Pause, Play, Send, Square, Trash2, X } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
 import { formatDuration, seededWaveform } from "@/lib/voiceRecorder";
 import type { VoiceDraft } from "@/hooks/useVoiceNote";
+import ViewSettingsPicker, { viewSettingsLabel, type ViewSettingsChoice } from "./ViewSettingsPicker";
 
 /** The mic button that sits in the message input row (next to the text field) whenever the field is
  * empty. Pressing it starts recording — there is no "hold": see hooks/useVoiceNote.ts. */
@@ -109,10 +111,22 @@ export function VoiceRecordingBar({
 }
 
 /** PREVIEW state — the finished recording, playable before it's sent (or thrown away). */
-export function VoicePreviewBar({ draft, onCancel, onSend }: { draft: VoiceDraft; onCancel: () => void; onSend: () => void }) {
+export function VoicePreviewBar({
+  draft,
+  onCancel,
+  onSend,
+}: {
+  draft: VoiceDraft;
+  onCancel: () => void;
+  onSend: (viewSettings?: ViewSettingsChoice) => void;
+}) {
+  const { profile } = useAuth();
+  const isPlatinum = profile?.isPlatinum === true;
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0);
+  const [viewSettings, setViewSettings] = useState<ViewSettingsChoice>(undefined);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   useEffect(() => {
     const audio = new Audio(draft.url);
@@ -145,37 +159,58 @@ export function VoicePreviewBar({ draft, onCancel, onSend }: { draft: VoiceDraft
   const progress = draft.seconds > 0 ? position / draft.seconds : 0;
 
   return (
-    <div className="flex w-full items-center gap-3 rounded-2xl bg-bg3 p-2.5" role="group" aria-label="Voice message preview">
-      <button
-        type="button"
-        onClick={toggle}
-        aria-label={playing ? "Pause preview" : "Play preview"}
-        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-clay text-white"
-      >
-        {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-      </button>
+    <div className="flex w-full flex-col gap-2">
+      {/* Beta feedback: "Also available on voice notes before sending" — same View Settings picker
+          media messages use, Platinum-only. */}
+      {isPlatinum && (
+        <button
+          type="button"
+          onClick={() => setPickerOpen(true)}
+          className={`flex w-fit items-center gap-1.5 rounded-full px-3 py-1 font-noto text-xs font-semibold ${
+            viewSettingsLabel(viewSettings) ? "bg-clay/20 text-clay2" : "bg-bg4 text-muted hover:text-text"
+          }`}
+        >
+          <Eye className="h-3.5 w-3.5" /> {viewSettingsLabel(viewSettings) ?? "View settings"}
+        </button>
+      )}
+      <div className="flex w-full items-center gap-3 rounded-2xl bg-bg3 p-2.5" role="group" aria-label="Voice message preview">
+        <button
+          type="button"
+          onClick={toggle}
+          aria-label={playing ? "Pause preview" : "Play preview"}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-clay text-white"
+        >
+          {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+        </button>
 
-      <div className="flex h-8 min-w-0 flex-1 items-center gap-0.5" aria-hidden>
-        {bars.map((h, i) => (
-          <span
-            key={i}
-            className="w-1 shrink-0 rounded-full transition-colors"
-            style={{ height: `${h}%`, background: i / bars.length < progress ? "#c4622d" : "#7a6a58" }}
-          />
-        ))}
+        <div className="flex h-8 min-w-0 flex-1 items-center gap-0.5" aria-hidden>
+          {bars.map((h, i) => (
+            <span
+              key={i}
+              className="w-1 shrink-0 rounded-full transition-colors"
+              style={{ height: `${h}%`, background: i / bars.length < progress ? "#c4622d" : "#7a6a58" }}
+            />
+          ))}
+        </div>
+
+        <span className="shrink-0 font-mono text-xs text-muted" data-testid="preview-duration">
+          {formatDuration(playing ? position : draft.seconds)}
+        </span>
+
+        <button type="button" onClick={onCancel} aria-label="Discard voice message" className="shrink-0 text-muted hover:text-red-400">
+          <X className="h-[18px] w-[18px]" />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onSend(viewSettings)}
+          aria-label="Send voice message"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-clay text-white"
+        >
+          <Send className="h-4 w-4" />
+        </button>
       </div>
-
-      <span className="shrink-0 font-mono text-xs text-muted" data-testid="preview-duration">
-        {formatDuration(playing ? position : draft.seconds)}
-      </span>
-
-      <button type="button" onClick={onCancel} aria-label="Discard voice message" className="shrink-0 text-muted hover:text-red-400">
-        <X className="h-[18px] w-[18px]" />
-      </button>
-
-      <button type="button" onClick={onSend} aria-label="Send voice message" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-clay text-white">
-        <Send className="h-4 w-4" />
-      </button>
+      <ViewSettingsPicker open={pickerOpen} onClose={() => setPickerOpen(false)} onSelect={setViewSettings} />
     </div>
   );
 }

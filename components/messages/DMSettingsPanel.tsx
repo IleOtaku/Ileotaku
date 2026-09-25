@@ -13,6 +13,7 @@ import {
   resetNickname,
   setDisappearingMessages,
   setNickname,
+  setUserDmPreference,
   unmuteConversation,
   type DisappearingDuration,
 } from "@/lib/dms";
@@ -98,6 +99,20 @@ export default function DMSettingsPanel({
     if (!user) return;
     await unmuteConversation(conversation.id, user.uid);
     toast.success("Conversation unmuted.");
+  }
+
+  // Beta feedback: "Read receipt privacy setting: In DM Settings → Privacy: 'Send read receipts'
+  // toggle... Platinum only." A free account never sees this — they always send receipts when the
+  // message they're reading is from a Platinum sender (that sender's paid feature, not their own
+  // to withhold); only Platinum accounts get a say in whether THEIRS go out.
+  const sendReadReceipts = profile?.dmPreferences?.sendReadReceipts !== false;
+  async function handleToggleReadReceipts() {
+    if (!user) return;
+    const next = !sendReadReceipts;
+    useAuth.getState().setProfile(profile ? { ...profile, dmPreferences: { ...profile.dmPreferences, sendReadReceipts: next } } : profile);
+    await setUserDmPreference(user.uid, "sendReadReceipts", next).catch(() => {
+      toast.error("Couldn't save that.");
+    });
   }
 
   async function handleDisappearing(ms: DisappearingDuration | 0) {
@@ -312,6 +327,20 @@ export default function DMSettingsPanel({
                   <Palette className="h-3.5 w-3.5" /> Privacy
                 </h3>
                 <div className="flex flex-col gap-2">
+                  {isPlatinum && (
+                    <label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-bg4 bg-bg p-3">
+                      <div>
+                        <p className="font-noto text-sm text-text">Send read receipts</p>
+                        <p className="font-noto text-xs text-muted">If off, others never see when you&apos;ve read their messages.</p>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={sendReadReceipts}
+                        onChange={handleToggleReadReceipts}
+                        className="h-4 w-4 shrink-0 accent-clay"
+                      />
+                    </label>
+                  )}
                   <button
                     type="button"
                     onClick={onDeleteConversation}

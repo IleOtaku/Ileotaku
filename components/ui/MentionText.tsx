@@ -5,9 +5,13 @@ import { useRouter } from "next/navigation";
 import { getUserByHandle } from "@/lib/firestore";
 import { getUserProfileUrl } from "@/lib/utils";
 
-// Captures @mentions, #hashtags, and http(s) URLs in one pass so a single text.split()
-// interleaves all three kinds of tokens with the plain-text runs between them, in original order.
-const TOKEN_PATTERN = /(@\w+|#\w+|https?:\/\/[^\s]+)/g;
+// Captures @mentions, #hashtags, http(s) URLs, and WhatsApp-style *bold*/_italic_ runs in one pass
+// so a single text.split() interleaves every kind of token with the plain-text runs between them,
+// in original order. Beta feedback: "What are the shortcuts for bold messages, italic, etc for pc
+// users, so i can say *bold* and it turns bold text _hi_ and it's italic." The marker characters
+// themselves are stripped when rendered (see the strip-and-wrap branches below); a lone `*`/`_`
+// with no closing partner just falls through untouched as plain text.
+const TOKEN_PATTERN = /(@\w+|#\w+|https?:\/\/[^\s]+|\*[^*\n]+\*|_[^_\n]+_)/g;
 const FIRST_URL_PATTERN = /https?:\/\/[^\s]+/;
 
 /** Beta feedback: "...show the preview." The first http(s) URL in `text`, if any — used to decide
@@ -89,6 +93,12 @@ export default function MentionText({ text, className }: MentionTextProps) {
               {part}
             </span>
           );
+        }
+        if (part.startsWith("*") && part.endsWith("*") && part.length > 2) {
+          return <strong key={i}>{part.slice(1, -1)}</strong>;
+        }
+        if (part.startsWith("_") && part.endsWith("_") && part.length > 2) {
+          return <em key={i}>{part.slice(1, -1)}</em>;
         }
         if (part.startsWith("http://") || part.startsWith("https://")) {
           return (

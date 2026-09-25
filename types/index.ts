@@ -154,6 +154,12 @@ export interface UserProfile {
     bubbleStyle?: number;
     bubbleColor?: string;
     universalBubble?: boolean;
+    /** Platinum-only control (DM Settings → Privacy → "Send read receipts") — a free account has
+     * no say in this and always sends theirs when the message they're reading is from a Platinum
+     * sender (read receipts are that sender's paid feature, not the reader's to withhold).
+     * Defaults to true (undefined counts as on) so an account that's never touched the toggle
+     * still sends receipts normally. */
+    sendReadReceipts?: boolean;
   };
   /** DM overhaul (Part B, "My Uploads" tab): this account's own uploaded wallpaper images
    * (Cloudinary URLs, under wallpapers/{uid}/), most-recently-added last. Kept on the profile
@@ -886,6 +892,12 @@ export interface Conversation {
   lastMessage: string;
   lastMessageAt: string;
   lastSenderId: string;
+  /** Read receipts (Platinum) — who has seen the CURRENT lastMessage, kept in step with it: reset
+   * to [] every time sendDM writes a new one, appended to by markMessageSeen/markAllMessagesSeen
+   * only when the message they're marking turns out to be this same latest one. Denormalized here
+   * purely so the conversation-list row can show its ✓/✓✓/✓✓-blue tick without loading that
+   * conversation's whole message history just to check one message. */
+  lastMessageSeenBy?: string[];
   /** Unread count per participant uid. */
   unreadCounts: Record<string, number>;
   createdAt: string;
@@ -1037,8 +1049,39 @@ export interface DMMessage {
   sharedPostMediaUrl?: string;
 
   /** DM overhaul: disappearing messages — set at send-time from the conversation's own
-   * disappearingMessages setting; a message with no expiresAt never disappears. */
+   * disappearingMessages setting; a message with no expiresAt never disappears. Orthogonal to
+   * `viewSettings` below (that's a per-message, sender-chosen rule triggered by the recipient
+   * actually opening it; this is a conversation-wide timer that fires regardless of who's read
+   * what). */
   expiresAt?: string;
+
+  /** Read receipts (Platinum-exclusive — see lib/dms.ts's markMessageSeen/markAllMessagesSeen and
+   * SendingUserProfile.dmPreferences.sendReadReceipts). Every uid who has actually opened the
+   * conversation with this message visible, regardless of the sender's Platinum status — the tier
+   * gate lives entirely in what the UI *shows* (blue ticks) and in whether a write happens at all
+   * for a non-Platinum sender's message, not in this field's own meaning. */
+  seenBy?: { uid: string; seenAt: string }[];
+
+  /** View-once / custom-expiry media & voice notes (Platinum-exclusive, set by the sender at send
+   * time via components/messages/ViewSettingsPicker.tsx). Absent entirely on a standard message —
+   * see lib/dms.ts's isMessageViewable/recordMessageView for the rules each mode enforces. */
+  viewSettings?: {
+    mode: "view_once" | "timed" | "multi_view" | "daily";
+    /** 'timed' mode only — minutes after FIRST open until it expires for everyone. */
+    deleteAfterMinutes?: number;
+    /** 'multi_view' mode only — 1-10; the message expires once `viewCount` reaches this. */
+    maxViews?: number;
+    /** Total opens across every viewer — what 'multi_view' actually counts against, since the
+     * rule is "N views total", not "N views per person". */
+    viewCount: number;
+    firstOpenedAt?: string;
+    /** 'timed' mode only — computed once, from firstOpenedAt + deleteAfterMinutes, so the
+     * countdown UI never has to redo that arithmetic against a possibly-stale local clock. */
+    expiresAt?: string;
+    /** Every open, by every viewer — 'daily' mode checks each viewer's own last entry here;
+     * 'view_once' checks whether the current viewer has any entry at all. */
+    viewedBy?: { uid: string; viewedAt: string }[];
+  };
 }
 
 /* ---------------------------- Creator feed ---------------------------- */
