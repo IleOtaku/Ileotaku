@@ -49,6 +49,7 @@ import AttachmentTray from "./AttachmentTray";
 import ViewControlledMedia from "./ViewControlledMedia";
 import MessageTicks from "./MessageTicks";
 import DMSettingsPanel from "./DMSettingsPanel";
+import ContactInfoPanel from "./ContactInfoPanel";
 import GifPicker from "./GifPicker";
 import GroupInfoPanel from "./GroupInfoPanel";
 import InAppCamera from "./InAppCamera";
@@ -275,6 +276,7 @@ export default function MessagesClient() {
   // WhatsApp-style Group Info redesign: this now opens GroupInfoPanel, a dedicated component
   // that owns essentially all of its own member/settings/media state internally.
   const [groupInfoOpen, setGroupInfoOpen] = useState(false);
+  const [contactInfoOpen, setContactInfoOpen] = useState(false);
   // Beta feedback: "...and also a clear conversation button" — a small menu on the open thread's
   // own header, distinct from the sidebar row's hide/delete-conversation icon.
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
@@ -1622,10 +1624,15 @@ export default function MessagesClient() {
           ) : (
             <>
               <div className="flex shrink-0 items-center gap-2 border-b border-bg4 px-2.5 py-2.5 sm:gap-3 sm:px-4 sm:py-3" data-testid="dm-header">
+                {/* Beta feedback: "Add a go back icon beside active chats profiles... before
+                    their avatar." Was mobile-only (deselecting has nowhere else to go on desktop
+                    since the sidebar's always visible there) — now shown whenever a conversation
+                    is open, on both: desktop just deselects back to the empty state instead of
+                    switching views, same handler either way. */}
                 <button
                   type="button"
                   onClick={() => setSelectedId(null)}
-                  className="text-muted hover:text-text sm:hidden"
+                  className="shrink-0 text-muted hover:text-text"
                   aria-label="Back to conversations"
                 >
                   <ArrowLeft className="h-5 w-5" />
@@ -1708,23 +1715,6 @@ export default function MessagesClient() {
                         </div>
                       )}
                     </div>
-                    {otherUid && !blockingMe && (
-                      <div className="hidden sm:block">
-                      <BlockButton
-                        targetUid={otherUid}
-                        targetLabel={otherName}
-                        compact
-                        onBlocked={() => setBlockedUids((s) => new Set(s).add(otherUid))}
-                        onUnblocked={() =>
-                          setBlockedUids((s) => {
-                            const next = new Set(s);
-                            next.delete(otherUid);
-                            return next;
-                          })
-                        }
-                      />
-                      </div>
-                    )}
                     {/* PART 5 — voice calls: a 1:1 call from a direct conversation (groups get their
                         own mesh call button below). */}
                     {otherUid && !blockingMe && (
@@ -1735,6 +1725,20 @@ export default function MessagesClient() {
                         className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted hover:bg-bg4 hover:text-text"
                       >
                         <Phone className="h-4 w-4" />
+                      </button>
+                    )}
+                    {/* Beta feedback: "Add the same pattern for direct messages" — groups' own
+                        chevron opens GroupInfoPanel; this is the 1:1 equivalent, opening
+                        ContactInfoPanel (which now also owns Block/Report, moved out of the
+                        header and the three-dot menu). */}
+                    {otherUid && (
+                      <button
+                        type="button"
+                        onClick={() => setContactInfoOpen(true)}
+                        aria-label="Contact info"
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted hover:bg-bg4 hover:text-text"
+                      >
+                        <ChevronRight className="h-4 w-4" />
                       </button>
                     )}
                   </>
@@ -1782,23 +1786,6 @@ export default function MessagesClient() {
                     <>
                       <div className="fixed inset-0 z-10" onClick={() => setHeaderMenuOpen(false)} />
                       <div className="glass absolute right-0 top-full z-20 mt-1 w-48 overflow-hidden rounded-xl p-1.5">
-                        {/* On phones the header has no room for the block icon, so it moves in here. */}
-                        {!isGroupThread && otherUid && !blockingMe && (
-                          <div className="px-1 py-1 sm:hidden">
-                            <BlockButton
-                              targetUid={otherUid}
-                              targetLabel={otherName}
-                              onBlocked={() => setBlockedUids((s) => new Set(s).add(otherUid))}
-                              onUnblocked={() =>
-                                setBlockedUids((s) => {
-                                  const next = new Set(s);
-                                  next.delete(otherUid);
-                                  return next;
-                                })
-                              }
-                            />
-                          </div>
-                        )}
                         {/* DM Feature Overhaul (Part F). */}
                         <button
                           type="button"
@@ -2858,6 +2845,30 @@ export default function MessagesClient() {
             setDmSettingsOpen(false);
             if (selectedId) handleHideConversation(selectedId);
           }}
+        />
+      )}
+
+      {/* Beta feedback: "Add the same pattern for direct messages" — the 1:1 equivalent of
+          GroupInfoPanel, reached from the chevron in a 1:1 thread's own header. */}
+      {selected && !isGroupThread && otherUid && (
+        <ContactInfoPanel
+          open={contactInfoOpen}
+          onClose={() => setContactInfoOpen(false)}
+          conversation={selected}
+          otherUid={otherUid}
+          otherProfile={otherProfile}
+          onDeleteConversation={() => {
+            setContactInfoOpen(false);
+            handleHideConversation(selected.id);
+          }}
+          onBlocked={() => setBlockedUids((s) => new Set(s).add(otherUid))}
+          onUnblocked={() =>
+            setBlockedUids((s) => {
+              const next = new Set(s);
+              next.delete(otherUid);
+              return next;
+            })
+          }
         />
       )}
     </div>
