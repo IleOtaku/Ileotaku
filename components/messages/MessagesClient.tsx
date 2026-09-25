@@ -137,6 +137,21 @@ export default function MessagesClient() {
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loadingConvos, setLoadingConvos] = useState(true);
+  const [composerDragActive, setComposerDragActive] = useState(false);
+
+  // Beta feedback: "The messages page title should show new messages counter... messages-
+  // ileotaku 5". Restores the static title on unmount so it never leaks onto whatever page comes
+  // next while that page's own metadata is still mounting in.
+  useEffect(() => {
+    if (!user) return;
+    const totalUnread = conversations
+      .filter((c) => !c.archivedBy?.[user.uid])
+      .reduce((sum, c) => sum + (c.unreadCounts?.[user.uid] ?? 0), 0);
+    document.title = totalUnread > 0 ? `Messages (${totalUnread}) — ÍléOtaku` : "Messages — ÍléOtaku";
+    return () => {
+      document.title = "ÍléOtaku — Africa's Manga Home";
+    };
+  }, [conversations, user]);
   const [sidebarQuery, setSidebarQuery] = useState("");
   // DM Feature Overhaul (Part I): collapsed by default, per the feature spec.
   const [archivedOpen, setArchivedOpen] = useState(false);
@@ -887,9 +902,9 @@ export default function MessagesClient() {
     void run();
   }
 
-  function handlePhotoVideoPicked(e: React.ChangeEvent<HTMLInputElement>) {
-    const picked = Array.from(e.target.files ?? []);
-    e.target.value = "";
+  /** Shared by the photo/video file input and drag-and-drop (see handleComposerDrop below) — both
+   * just need to hand this a raw file list. */
+  function stageMediaFiles(picked: File[]) {
     if (picked.length === 0 || !user || !selectedId || blockedFromSending()) return;
     const usable = picked.filter((f) => f.type.startsWith("image/") || f.type.startsWith("video/"));
     if (usable.length === 0) {
@@ -900,6 +915,28 @@ export default function MessagesClient() {
     if (usable.length < picked.length) toast(`${picked.length - usable.length} unsupported file(s) were skipped.`);
     setPreviewKind("media");
     setPreviewFiles(usable);
+  }
+
+  function handlePhotoVideoPicked(e: React.ChangeEvent<HTMLInputElement>) {
+    const picked = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    stageMediaFiles(picked);
+  }
+
+  // Beta feedback: "Allow drag and drop into dms."
+  function handleComposerDragOver(e: React.DragEvent) {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    setComposerDragActive(true);
+  }
+  function handleComposerDragLeave(e: React.DragEvent) {
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+    setComposerDragActive(false);
+  }
+  function handleComposerDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setComposerDragActive(false);
+    stageMediaFiles(Array.from(e.dataTransfer.files ?? []));
   }
 
   function handleAnyFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
@@ -1768,6 +1805,9 @@ export default function MessagesClient() {
                   content so bubbles stay crisp/readable regardless of the wallpaper. */}
               <div
                 className="relative min-h-0 flex-1"
+                onDragOver={handleComposerDragOver}
+                onDragLeave={handleComposerDragLeave}
+                onDrop={handleComposerDrop}
                 style={
                   selected?.wallpaperUrl
                     ? selected.wallpaperType === "image"
@@ -1776,6 +1816,11 @@ export default function MessagesClient() {
                     : undefined
                 }
               >
+                {composerDragActive && (
+                  <div className="pointer-events-none absolute inset-2 z-30 flex items-center justify-center rounded-2xl border-2 border-dashed border-gold bg-bg/90">
+                    <p className="font-cinzel text-sm text-gold">Drop to send</p>
+                  </div>
+                )}
                 {/* Beta feedback bug: "the blur moves alongside chats, it should be static." The
                     blur overlay used to be a child of the scrolling messages div itself — an
                     absolutely-positioned descendant's containing block scrolls right along with

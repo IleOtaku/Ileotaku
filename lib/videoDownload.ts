@@ -213,7 +213,14 @@ export async function downloadVideoWithWatermark(
     });
 
     onProgress?.(100);
-    saveBlob(new Blob(chunks, { type: mimeType || "video/webm" }), `${filename}_ileotaku.${extension}`);
+    const blob = new Blob(chunks, { type: mimeType || "video/webm" });
+    // Beta feedback bug: "doesn't save anything, just an empty file" — whatever silently starved
+    // the recorder of frames (a slow/rejected video.play() before the first paint, a backgrounded
+    // tab throttling rAF, ...), saveBlob() would still write out a 0-byte file with no indication
+    // anything went wrong. Failing loudly here at least surfaces it instead of handing back a
+    // useless download that looks like it worked.
+    if (blob.size < 1024) throw new Error("Recording produced no video data — try again with the tab in the foreground.");
+    saveBlob(blob, `${filename}_ileotaku.${extension}`);
   } finally {
     video.pause();
     video.removeAttribute("src");

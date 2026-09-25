@@ -31,7 +31,7 @@ import { Avatar } from "@/components/ui/Avatar";
 import { BirthdayBadge } from "@/components/ui/BirthdayBadge";
 import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import { useAuth } from "@/hooks/useAuth";
-import { uploadImage } from "@/lib/cloudinary";
+import { getVideoThumbnail, uploadImage } from "@/lib/cloudinary";
 import {
   addMembersToGroup,
   deleteGroup,
@@ -711,8 +711,16 @@ export default function GroupInfoPanel({
                     <div className="flex gap-2 overflow-x-auto pb-1">
                       {media.map((m) => (
                         <div key={m.id} className="h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-bg3">
+                          {/* Beta feedback bug: "media preview in group chat media tab ... showing
+                              broken images" — a video message's mediaUrl is the raw .mp4, which
+                              renders as a broken <img>; getVideoThumbnail derives its poster frame. */}
                           {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img loading="lazy" src={m.mediaUrl} alt="" className="h-full w-full object-cover" />
+                          <img
+                            loading="lazy"
+                            src={m.mediaType === "video" ? getVideoThumbnail(m.mediaUrl ?? "") : m.mediaUrl}
+                            alt=""
+                            className="h-full w-full object-cover"
+                          />
                         </div>
                       ))}
                     </div>

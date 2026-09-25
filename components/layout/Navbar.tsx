@@ -136,10 +136,15 @@ export default function Navbar() {
                 <Avatar
                   uid={user.uid}
                   photoURL={avatarURL}
-                  displayName={user.displayName ?? user.email ?? "U"}
+                  displayName={profile?.displayName ?? user.displayName ?? user.email ?? "U"}
                   size={32}
                 />
-                <span className="font-syne text-sm text-text">{user.displayName ?? "Reader"}</span>
+                {/* Beta feedback bug: "the profile preview/dropdown on navbar shows my previous
+                    display name" — user.displayName is Firebase Auth's copy, which only updates on
+                    an explicit updateProfile() call and never after an Edit Profile save (that only
+                    writes Firestore). profile.displayName (subscribeToUserProfile, live) is the one
+                    that's actually current. */}
+                <span className="font-syne text-sm text-text">{profile?.displayName ?? user.displayName ?? "Reader"}</span>
                 {isPlatinum && <span className="badge-plat">Platinum</span>}
                 <ChevronDown className="h-4 w-4 text-muted" />
               </button>

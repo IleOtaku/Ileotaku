@@ -173,8 +173,11 @@ export default function ReaderClient() {
         if (cancelled) return;
         setDetail(res.data);
 
+        // Same ascending order as chapters/isFirstChapter above — index 0 is Chapter 1, the sane
+        // default for a first-time open (the old `length - 1` opened straight into the newest
+        // chapter instead).
         const chapters = res.data.chapterList ?? [];
-        let initialIndex = chapters.length > 0 ? chapters.length - 1 : 0;
+        let initialIndex = 0;
         if (pendingChapterParam.current) {
           const parsed = Number(pendingChapterParam.current);
           if (Number.isInteger(parsed) && parsed >= 0 && parsed < chapters.length) {
@@ -284,7 +287,9 @@ export default function ReaderClient() {
           chapterIndex,
           chapterLabel: currentChapter.chapter,
           totalChapters: chapters.length,
-          progress: chapters.length > 0 ? (chapters.length - chapterIndex) / chapters.length : 0,
+          // Ascending chapterList (see isFirstChapter above): index 0 is Chapter 1, so progress
+          // grows with the index, not against it.
+          progress: chapters.length > 0 ? (chapterIndex + 1) / chapters.length : 0,
           updatedAt: new Date().toISOString(),
         });
         if (profile) await checkAndAwardAchievements(uid, { ...profile, chaptersRead });
@@ -366,14 +371,19 @@ export default function ReaderClient() {
     [router, mangaList]
   );
 
-  const isFirstChapter = chapters.length === 0 || chapterIndex === chapters.length - 1;
-  const isLastChapter = chapters.length === 0 || chapterIndex === 0;
+  // Beta feedback bug: "Go to next chapter button from the ads takes me back to previous
+  // chapter." chapterList (getPublishedSeriesDetail, lib/publishedSeries.ts) is ordered
+  // chapterNumber ASCENDING — chapters[0] is Chapter 1, chapters[length-1] is the latest — same
+  // convention ProseReaderClient already uses. This file had it backwards (treating index 0 as
+  // the latest chapter), so "next" decremented toward Chapter 1 instead of advancing.
+  const isFirstChapter = chapters.length === 0 || chapterIndex === 0;
+  const isLastChapter = chapters.length === 0 || chapterIndex === chapters.length - 1;
 
   function handlePrevChapter() {
-    if (!isFirstChapter) setChapterIndex((i) => Math.min(i + 1, chapters.length - 1));
+    if (!isFirstChapter) setChapterIndex((i) => Math.max(i - 1, 0));
   }
   function handleNextChapter() {
-    if (!isLastChapter) setChapterIndex((i) => Math.max(i - 1, 0));
+    if (!isLastChapter) setChapterIndex((i) => Math.min(i + 1, chapters.length - 1));
   }
 
   return (

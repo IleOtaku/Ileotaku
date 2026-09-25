@@ -78,30 +78,65 @@ function TierImage({ src, tier, className }: { src: string; tier?: CreatorPost["
   return <img loading="lazy" src={failed ? plain : derived} alt="" className={className} data-tier={tier ?? "standard"} onError={() => setFailed(true)} />;
 }
 
-function ImageGrid({ images, resLabel, tier }: { images: string[]; resLabel?: string; tier?: CreatorPost["imageResolution"] }) {
-  if (images.length === 0) return null;
-  const grid =
-    images.length === 1 ? (
-      <div className="mt-3 overflow-hidden rounded-xl border border-bg4">
-        <TierImage src={images[0]} tier={tier} className="max-h-[420px] w-full object-cover" />
-      </div>
-    ) : (
-      <div className="mt-3 grid grid-cols-2 gap-1.5 overflow-hidden rounded-xl border border-bg4">
-        {images.slice(0, 4).map((src, i) => (
-          <TierImage key={src + i} src={src} tier={tier} className="aspect-square w-full object-cover" />
+// Beta feedback bug: "posted 4 photos at once, no carousel, why?" — a multi-image post used to
+// render every photo squeezed into a static 2x2 grid (only the first 4 ever visible, none of them
+// full-size). A horizontal snap-scroller with dot indicators (TikTok/Instagram-style) shows each
+// photo full width and swipeable instead.
+function ImageCarousel({ images, resLabel, tier }: { images: string[]; resLabel?: string; tier?: CreatorPost["imageResolution"] }) {
+  const [active, setActive] = useState(0);
+  const trackRef = useRef<HTMLDivElement>(null);
+
+  function handleScroll() {
+    const el = trackRef.current;
+    if (!el) return;
+    setActive(Math.round(el.scrollLeft / el.clientWidth));
+  }
+
+  return (
+    <div className="relative mt-3">
+      <div
+        ref={trackRef}
+        onScroll={handleScroll}
+        className="flex snap-x snap-mandatory overflow-x-auto overflow-y-hidden rounded-xl border border-bg4 [&::-webkit-scrollbar]:hidden"
+        style={{ scrollbarWidth: "none" }}
+      >
+        {images.map((src, i) => (
+          <div key={src + i} className="aspect-square w-full shrink-0 snap-center">
+            <TierImage src={src} tier={tier} className="h-full w-full object-cover" />
+          </div>
         ))}
       </div>
-    );
-  return (
-    <div className="relative">
-      {grid}
       {resLabel && (
         <span className="absolute right-4 top-4 rounded-full bg-black/70 px-2 py-0.5 font-noto text-[10px] font-semibold text-gold">
           {resLabel}
         </span>
       )}
+      {images.length > 1 && (
+        <div className="absolute bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-black/50 px-2 py-1">
+          {images.map((_, i) => (
+            <span key={i} className={`h-1.5 w-1.5 rounded-full transition-colors ${i === active ? "bg-white" : "bg-white/40"}`} />
+          ))}
+        </div>
+      )}
     </div>
   );
+}
+
+function ImageGrid({ images, resLabel, tier }: { images: string[]; resLabel?: string; tier?: CreatorPost["imageResolution"] }) {
+  if (images.length === 0) return null;
+  if (images.length === 1) {
+    return (
+      <div className="relative mt-3 overflow-hidden rounded-xl border border-bg4">
+        <TierImage src={images[0]} tier={tier} className="max-h-[420px] w-full object-cover" />
+        {resLabel && (
+          <span className="absolute right-4 top-4 rounded-full bg-black/70 px-2 py-0.5 font-noto text-[10px] font-semibold text-gold">
+            {resLabel}
+          </span>
+        )}
+      </div>
+    );
+  }
+  return <ImageCarousel images={images} resLabel={resLabel} tier={tier} />;
 }
 
 export interface FeedPostCardProps {

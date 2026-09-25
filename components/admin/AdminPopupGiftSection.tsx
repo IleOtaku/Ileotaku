@@ -42,7 +42,13 @@ interface HistoryRow {
 }
 
 async function callGift<T>(init: { method: "GET" | "POST"; body?: unknown }): Promise<T> {
-  const token = await auth.currentUser?.getIdToken();
+  // Beta feedback bug: "Pop up gifts said there's an error when i tried posting" — the admin
+  // panel can sit open/idle for a while before someone uses this rarely-touched tool, and
+  // getIdToken() without `forceRefresh` can hand back a token that's already expired, which the
+  // authenticate() check on the server rejects with a generic "session expired" error. Forcing a
+  // fresh token on this specific privileged call costs one extra round-trip but never fails this
+  // way.
+  const token = await auth.currentUser?.getIdToken(true);
   if (!token) throw new Error("Please sign in again.");
   const res = await fetch("/api/admin/gift", {
     method: init.method,

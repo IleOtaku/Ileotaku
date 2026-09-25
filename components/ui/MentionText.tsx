@@ -56,7 +56,7 @@ export default function MentionText({ text, className }: MentionTextProps) {
   }
 
   return (
-    <span className={className}>
+    <span className={className ? `whitespace-pre-wrap ${className}` : "whitespace-pre-wrap"}>
       {parts.map((part, i) => {
         if (part.startsWith("@") && part.length > 1) {
           return (

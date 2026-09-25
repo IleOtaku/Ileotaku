@@ -5,6 +5,7 @@ import { AtSign, Calendar, Eye, Globe, MapPin, Sparkles, Users2 } from "lucide-r
 import CreatorPostsViewer from "@/components/creator/CreatorPostsViewer";
 import PostGridCard from "@/components/creator/PostGridCard";
 import PublishedWorkCard from "@/components/creator/PublishedWorkCard";
+import FollowListModal from "@/components/social/FollowListModal";
 import { EmptyState, Tabs } from "@/components/ui";
 import { formatBirthday } from "@/lib/birthday";
 import type { CreatorPost, PublishedSeries, UserProfile } from "@/types";
@@ -33,6 +34,11 @@ export default function CreatorProfileTabs({
   // Beta feedback: "The post section on user's profile should just be small cards... Tapping one
   // would open the post with a back arrow button top left."
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  // Beta feedback: "We should be able to see people's followers and their following when we
+  // search others profiles" — this tab previously only showed a follower COUNT, with no way to
+  // open the list (ProfileClient's own-profile view already had this via the same FollowListModal).
+  const [followersOpen, setFollowersOpen] = useState(false);
+  const [followingOpen, setFollowingOpen] = useState(false);
   // `works` is already the creator's PUBLISHED catalog (queried from publishedSeries — pending
   // and rejected creatorWorks never reach this component at all), so no status filter is needed
   // here the way the old creatorWorks-backed version required.
@@ -88,7 +94,7 @@ export default function CreatorProfileTabs({
           <div className="mx-auto flex max-w-xl flex-col gap-6">
             {creator.bio && <p className="font-noto text-sm leading-relaxed text-muted">{creator.bio}</p>}
 
-            <div className="grid grid-cols-2 gap-4 rounded-2xl border border-bg4 bg-bg2 p-5 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-4 rounded-2xl border border-bg4 bg-bg2 p-5 sm:grid-cols-3 lg:grid-cols-5">
               <div>
                 <Eye className="h-4 w-4 text-gold" />
                 <p className="mt-2 font-cinzel text-lg text-text">{totalReads.toLocaleString()}</p>
@@ -99,11 +105,16 @@ export default function CreatorProfileTabs({
                 <p className="mt-2 font-cinzel text-lg text-text">{published.length}</p>
                 <p className="font-noto text-xs text-muted">Works Published</p>
               </div>
-              <div>
+              <button type="button" onClick={() => setFollowersOpen(true)} className="text-left">
                 <Users2 className="h-4 w-4 text-gold" />
                 <p className="mt-2 font-cinzel text-lg text-text">{followerCount.toLocaleString()}</p>
-                <p className="font-noto text-xs text-muted">Followers</p>
-              </div>
+                <p className="font-noto text-xs text-muted underline-offset-2 hover:underline">Followers</p>
+              </button>
+              <button type="button" onClick={() => setFollowingOpen(true)} className="text-left">
+                <Users2 className="h-4 w-4 text-gold" />
+                <p className="mt-2 font-cinzel text-lg text-text">{(creator.following?.length ?? 0).toLocaleString()}</p>
+                <p className="font-noto text-xs text-muted underline-offset-2 hover:underline">Following</p>
+              </button>
               <div>
                 <Calendar className="h-4 w-4 text-gold" />
                 <p className="mt-2 font-cinzel text-lg text-text">{joined}</p>
@@ -162,6 +173,21 @@ export default function CreatorProfileTabs({
       {viewerIndex !== null && (
         <CreatorPostsViewer posts={posts} startIndex={viewerIndex} onClose={() => setViewerIndex(null)} />
       )}
+
+      <FollowListModal
+        open={followersOpen}
+        onClose={() => setFollowersOpen(false)}
+        title="Followers"
+        uid={creator.uid}
+        mode="followers"
+      />
+      <FollowListModal
+        open={followingOpen}
+        onClose={() => setFollowingOpen(false)}
+        title="Following"
+        uid={creator.uid}
+        mode="following"
+      />
     </div>
   );
 }
