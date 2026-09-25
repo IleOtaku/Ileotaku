@@ -15,6 +15,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { isSuspended, suspensionMessage } from "@/lib/suspension";
 import { getCreatorWorks, getUserProfile, subscribeToCreatorWorks, updateUserPrefs } from "@/lib/firestore";
 import CreatorFeedTab from "@/components/creator/CreatorFeedTab";
 import CreatorStickerPacksTab from "@/components/creator/CreatorStickerPacksTab";
@@ -107,6 +108,16 @@ export default function CreatorDashboardClient() {
   const [manageChaptersWorkId, setManageChaptersWorkId] = useState<string | null>(null);
   const [transferringWork, setTransferringWork] = useState<CreatorWork | null>(null);
   const [pendingTransfers, setPendingTransfers] = useState<OwnershipTransferRequest[]>([]);
+
+  // Beta feedback: suspended accounts "cannot upload works or chapters" — every entry point into
+  // an upload flow below checks this first instead of ever opening the modal.
+  function openIfNotSuspended(open: () => void) {
+    if (isSuspended(profile)) {
+      toast.error(suspensionMessage(profile));
+      return;
+    }
+    open();
+  }
 
   const isCreator = profile?.isCreator === true;
 
@@ -220,7 +231,13 @@ export default function CreatorDashboardClient() {
         </div>
 
         {isCreator ? (
-          <button type="button" onClick={() => setUploadOpen(true)} className="btn-primary">
+          <button
+            type="button"
+            onClick={() => openIfNotSuspended(() => setUploadOpen(true))}
+            disabled={isSuspended(profile)}
+            title={isSuspended(profile) ? suspensionMessage(profile) : undefined}
+            className="btn-primary disabled:cursor-not-allowed disabled:opacity-50"
+          >
             <Plus className="h-4 w-4" /> Upload New Work
           </button>
         ) : (
@@ -343,8 +360,10 @@ export default function CreatorDashboardClient() {
                       action={
                         <button
                           type="button"
-                          onClick={() => setUploadOpen(true)}
-                          className="btn-primary"
+                          onClick={() => openIfNotSuspended(() => setUploadOpen(true))}
+                          disabled={isSuspended(profile)}
+                          title={isSuspended(profile) ? suspensionMessage(profile) : undefined}
+                          className="btn-primary disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           <Plus className="h-4 w-4" /> Upload New Work
                         </button>
@@ -357,7 +376,7 @@ export default function CreatorDashboardClient() {
                       <WorkCard
                         key={work.id}
                         work={work}
-                        onAddChapter={() => setChapterWorkId(work.id)}
+                        onAddChapter={() => openIfNotSuspended(() => setChapterWorkId(work.id))}
                         onEditSeries={() => setEditingWork(work)}
                         onDeleteWork={() => setDeletingWork(work)}
                         onViewDrafts={() => setDraftsWorkId(work.id)}

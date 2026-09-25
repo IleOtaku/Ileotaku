@@ -10,6 +10,7 @@ import { PlatinumBadge } from "@/components/ui/Badges";
 import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import MentionText from "@/components/ui/MentionText";
 import { useAuth } from "@/hooks/useAuth";
+import { isSuspended, suspensionMessage } from "@/lib/suspension";
 import {
   addFeedComment,
   deleteFeedComment,
@@ -168,6 +169,10 @@ export default function FeedCommentSheet({ postId, postAuthorUid, open, onClose 
 
   async function handleSubmit() {
     if (!user || !profile || !text.trim() || posting) return;
+    if (isSuspended(profile)) {
+      toast.error(suspensionMessage(profile));
+      return;
+    }
     setPosting(true);
     try {
       await addFeedComment(postId, {
@@ -305,8 +310,9 @@ export default function FeedCommentSheet({ postId, postAuthorUid, open, onClose 
                     onKeyDown={(e) => {
                       if (e.key === "Enter") handleSubmit();
                     }}
-                    placeholder="Add a comment..."
-                    className="flex-1 rounded-full border border-white/15 bg-white/5 px-4 py-2 font-noto text-sm text-white placeholder:text-white/40 focus:outline-none"
+                    disabled={isSuspended(profile)}
+                    placeholder={isSuspended(profile) ? suspensionMessage(profile) : "Add a comment..."}
+                    className="flex-1 rounded-full border border-white/15 bg-white/5 px-4 py-2 font-noto text-sm text-white placeholder:text-white/40 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                   />
                   <button
                     type="button"

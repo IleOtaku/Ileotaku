@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { Shield } from "lucide-react";
 import { getAllUsers } from "@/lib/firestore";
 import { getFeedback, subscribeToPendingAppealCount, sweepInactiveVerifiedAccounts } from "@/lib/admin";
+import { subscribeToGroupReports } from "@/lib/groupReports";
 import { getAllApplications } from "@/lib/verification";
 import { Skeleton, Tabs } from "@/components/ui";
 import type { UserProfile } from "@/types";
@@ -18,6 +19,7 @@ const AdminAppealsTab = dynamic(() => import("./AdminAppealsTab"), { ssr: false 
 const AdminFeedbackTab = dynamic(() => import("./AdminFeedbackTab"), { ssr: false });
 const AdminFeedTab = dynamic(() => import("./AdminFeedTab"), { ssr: false });
 const AdminFinanceTab = dynamic(() => import("./AdminFinanceTab"), { ssr: false });
+const AdminGroupReportsTab = dynamic(() => import("./AdminGroupReportsTab"), { ssr: false });
 const AdminOverviewTab = dynamic(() => import("./AdminOverviewTab"), { ssr: false });
 const AdminReportsTab = dynamic(() => import("./AdminReportsTab"), { ssr: false });
 const AdminWorksTab = dynamic(() => import("./AdminWorksTab"), { ssr: false });
@@ -31,6 +33,7 @@ type SuperAdminTab =
   | "works"
   | "feed"
   | "reports"
+  | "groupReports"
   | "announcements"
   | "finance"
   | "feedback"
@@ -54,6 +57,7 @@ export default function SuperAdminDashboard({ adminName, isSuperAdmin = true }: 
   const [unresolvedFeedback, setUnresolvedFeedback] = useState(0);
   const [pendingAppeals, setPendingAppeals] = useState(0);
   const [pendingApplications, setPendingApplications] = useState(0);
+  const [pendingGroupReports, setPendingGroupReports] = useState(0);
 
   useEffect(() => {
     getAllUsers()
@@ -77,6 +81,14 @@ export default function SuperAdminDashboard({ adminName, isSuperAdmin = true }: 
     return subscribeToPendingAppealCount(setPendingAppeals);
   }, [isSuperAdmin]);
 
+  useEffect(
+    () =>
+      subscribeToGroupReports((reports) =>
+        setPendingGroupReports(reports.filter((r) => r.status === "pending" || r.status === "escalated").length)
+      ),
+    []
+  );
+
   useEffect(() => {
     getAllApplications()
       .then((apps) => setPendingApplications(apps.filter((a) => a.status === "pending").length))
@@ -89,6 +101,7 @@ export default function SuperAdminDashboard({ adminName, isSuperAdmin = true }: 
     { label: "Works", value: "works" },
     { label: "Feed", value: "feed" },
     { label: "Reports", value: "reports" },
+    { label: pendingGroupReports > 0 ? `Group Reports (${pendingGroupReports})` : "Group Reports", value: "groupReports" },
     { label: "Announcements", value: "announcements" },
     { label: "Finance", value: "finance" },
     { label: unresolvedFeedback > 0 ? `Feedback (${unresolvedFeedback})` : "Feedback", value: "feedback" },
@@ -164,6 +177,8 @@ export default function SuperAdminDashboard({ adminName, isSuperAdmin = true }: 
           {tab === "feed" && <AdminFeedTab />}
 
           {tab === "reports" && <AdminReportsTab />}
+
+          {tab === "groupReports" && <AdminGroupReportsTab isSuperAdmin={isSuperAdmin} />}
 
           {isSuperAdmin && tab === "announcements" && <AdminAnnouncementsTab />}
 

@@ -9,6 +9,7 @@ import { Avatar } from "@/components/ui/Avatar";
 import { useAuth } from "@/hooks/useAuth";
 import { getUserProfile } from "@/lib/firestore";
 import { tipCreator } from "@/lib/payments";
+import { isSuspended, suspensionMessage } from "@/lib/suspension";
 
 export interface TipModalProps {
   open: boolean;
@@ -35,6 +36,10 @@ export default function TipModal({ open, onClose, creatorId, creatorName, mangaI
 
   async function handleSend() {
     if (!user || !creatorId || effectiveAmount <= 0) return;
+    if (isSuspended(profile)) {
+      toast.error(suspensionMessage(profile));
+      return;
+    }
     setSending(true);
     try {
       const result = await tipCreator(user, creatorId, effectiveAmount, mangaId);
@@ -121,11 +126,16 @@ export default function TipModal({ open, onClose, creatorId, creatorName, mangaI
               </p>
             )}
 
+            {isSuspended(profile) && (
+              <p className="rounded-lg border border-clay/30 bg-clay/10 p-3 font-noto text-xs text-clay2">
+                {suspensionMessage(profile)}.
+              </p>
+            )}
             <button
               type="button"
               onClick={handleSend}
-              disabled={sending || insufficientBalance || effectiveAmount <= 0 || !user}
-              className="btn-primary w-full justify-center"
+              disabled={sending || insufficientBalance || effectiveAmount <= 0 || !user || isSuspended(profile)}
+              className="btn-primary w-full justify-center disabled:cursor-not-allowed disabled:opacity-50"
             >
               {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : `Send ${effectiveAmount} 🪙 Tip`}
             </button>

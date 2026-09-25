@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import { AnimatePresence, motion } from "framer-motion";
 import { ChevronLeft, ChevronRight, Coins, Lock, Loader2, Moon, Settings2, Sun, X } from "lucide-react";
@@ -37,6 +37,9 @@ import type { PublishedChapter, PublishedSeries, ReadingPreferences } from "@/ty
 
 export interface ProseReaderClientProps {
   workId: string;
+  /** 1-indexed chapter number from the /read/[chapterId] route segment — falls back to the last
+   * published chapter (a fresh "keep reading" open) when missing or out of range. */
+  initialChapterNumber?: number;
 }
 
 type FontSize = "sm" | "md" | "lg" | "xl";
@@ -114,9 +117,8 @@ function renderParagraph(
  * machinery the manga reader's ImportedContentGate does (a chapter's own author-set coinPrice,
  * Platinum bypass), just rendered as an inline text-blur gate instead of an image backdrop.
  */
-export default function ProseReaderClient({ workId }: ProseReaderClientProps) {
+export default function ProseReaderClient({ workId, initialChapterNumber }: ProseReaderClientProps) {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { user, profile } = useAuth();
 
   const [series, setSeries] = useState<PublishedSeries | null>(null);
@@ -200,12 +202,8 @@ export default function ProseReaderClient({ workId }: ProseReaderClientProps) {
       setChapters(c);
       if (!initializedFromUrl.current) {
         initializedFromUrl.current = true;
-        const chapterParam = Number(searchParams.get("chapter"));
-        setChapterIndex(
-          Number.isInteger(chapterParam) && chapterParam >= 0 && chapterParam < c.length
-            ? chapterParam
-            : Math.max(0, c.length - 1)
-        );
+        const wanted = (initialChapterNumber ?? 0) - 1;
+        setChapterIndex(wanted >= 0 && wanted < c.length ? wanted : Math.max(0, c.length - 1));
       }
       setLoading(false);
     });
@@ -375,7 +373,7 @@ export default function ProseReaderClient({ workId }: ProseReaderClientProps) {
       setChapterIndex(index);
       paragraphRefs.current = [];
       window.scrollTo({ top: 0 });
-      router.replace(`/story/${workId}?chapter=${index}`, { scroll: false });
+      router.replace(`/story/${workId}/read/${index + 1}`, { scroll: false });
     },
     [router, workId]
   );

@@ -67,6 +67,7 @@ import { useVoiceNote, type VoiceDraft } from "@/hooks/useVoiceNote";
 import { VOICE_MAX_SECONDS_FREE, VOICE_MAX_SECONDS_PLATINUM } from "@/lib/voiceRecorder";
 import { useAuth } from "@/hooks/useAuth";
 import { getBlockedUsers, isBlockedBy } from "@/lib/blocking";
+import { isSuspended, suspensionMessage } from "@/lib/suspension";
 import { uploadAnyFile, uploadImage, uploadImageWithProgress, uploadVideo, uploadVoiceNote } from "@/lib/cloudinary";
 import {
   addReaction,
@@ -793,11 +794,7 @@ export default function MessagesClient() {
 
   async function handleSend() {
     if (!user || !selectedId || !text.trim()) return;
-    const other = conversations.find((c) => c.id === selectedId)?.participants.find((id) => id !== user.uid);
-    if ((other && blockedUids.has(other)) || blockingMe) {
-      toast.error("You can't message this user.");
-      return;
-    }
+    if (blockedFromSending()) return;
     setSending(true);
     const value = text;
     const replyTo = replyingTo ?? undefined;
@@ -849,6 +846,10 @@ export default function MessagesClient() {
   // go through) rather than growing branches for each media kind.
   function blockedFromSending(): boolean {
     if (!user || !selectedId) return true;
+    if (isSuspended(profile)) {
+      toast.error(suspensionMessage(profile));
+      return true;
+    }
     const other = conversations.find((c) => c.id === selectedId)?.participants.find((id) => id !== user.uid);
     if ((other && blockedUids.has(other)) || blockingMe) {
       toast.error("You can't message this user.");
@@ -2395,8 +2396,9 @@ export default function MessagesClient() {
                         onChange={handleTextareaInput}
                         onKeyDown={handleKeyDown}
                         rows={1}
-                        placeholder="Type a message..."
-                        className="input-base min-w-0 flex-1 resize-none overflow-y-auto"
+                        disabled={isSuspended(profile)}
+                        placeholder={isSuspended(profile) ? suspensionMessage(profile) : "Type a message..."}
+                        className="input-base min-w-0 flex-1 resize-none overflow-y-auto disabled:cursor-not-allowed disabled:opacity-60"
                         style={{ maxHeight: MAX_TEXTAREA_HEIGHT }}
                       />
                       <button

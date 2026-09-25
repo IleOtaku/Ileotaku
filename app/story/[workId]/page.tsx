@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import ProseReaderClient from "@/components/reader/ProseReaderClient";
+import ProseDetailClient from "@/components/reader/ProseDetailClient";
 import { getPublishedSeries } from "@/lib/publishedSeries";
 
 interface StoryPageProps {
@@ -11,6 +11,7 @@ export async function generateMetadata({ params }: StoryPageProps): Promise<Meta
   return { title: series?.title ?? "Prose Story" };
 }
 
+/** Prose work details/landing page — the reader itself lives at /story/[workId]/read/[chapterId]. */
 export default function StoryPage({ params }: StoryPageProps) {
-  return <ProseReaderClient workId={params.workId} />;
+  return <ProseDetailClient workId={params.workId} />;
 }

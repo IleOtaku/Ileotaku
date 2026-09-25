@@ -7,7 +7,6 @@ import { ArrowLeft, ArrowUp, Plus, Sparkles, UsersRound } from "lucide-react";
 import TikTokFeedItem from "./TikTokFeedItem";
 import PostComposer from "./PostComposer";
 import FeedSoundToggle from "./FeedSoundToggle";
-import { Modal } from "@/components/ui";
 import { useAuth } from "@/hooks/useAuth";
 import { getBlockedUsers } from "@/lib/blocking";
 import {
@@ -358,14 +357,14 @@ export default function FeedClient() {
         </div>
       </div>
 
-      <Modal open={composerOpen} onClose={() => setComposerOpen(false)} title="Create Post" centered>
-        <PostComposer
-          onPosted={() => {
-            setComposerOpen(false);
-            loadFirstPage(tab);
-          }}
-        />
-      </Modal>
+      <PostComposer
+        open={composerOpen}
+        onOpenChange={setComposerOpen}
+        onPosted={() => {
+          setComposerOpen(false);
+          loadFirstPage(tab);
+        }}
+      />
     </div>
   );
 }

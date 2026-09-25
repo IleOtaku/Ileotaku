@@ -3,7 +3,7 @@
 import { useState } from "react";
 import toast from "react-hot-toast";
 import { useAuth } from "@/hooks/useAuth";
-import { downloadMediaDirect, downloadVideoWithWatermark } from "@/lib/videoDownload";
+import { downloadMediaDirect, downloadWatermarkedVideo } from "@/lib/videoDownload";
 import { getUserProfile } from "@/lib/firestore";
 import type { CreatorPost } from "@/types";
 
@@ -49,11 +49,9 @@ export function usePostDownload(post: DownloadablePost) {
         return;
       }
 
-      toast.loading("Preparing download... adding watermark", { id: toastId });
+      toast.loading("Preparing download...", { id: toastId });
       try {
-        await downloadVideoWithWatermark(post.videoUrl, safeName(post), post.handle ?? author?.handle ?? "", (percent) =>
-          toast.loading(`Preparing download... adding watermark ${percent}%  (keep this tab open)`, { id: toastId })
-        );
+        await downloadWatermarkedVideo(post.videoUrl, safeName(post));
         toast.success("Downloaded with the ÍléOtaku watermark.", { id: toastId });
       } catch (error) {
         console.error("[download] watermark failed:", error);

@@ -20,6 +20,7 @@ import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import MentionText from "@/components/ui/MentionText";
 import { useAuth } from "@/hooks/useAuth";
 import { getBlockedUsers } from "@/lib/blocking";
+import { isSuspended, suspensionMessage } from "@/lib/suspension";
 import { deleteComment, editComment, postComment, subscribeToComments, toggleCommentLike } from "@/lib/firestore";
 import { formatPostTimestamp } from "@/lib/utils";
 import BlockUserModal from "./BlockUserModal";
@@ -328,6 +329,10 @@ export default function CommentSection({ mangaId, chapterId, variant = "page" }:
 
   async function handlePost() {
     if (!user) return;
+    if (isSuspended(profile)) {
+      toast.error(suspensionMessage(profile));
+      return;
+    }
     const trimmed = text.trim();
     if (!trimmed) return;
     setPosting(true);
@@ -357,6 +362,10 @@ export default function CommentSection({ mangaId, chapterId, variant = "page" }:
 
   async function handleReply(parentId: string) {
     if (!user) return;
+    if (isSuspended(profile)) {
+      toast.error(suspensionMessage(profile));
+      return;
+    }
     const trimmed = replyText.trim();
     if (!trimmed) return;
     try {
@@ -497,8 +506,9 @@ export default function CommentSection({ mangaId, chapterId, variant = "page" }:
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={2}
-          placeholder="Share your thoughts..."
-          className="input-base w-full resize-none"
+          disabled={isSuspended(profile)}
+          placeholder={isSuspended(profile) ? suspensionMessage(profile) : "Share your thoughts..."}
+          className="input-base w-full resize-none disabled:cursor-not-allowed disabled:opacity-60"
           style={{ minHeight: "80px", fontSize: "16px" }}
         />
         <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

@@ -53,17 +53,18 @@ interface UserLite {
   photoURL?: string;
   isPlatinum: boolean;
   isCreator: boolean;
-  /** Beta feedback: "Only verified creators earn. The rest don't." — see earnsMoney(). */
   earnsMoney: boolean;
 }
 
-/** Cash earnings are only for VERIFIED creators (a verified Creator or Publisher, or the Founder/Admin
- * accounts). Everyone else can still be tipped and can still sell chapters for coins, but no naira accrues
- * to them and no payout is computed. */
+/** Policy update (superseding the earlier "Only verified creators earn" beta rule): every creator
+ * or publisher earns cash, priced chapters, tips, and ad revenue alike, and can withdraw it —
+ * verification no longer gates any of that. What verification actually changes now is entirely
+ * elsewhere: higher reach in the For You algorithm, and the verified badge. Kept as its own
+ * function (rather than inlining `isCreator || isPublisher` at every call site) so that if
+ * eligibility ever needs a real carve-out again (e.g. an account under review), there's one place
+ * to add it back. */
 export function earnsMoney(u: Record<string, unknown>): boolean {
-  if (u.isFounder === true || u.isAdmin === true) return true;
-  const type = (u.verifiedType as string | null | undefined) ?? (u.isPublisher === true ? "publisher" : undefined);
-  return u.isVerified === true && (type === "creator" || type === "publisher");
+  return u.isFounder === true || u.isAdmin === true || u.isCreator === true || u.isPublisher === true;
 }
 
 /** Everything one period's calculation needs, fetched once and shared across every creator. */

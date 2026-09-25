@@ -10,6 +10,7 @@ import NotificationPrompt from "@/components/layout/NotificationPrompt";
 import Preloader from "@/components/layout/Preloader";
 import ServiceWorkerRegister from "@/components/layout/ServiceWorkerRegister";
 import SiteChrome from "@/components/layout/SiteChrome";
+import SuspensionBanner from "@/components/layout/SuspensionBanner";
 import IncomingCallListener from "@/components/messages/IncomingCallListener";
 import GroupCallHost from "@/components/messages/GroupCallHost";
 import GiftPopup from "@/components/layout/GiftPopup";
@@ -103,6 +104,7 @@ export default function RootLayout({
             <FeedAudioProvider>
               <MaintenanceGate>
                 <BannedGate>
+                  <SuspensionBanner />
                   <SiteChrome>{children}</SiteChrome>
                 </BannedGate>
               </MaintenanceGate>

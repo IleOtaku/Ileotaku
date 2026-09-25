@@ -13,6 +13,7 @@ import {
   Check,
   Clock,
   Copy,
+  Flag,
   Link2,
   Loader2,
   LogOut,
@@ -60,6 +61,7 @@ import {
   type GroupVerificationRequest,
 } from "@/lib/groupVerification";
 import type { Conversation, DMMessage, GroupCall, UserProfile } from "@/types";
+import ReportGroupModal from "./ReportGroupModal";
 import WallpaperPicker from "./WallpaperPicker";
 
 export interface GroupInfoPanelProps {
@@ -135,6 +137,7 @@ export default function GroupInfoPanel({
   const [memberSearch, setMemberSearch] = useState("");
   const [memberActionUid, setMemberActionUid] = useState<string | null>(null);
   const [tagEditUid, setTagEditUid] = useState<string | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
   const [verifyRequest, setVerifyRequest] = useState<GroupVerificationRequest | null | undefined>(undefined);
   const [verifyReason, setVerifyReason] = useState("");
   const [verifyBusy, setVerifyBusy] = useState(false);
@@ -1001,6 +1004,17 @@ export default function GroupInfoPanel({
 
                 {/* ---- Danger Zone ---- */}
                 <div className="flex flex-col gap-2 border-t border-bg4 pt-3">
+                  {/* Beta feedback: "Add a gc report feature that sends main admin and/or sub
+                      admins the report and shows the last 15 messages sent on the group." No
+                      dedicated three-dot menu exists on the group info panel today — this lives
+                      here in the Danger Zone, the panel's existing home for group-level actions. */}
+                  <button
+                    type="button"
+                    onClick={() => setReportOpen(true)}
+                    className="flex items-center justify-center gap-2 rounded-lg py-2 font-noto text-sm font-semibold text-muted hover:bg-bg3 hover:text-clay2"
+                  >
+                    <Flag className="h-4 w-4" /> Report Group
+                  </button>
                   {conversation.creatorUid === user?.uid ? (
                     <button
                       type="button"
@@ -1029,6 +1043,7 @@ export default function GroupInfoPanel({
             conversationId={conversation.id}
             currentBlur={conversation.wallpaperBlur ?? false}
           />
+          <ReportGroupModal open={reportOpen} onClose={() => setReportOpen(false)} conversation={conversation} />
         </>
       )}
     </AnimatePresence>

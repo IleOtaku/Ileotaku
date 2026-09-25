@@ -561,9 +561,10 @@ service cloud.firestore {
         && request.resource.data.participants.hasAll(resource.data.participants)
         && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(["participants", "participantNames", "participantPhotos", "unreadCounts"]);
-      // The group's creator only (deleteGroup in lib/dms.ts) — a 1:1 conversation is never
-      // deleted, only left implicitly by no longer being messaged.
-      allow delete: if isSignedIn() && resource.data.creatorUid == request.auth.uid;
+      // The group's creator (deleteGroup in lib/dms.ts, leaving/closing your own group), or an
+      // admin acting on a group report (adminDeleteGroupForReport in lib/groupReports.ts) — a 1:1
+      // conversation is never deleted, only left implicitly by no longer being messaged.
+      allow delete: if isSignedIn() && (resource.data.creatorUid == request.auth.uid || isAdmin());
 
       match /messages/{messageId} {
         allow read: if isSignedIn()
@@ -968,6 +969,18 @@ service cloud.firestore {
         || (isSignedIn() && resource.data.requestedBy == request.auth.uid
           && resource.data.status == "rejected" && request.resource.data.status == "pending");
       allow delete: if isAdmin();
+    }
+
+    // ---------------------------- group chat reports ----------------------------
+    // groupReports/{reportId} — any signed-in member can file one (submitGroupReport,
+    // lib/groupReports.ts); only an admin (sub or super — isAdmin() covers both, same as every
+    // other admin-gated collection in this file) can read the queue or act on one. No client
+    // delete: resolved reports stay as the moderation record.
+    match /groupReports/{reportId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn() && request.resource.data.reportedBy == request.auth.uid;
+      allow update: if isAdmin();
+      allow delete: if false;
     }
 
     // ---------------------------- typing indicators (Part 10) ----------------------------

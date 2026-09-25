@@ -61,6 +61,7 @@ const TYPE_ICON: Record<NotificationType, LucideIcon> = {
   [NotificationType.EARNINGS_MILESTONE]: Wallet,
   [NotificationType.BADGE_APPROVED]: Award,
   [NotificationType.MODERATION_ACTION]: Ban,
+  [NotificationType.GROUP_REPORT_ESCALATED]: Ban,
   [NotificationType.GROUP_ADDED]: Users,
   [NotificationType.GROUP_MENTION]: AtSign,
   [NotificationType.OWNERSHIP_TRANSFER_REQUEST]: RefreshCw,

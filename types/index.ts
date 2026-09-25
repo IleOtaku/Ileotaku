@@ -750,6 +750,9 @@ export enum NotificationType {
   EARNINGS_MILESTONE = "EARNINGS_MILESTONE",
   BADGE_APPROVED = "BADGE_APPROVED",
   MODERATION_ACTION = "MODERATION_ACTION",
+  /** A Sub Admin escalated a group report — sent to every Super Admin so it shows up in their
+   * pending approvals (see lib/groupReports.ts's escalateGroupReport). */
+  GROUP_REPORT_ESCALATED = "GROUP_REPORT_ESCALATED",
   GROUP_ADDED = "GROUP_ADDED",
   GROUP_MENTION = "GROUP_MENTION",
   OWNERSHIP_TRANSFER_REQUEST = "OWNERSHIP_TRANSFER_REQUEST",
@@ -1526,4 +1529,47 @@ export interface GroupCall {
   endedAt?: string;
   /** Seconds. */
   duration?: number;
+}
+
+/* ---------------------------- Group chat reports ---------------------------- */
+
+export type GroupReportReason = "spam" | "harassment" | "inappropriate" | "underage" | "other";
+export type GroupReportStatus = "pending" | "under_review" | "escalated" | "resolved";
+
+/** One captured message, snapshotted at report time — kept alongside the report itself rather
+ * than a live reference, since the messages a report is ABOUT should read the same during review
+ * even if the group's conversation moves on or those messages later disappear/get edited. */
+export interface ReportedMessageSnapshot {
+  id: string;
+  senderId: string;
+  senderName: string;
+  text: string;
+  createdAt: string;
+}
+
+/** `groupReports/{reportId}` — a member's report of an entire group (not one message), reviewed
+ * by Sub/Super Admins. Sub Admins can temp-ban or escalate; only a Super Admin can perma-ban a
+ * group's members or delete the group outright. See components/messages/ReportGroupModal.tsx
+ * (submission) and components/admin/AdminGroupReportsTab.tsx (triage). */
+export interface GroupReport {
+  id: string;
+  groupId: string;
+  groupName: string;
+  groupPhotoURL?: string;
+  reportedBy: string;
+  reportedByName: string;
+  reason: GroupReportReason;
+  description: string;
+  last15Messages: ReportedMessageSnapshot[];
+  status: GroupReportStatus;
+  /** Set when a Sub Admin escalates — their own note explaining why, shown to the Super Admin
+   * alongside the original report. */
+  escalationNote?: string;
+  escalatedBy?: string;
+  escalatedAt?: string;
+  resolvedBy?: string;
+  resolvedAt?: string;
+  /** What actually happened when this was resolved/escalated — shown in the admin tab's history. */
+  resolution?: "dismissed" | "temp_banned" | "perma_banned" | "group_deleted";
+  createdAt: string;
 }
