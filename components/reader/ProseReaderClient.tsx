@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import { AnimatePresence, motion } from "framer-motion";
 import { ChevronLeft, ChevronRight, Coins, Lock, Loader2, Moon, Settings2, Sun, X } from "lucide-react";
+import AdSlot from "@/components/ads/AdSlot";
 import CommentSection from "@/components/social/CommentSection";
 import { Skeleton } from "@/components/ui";
 import { Avatar } from "@/components/ui/Avatar";
@@ -419,6 +420,16 @@ export default function ProseReaderClient({ workId }: ProseReaderClientProps) {
   return (
     <div className="min-h-screen" style={{ backgroundColor: palette.bg, color: palette.text }}>
       <div className="kente-bar" />
+
+      {/* Beta feedback: "bring back the side banner ads for free users in prose... they should
+          just be on the sides, not imposing." Fixed, narrow, large-screens-only rails — AdSlot
+          itself already renders nothing at all for Platinum readers or while auth is loading. */}
+      <div className="pointer-events-none fixed inset-y-0 left-0 z-0 hidden w-40 items-center justify-center xl:flex">
+        <AdSlot placement="profile-sidebar" className="pointer-events-auto max-h-[600px] w-36" />
+      </div>
+      <div className="pointer-events-none fixed inset-y-0 right-0 z-0 hidden w-40 items-center justify-center xl:flex">
+        <AdSlot placement="profile-sidebar" className="pointer-events-auto max-h-[600px] w-36" />
+      </div>
 
       <div className="fixed inset-x-0 top-1 z-20 h-1 bg-black/10">
         <div className="h-full bg-clay transition-[width] duration-150" style={{ width: `${progress}%` }} />

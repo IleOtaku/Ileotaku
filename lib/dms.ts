@@ -132,6 +132,24 @@ export interface SendDMOptions {
   sharedPostMediaUrl?: string;
 }
 
+/**
+ * Beta feedback: "Right now, anyone can message anyone... make it so, you can only send one
+ * message to someone you've not chatted before... other messages won't send till that person
+ * replies... and you can't call till that person replies." Applies only to a fresh 1:1
+ * conversation where the CURRENT sender sent its very first message and the other side has never
+ * sent anything back — a reply from either side, at any point, lifts this permanently (it never
+ * re-applies once the two of them have actually talked). Never applies to groups, and never
+ * restricts the recipient of an unsolicited first message from replying freely.
+ */
+export async function isAwaitingFirstReply(conversationId: string, senderId: string, recipientId: string): Promise<boolean> {
+  const messages = collection(db, CONVERSATIONS, conversationId, "messages");
+  const firstSnap = await getDocs(query(messages, orderBy("createdAt", "asc"), limit(1)));
+  if (firstSnap.empty) return false; // nothing sent yet — this send would BE the opener
+  if ((firstSnap.docs[0].data() as DMMessage).senderId !== senderId) return false; // they messaged first
+  const recipientReplied = await getDocs(query(messages, where("senderId", "==", recipientId), limit(1)));
+  return recipientReplied.empty;
+}
+
 export async function sendDM(
   conversationId: string,
   senderId: string,
@@ -151,6 +169,12 @@ export async function sendDM(
     // however many members besides the sender. Bumping only the first one (the original,
     // 1:1-only implementation) silently left every other group member's unread count frozen.
     const recipientIds = convo.participants.filter((id) => id !== senderId);
+
+    if (convo.type !== "group" && recipientIds.length === 1) {
+      if (await isAwaitingFirstReply(conversationId, senderId, recipientIds[0])) {
+        throw new Error("Wait for them to reply before sending another message.");
+      }
+    }
 
     // DM overhaul: disappearing messages — stamped at send-time from the conversation's current
     // setting, so toggling it later never retroactively changes an already-sent message's fate.

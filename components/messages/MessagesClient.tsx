@@ -15,6 +15,7 @@ import {
   Clock,
   Copy,
   Download,
+  Forward,
   ImagePlus,
   Loader2,
   MoreHorizontal,
@@ -58,6 +59,7 @@ import SharePickerModal, { type SharedManga, type SharedPost } from "./SharePick
 import StickerPicker from "./StickerPicker";
 import KeptMessagesPanel from "./KeptMessagesPanel";
 import MediaPreviewModal, { type MediaPreviewResult } from "./MediaPreviewModal";
+import ForwardMessageModal from "./ForwardMessageModal";
 import { downloadMediaDirect } from "@/lib/videoDownload";
 import PendingBubble, { type PendingSend } from "./PendingBubble";
 import { VoiceMicButton, VoicePreviewBar, VoiceRecordingBar } from "./VoiceNoteBars";
@@ -74,6 +76,7 @@ import {
   deleteMessage,
   editMessage,
   hideConversationForUser,
+  isAwaitingFirstReply,
   keepMessage,
   markDMRead,
   removeReaction,
@@ -231,6 +234,7 @@ export default function MessagesClient() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [replyingTo, setReplyingTo] = useState<MessageReplyTo | null>(null);
+  const [forwardingMessage, setForwardingMessage] = useState<DMMessage | null>(null);
   const [reactionViewer, setReactionViewer] = useState<{ emoji: string; uids: string[] } | null>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressFiredRef = useRef(false);
@@ -555,6 +559,12 @@ export default function MessagesClient() {
       toast.error("You're already on a call.");
       return;
     }
+    // Beta feedback: "...and you can't call till that person replies" — same first-reply gate as
+    // sendDM, applied to calling too.
+    if (selectedId && (await isAwaitingFirstReply(selectedId, user.uid, targetUid))) {
+      toast.error("Wait for them to reply before calling.");
+      return;
+    }
     // Beta feedback bug: "we can't hear each other on calls" — checked up front so a mic the
     // browser already knows is blocked never gets as far as showing a ringing/calling screen.
     if ((await checkMicrophonePermission()) === "denied") {
@@ -817,8 +827,8 @@ export default function MessagesClient() {
       // getConversations refetch isn't needed for the sidebar (subscribeToConversations already
       // picks up the updated lastMessage/lastMessageAt in real time); kept as a no-op-safe
       // read only if that ever needs a manual nudge.
-    } catch {
-      toast.error("Couldn't send your message.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't send your message.");
       setText(value);
       setReplyingTo(replyTo ?? null);
       setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
@@ -851,8 +861,8 @@ export default function MessagesClient() {
     if (!user || !selectedId || blockedFromSending()) return;
     try {
       await sendDM(selectedId, user.uid, "", options);
-    } catch {
-      toast.error("Couldn't send that.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't send that.");
     }
   }
 
@@ -2126,6 +2136,19 @@ export default function MessagesClient() {
                               >
                                 <Reply className="h-4 w-4" /> Reply
                               </button>
+                              {!m.isSystem && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    closeMenu();
+                                    setForwardingMessage(m);
+                                  }}
+                                  data-testid="forward-message"
+                                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-left font-noto text-sm text-text hover:bg-bg4"
+                                >
+                                  <Forward className="h-4 w-4" /> Forward
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 onClick={() => handleCopy(m)}
@@ -2419,6 +2442,15 @@ export default function MessagesClient() {
           <InAppCamera open={cameraOpen} onClose={() => setCameraOpen(false)} onCapture={handleCameraCapture} />
           <GifPicker open={gifPickerOpen} onClose={() => setGifPickerOpen(false)} onSelect={handleGifSelected} />
           <StickerPicker open={stickerPickerOpen} onClose={() => setStickerPickerOpen(false)} onSelect={handleStickerSelected} />
+          {user && (
+            <ForwardMessageModal
+              open={!!forwardingMessage}
+              onClose={() => setForwardingMessage(null)}
+              message={forwardingMessage}
+              conversations={conversations}
+              currentUid={user.uid}
+            />
+          )}
           {sharePickerMode && (
             <SharePickerModal
               open
