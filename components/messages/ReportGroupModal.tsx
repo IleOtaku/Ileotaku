@@ -60,7 +60,13 @@ export default function ReportGroupModal({ open, onClose, conversation }: Report
   }
 
   return (
-    <Modal open={open} onClose={handleClose} title={submitted ? undefined : "Report Group"}>
+    // Beta feedback bug: "When i click report group, the groupchat about panel stops me from
+    // tapping it, and when i tap it, it goes and takes the report panel along." Modal's default
+    // z-index (100) sits BELOW GroupInfoPanel's own backdrop/slide-in panel (z-[130]/z-[131]), so
+    // this modal was rendering behind it — taps landed on GroupInfoPanel instead, including its
+    // backdrop's onClose, which unmounts GroupInfoPanel and (since this modal lives inside its
+    // JSX tree) this modal right along with it.
+    <Modal open={open} onClose={handleClose} title={submitted ? undefined : "Report Group"} zIndex={140}>
       {submitted ? (
         <div className="flex flex-col items-center gap-3 py-4 text-center">
           <CircleCheckBig className="h-10 w-10 text-green2" />

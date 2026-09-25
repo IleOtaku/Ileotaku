@@ -6,6 +6,7 @@ import toast from "react-hot-toast";
 import { AnimatePresence, motion } from "framer-motion";
 import { Bell, BellOff, Clock, Lock, Palette, Trash2, User, X } from "lucide-react";
 import BlockButton from "@/components/social/BlockButton";
+import ReportButton from "@/components/social/ReportButton";
 import { useAuth } from "@/hooks/useAuth";
 import {
   muteConversation,
@@ -318,7 +319,15 @@ export default function DMSettingsPanel({
                   >
                     <Trash2 className="h-4 w-4" /> Delete conversation
                   </button>
-                  {otherUid && otherName && <BlockButton targetUid={otherUid} targetLabel={otherName} />}
+                  {otherUid && otherName && (
+                    <>
+                      <BlockButton targetUid={otherUid} targetLabel={otherName} />
+                      {/* Beta feedback: "Where's the report user feature in 1 on 1 dms not
+                          groups?" — groups already had Report Group; this was the missing 1:1
+                          equivalent. */}
+                      <ReportButton targetType="user" targetId={otherUid} targetUserId={otherUid} label={`Report ${otherName}`} zIndex={140} />
+                    </>
+                  )}
                 </div>
               </section>
 

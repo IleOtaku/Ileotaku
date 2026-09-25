@@ -16,6 +16,10 @@ export interface ReportModalProps {
   targetId: string;
   /** The uid of the person being reported, when known — lets a moderator action them directly. */
   targetUserId?: string;
+  /** Pass a higher value when this opens from inside another slide-in panel (e.g. DMSettingsPanel/
+   * GroupInfoPanel, both z-[130]/z-[131]) — Modal's own default (100) would otherwise render
+   * behind it, exactly the bug ReportGroupModal had ("the panel stops me from tapping it"). */
+  zIndex?: number;
 }
 
 const REASONS: { label: string; value: ReportReason }[] = [
@@ -34,6 +38,7 @@ export default function ReportModal({
   targetType,
   targetId,
   targetUserId,
+  zIndex,
 }: ReportModalProps) {
   const { user, profile } = useAuth();
   const [reason, setReason] = useState<ReportReason>("spam");
@@ -86,7 +91,7 @@ export default function ReportModal({
   }
 
   return (
-    <Modal open={open} onClose={handleClose} title={submitted ? undefined : "Report content"}>
+    <Modal open={open} onClose={handleClose} title={submitted ? undefined : "Report content"} zIndex={zIndex}>
       {submitted ? (
         <div className="flex flex-col items-center gap-3 py-4 text-center">
           <CircleCheckBig className="h-10 w-10 text-green2" />

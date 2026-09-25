@@ -13,6 +13,8 @@ export interface ReportButtonProps {
   label?: string;
   /** Compact icon-only style for tight toolbars (e.g. next to a creator's other actions). */
   compact?: boolean;
+  /** Passed straight through to ReportModal — see its own doc comment. */
+  zIndex?: number;
 }
 
 /** Small reusable report trigger — owns its own modal state, usable on any page. */
@@ -22,6 +24,7 @@ export default function ReportButton({
   targetUserId,
   label = "Report",
   compact,
+  zIndex,
 }: ReportButtonProps) {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
@@ -48,6 +51,7 @@ export default function ReportButton({
         targetType={targetType}
         targetId={targetId}
         {...(targetUserId ? { targetUserId } : {})}
+        zIndex={zIndex}
       />
     </>
   );
