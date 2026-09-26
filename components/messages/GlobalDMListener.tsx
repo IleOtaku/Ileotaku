@@ -41,33 +41,37 @@ export default function GlobalDMListener() {
     if (!user) return;
     lastSeenRef.current = new Map();
     hasLoadedOnceRef.current = false;
+    console.log("[GlobalDMListener] subscribing for uid", user.uid);
 
     const q = query(collection(db, CONVERSATIONS), where("participants", "array-contains", user.uid));
-    const unsub = onSnapshot(q, (snap) => {
-      snap.docs.forEach((d) => {
-        const convo = d.data() as Conversation;
-        const conversationId = d.id;
-        const lastMessageAt = convo.lastMessageAt;
-        if (!lastMessageAt) return;
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        console.log("[GlobalDMListener] snapshot, docs:", snap.docs.length, "hasLoadedOnce:", hasLoadedOnceRef.current);
+        snap.docs.forEach((d) => {
+          const convo = d.data() as Conversation;
+          const conversationId = d.id;
+          const lastMessageAt = convo.lastMessageAt;
+          if (!lastMessageAt) return;
 
-        const previouslySeen = lastSeenRef.current.get(conversationId);
-        lastSeenRef.current.set(conversationId, lastMessageAt);
+          const previouslySeen = lastSeenRef.current.get(conversationId);
+          lastSeenRef.current.set(conversationId, lastMessageAt);
 
-        // Seeding pass (initial snapshot, or right after a fresh sign-in) — never plays a sound
-        // for a conversation's EXISTING last message, only for one that changes after this.
-        if (!hasLoadedOnceRef.current) return;
-        if (previouslySeen === lastMessageAt) return;
-        // Own message (sent from elsewhere, e.g. another device) and system messages ("X joined
-        // the group") never get a sound.
-        if (convo.lastSenderId === user.uid || convo.lastSenderId === "system") return;
-        // MessagesClient's own subscription already plays message.mp3 for whichever conversation
-        // is actually open right now — this listener is only for every OTHER conversation.
-        if (conversationId === activeConversationIdRef.current) return;
+          if (!hasLoadedOnceRef.current) return;
+          if (previouslySeen === lastMessageAt) return;
+          console.log("[GlobalDMListener] change detected", { conversationId, lastMessageAt, previouslySeen, lastSenderId: convo.lastSenderId, active: activeConversationIdRef.current });
+          if (convo.lastSenderId === user.uid || convo.lastSenderId === "system") return;
+          if (conversationId === activeConversationIdRef.current) return;
 
-        playNotificationSound();
-      });
-      hasLoadedOnceRef.current = true;
-    });
+          console.log("[GlobalDMListener] playing notification sound");
+          playNotificationSound();
+        });
+        hasLoadedOnceRef.current = true;
+      },
+      (error) => {
+        console.error("[GlobalDMListener] onSnapshot error:", error);
+      }
+    );
 
     return unsub;
   }, [user]);
