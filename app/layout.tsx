@@ -13,6 +13,7 @@ import SoundPreloader from "@/components/layout/SoundPreloader";
 import SuspensionBanner from "@/components/layout/SuspensionBanner";
 import IncomingCallListener from "@/components/messages/IncomingCallListener";
 import GroupCallHost from "@/components/messages/GroupCallHost";
+import GlobalDMListener from "@/components/messages/GlobalDMListener";
 import GiftPopup from "@/components/layout/GiftPopup";
 import ShakeReporter from "@/components/feedback/ShakeReporter";
 import { FeedAudioProvider } from "@/lib/audioContext";
@@ -112,6 +113,7 @@ export default function RootLayout({
               <InstallPrompt />
               <NotificationPrompt />
               <IncomingCallListener />
+              <GlobalDMListener />
               <GroupCallHost />
               <GiftPopup />
               <ShakeReporter />

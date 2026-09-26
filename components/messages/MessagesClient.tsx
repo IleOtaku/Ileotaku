@@ -74,6 +74,7 @@ import { VoiceMicButton, VoicePreviewBar, VoiceRecordingBar } from "./VoiceNoteB
 import { useVoiceNote, type VoiceDraft } from "@/hooks/useVoiceNote";
 import { VOICE_MAX_SECONDS_FREE, VOICE_MAX_SECONDS_PLATINUM } from "@/lib/voiceRecorder";
 import { useAuth } from "@/hooks/useAuth";
+import { useDMStore } from "@/hooks/useDMStore";
 import { getBlockedUsers, isBlockedBy } from "@/lib/blocking";
 import { isSuspended, suspensionMessage } from "@/lib/suspension";
 import { uploadAnyFile, uploadImage, uploadImageWithProgress, uploadVideo, uploadVoiceNote } from "@/lib/cloudinary";
@@ -170,6 +171,19 @@ export default function MessagesClient() {
   // DM Feature Overhaul (Part I): collapsed by default, per the feature spec.
   const [archivedOpen, setArchivedOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Beta feedback bug fix: "notification.mp3 not playing when a DM arrives outside the active
+  // thread." Mirrors `selectedId` onto the global store GlobalDMListener (app/layout.tsx) reads,
+  // so it knows which conversation THIS component's own subscription is already sounding for —
+  // and clears it back to null on unmount, so leaving /messages makes every conversation "in
+  // the background" again.
+  const setActiveConversationId = useDMStore((s) => s.setActiveConversationId);
+  useEffect(() => {
+    setActiveConversationId(selectedId);
+  }, [selectedId, setActiveConversationId]);
+  useEffect(() => {
+    return () => setActiveConversationId(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [otherProfile, setOtherProfile] = useState<UserProfile | null>(null);
   // 5-tier verification overhaul: the sidebar conversation list only denormalizes
   // participantNames/Photos (strings) onto each Conversation — same gap propagateProfileChange
