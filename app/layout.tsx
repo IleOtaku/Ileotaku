@@ -9,6 +9,7 @@ import NotificationPrompt from "@/components/layout/NotificationPrompt";
 import Preloader from "@/components/layout/Preloader";
 import ServiceWorkerRegister from "@/components/layout/ServiceWorkerRegister";
 import SiteChrome from "@/components/layout/SiteChrome";
+import SoundPreloader from "@/components/layout/SoundPreloader";
 import SuspensionBanner from "@/components/layout/SuspensionBanner";
 import IncomingCallListener from "@/components/messages/IncomingCallListener";
 import GroupCallHost from "@/components/messages/GroupCallHost";
@@ -98,6 +99,7 @@ export default function RootLayout({
     <html lang="en">
       <body className="bg-bg font-noto text-text antialiased">
         <Preloader />
+        <SoundPreloader />
         <ErrorBoundary>
           <AuthProvider>
             <FeedAudioProvider>

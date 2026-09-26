@@ -35,8 +35,9 @@ export default function CallUI() {
   const [micReady, setMicReady] = useState(false);
   const connectedAtRef = useRef<number | null>(null);
 
-  // Our own ringtone (lib/notificationSounds.ts): a deep rhythmic pulse for an incoming call, a softer ringback for the caller.
-  useRingtone(status === "ringing" && !minimized ? (direction === "incoming" ? "incoming" : "outgoing") : null);
+  // Our own ringtone (public/sounds/ringtone.mp3, lib/notificationSounds.ts) — same sound for the
+  // callee's ring and the caller's ringback.
+  useRingtone(status === "ringing" && !minimized);
 
   useEffect(() => {
     if (!call) return;

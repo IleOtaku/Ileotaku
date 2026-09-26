@@ -68,7 +68,7 @@ import MediaPreviewModal, { type MediaPreviewResult } from "./MediaPreviewModal"
 import ForwardMessageModal from "./ForwardMessageModal";
 import type { ViewSettingsChoice } from "./ViewSettingsPicker";
 import { downloadMediaDirect } from "@/lib/videoDownload";
-import { playMessageSound } from "@/lib/notificationSounds";
+import { playIncomingMessageSound } from "@/lib/notificationSounds";
 import PendingBubble, { type PendingSend } from "./PendingBubble";
 import { VoiceMicButton, VoicePreviewBar, VoiceRecordingBar } from "./VoiceNoteBars";
 import { useVoiceNote, type VoiceDraft } from "@/hooks/useVoiceNote";
@@ -217,9 +217,9 @@ export default function MessagesClient() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const handledWithParam = useRef(false);
   const handledOpenParam = useRef<string | null>(null);
-  // Beta feedback: "New notification sounds... DM message received -> playMessageSound()." Tracks
-  // the newest message id already seen in the OPEN thread so the thud only plays for a genuinely
-  // new incoming message, never for the initial snapshot when a conversation is first opened/switched.
+  // Beta feedback: "Context-aware sounds." Tracks the newest message id already seen in the OPEN
+  // thread so playIncomingMessageSound only fires for a genuinely new message, never for the
+  // initial snapshot when a conversation is first opened/switched.
   const lastSeenMessageIdRef = useRef<string | null>(null);
   const messagesLoadedOnceRef = useRef(false);
   // Beta feedback bug fix: "view-once deletes too fast." Every view-once (or exhausted multi_view)
@@ -433,14 +433,14 @@ export default function MessagesClient() {
       selectedId,
       (msgs) => {
         const newest = msgs[msgs.length - 1];
-        if (
-          messagesLoadedOnceRef.current &&
-          newest &&
-          newest.id !== lastSeenMessageIdRef.current &&
-          newest.senderId !== user?.uid &&
-          !newest.isSystem
-        ) {
-          playMessageSound();
+        if (messagesLoadedOnceRef.current && newest && newest.id !== lastSeenMessageIdRef.current && !newest.isSystem) {
+          // This subscription only ever exists for the conversation currently open on screen, so
+          // both the "active thread" and "from conversation" args are always this same
+          // `selectedId` — an own message here plays message-out.mp3 (this fires on Firestore's
+          // own echo of a send, which happens for every send path — text, media, voice, forward,
+          // sticker — with no need to duplicate a sound call at each individual sendDM() call
+          // site), and someone else's plays message.mp3.
+          playIncomingMessageSound(true, newest.senderId === user?.uid, selectedId, selectedId);
         }
         messagesLoadedOnceRef.current = true;
         lastSeenMessageIdRef.current = newest?.id ?? null;

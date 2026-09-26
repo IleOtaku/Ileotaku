@@ -1,11 +1,11 @@
 import { useEffect } from "react";
-import { playRingtone, type RingtoneKind } from "@/lib/notificationSounds";
+import { playRingtone } from "@/lib/notificationSounds";
 
-/** Plays the call ringtone while `kind` is set (see lib/notificationSounds.ts), and stops the
- * moment it becomes null or the component unmounts. */
-export function useRingtone(kind: RingtoneKind | null): void {
+/** Plays the call ringtone (ringtone.mp3) while `active` is true, and stops the moment it becomes
+ * false or the component unmounts. */
+export function useRingtone(active: boolean): void {
   useEffect(() => {
-    if (!kind) return;
-    return playRingtone(kind);
-  }, [kind]);
+    if (!active) return;
+    return playRingtone();
+  }, [active]);
 }

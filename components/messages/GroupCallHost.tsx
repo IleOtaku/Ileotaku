@@ -69,7 +69,7 @@ export default function GroupCallHost() {
   }, [user]);
 
   // The caller hears the ringback until somebody picks up — whether the call is full-screen or minimized.
-  useRingtone(call && call.status === "ringing" && user && call.participants[user.uid]?.status === "joined" ? "outgoing" : null);
+  useRingtone(!!(call && call.status === "ringing" && user && call.participants[user.uid]?.status === "joined"));
 
   const ringing =
     user && phase === "idle" && !inDirectCall
