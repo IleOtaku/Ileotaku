@@ -37,9 +37,8 @@ import ReportButton from "@/components/social/ReportButton";
 import type { CreatorPost, CreatorPostType } from "@/types";
 
 const SOUND_SOURCE_LABEL: Record<NonNullable<CreatorPost["soundSource"]>, string> = {
-  library: "Library",
-  creator: "Original Sound",
-  spotify: "Spotify",
+  video_upload: "Original Sound",
+  direct_upload: "Sound",
 };
 
 const TYPE_LABEL: Record<CreatorPostType, string> = {
@@ -509,9 +508,7 @@ function FeedPostCard({ post, onDeleted }: FeedPostCardProps) {
         <div className="sound-marquee mt-3 rounded-full bg-bg3 px-3 py-1.5">
           <span className="sound-marquee-track font-noto text-xs text-clay2">
             {(() => {
-              const label = `🎵 ${post.soundTitle} — ${post.soundArtist ?? "Unknown"} · ${
-                SOUND_SOURCE_LABEL[post.soundSource ?? "library"]
-              }`;
+              const label = `🎵 ${post.soundTitle} · ${SOUND_SOURCE_LABEL[post.soundSource ?? "direct_upload"]}`;
               // Two copies with a gap between, since the -50% scroll keyframe assumes exactly
               // half the track is one full loop of the label.
               return `${label}        ${label}        `;

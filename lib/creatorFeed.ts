@@ -26,7 +26,7 @@ import { logError } from "./errorLogger";
 import { db } from "./firebase";
 import { getUserProfile, updateLastActive, updateUserPrefs } from "./firestore";
 import { createNotification } from "./notifications";
-import { incrementSoundUsage } from "./sounds";
+import { audioUrlFromVideo, incrementSoundUsage, saveSoundFromVideo } from "./sounds";
 import { NotificationType, type CreatorPost, type CreatorPostType, type EditingApp, type FeedComment, type Sound, type UserProfile } from "@/types";
 
 import { isConsistentPoster, reachTierOf, viewerSees } from "./feedAlgorithm";
@@ -335,6 +335,9 @@ export interface UploadedVideo {
   posterUrl: string;
   /** Seconds. */
   duration: number;
+  /** Cloudinary public_id — threaded through to createPost so it can derive this video's
+   * audio-only URL for saveSoundFromVideo. */
+  publicId: string;
 }
 
 /** Reads a video file's duration client-side by loading it into an off-DOM <video> — there's no
@@ -378,12 +381,12 @@ export async function uploadPostVideo(
     throw new Error("Videos must be under 100MB.");
   }
 
-  const [duration, { secureUrl }] = await Promise.all([
+  const [duration, { secureUrl, publicId }] = await Promise.all([
     probeVideoDuration(file),
     uploadVideo(file, `feed/videos/${uid}`, onProgress),
   ]);
 
-  return { url: secureUrl, posterUrl: getVideoThumbnail(secureUrl), duration };
+  return { url: secureUrl, posterUrl: getVideoThumbnail(secureUrl), duration, publicId };
 }
 
 /* ---------------------------- Create / read ---------------------------- */
@@ -403,6 +406,9 @@ export interface CreatePostInput {
   videoPosterUrl?: string;
   videoDuration?: number;
   videoResolution?: CreatorPost["videoResolution"];
+  /** Cloudinary public_id of the uploaded video — needed to derive its audio-only URL for
+   * saveSoundFromVideo (see createPost's own use of it below). */
+  videoPublicId?: string;
   editingApp?: EditingApp | null;
   /** Whether the author's role permits this post to enter the algorithmic For You feed at all —
    * computed by the caller from the author's profile (see getForYouEligibility() below), since
@@ -439,6 +445,7 @@ export async function createPost(input: CreatePostInput): Promise<string> {
     videoPosterUrl,
     videoDuration,
     videoResolution,
+    videoPublicId,
     editingApp,
     forYouEligible,
   } = input;
@@ -532,10 +539,8 @@ export async function createPost(input: CreatePostInput): Promise<string> {
             soundId: sound.id,
             soundUrl: sound.url,
             soundTitle: sound.title,
-            soundArtist: sound.artist,
             soundSource: sound.source,
-            soundDuration: sound.duration,
-            ...(sound.source !== "spotify" ? { soundCategory: sound.category } : {}),
+            ...(sound.duration != null ? { soundDuration: sound.duration } : {}),
           }
         : {}),
       mediaType,
@@ -559,10 +564,27 @@ export async function createPost(input: CreatePostInput): Promise<string> {
       forYouEligible,
       createdAt,
     });
-    // Fire-and-forget — a missed usage-count bump shouldn't fail the post itself. Spotify
-    // preview "sounds" aren't real `sounds` docs (their id is a synthetic `spotify:{trackId}`),
-    // so this silently no-ops for them via incrementSoundUsage's own internal try/catch.
+    // Fire-and-forget — a missed usage-count bump shouldn't fail the post itself.
     if (sound) incrementSoundUsage(sound.id);
+
+    // Beta feedback: "Auto-save audio from creator video uploads." A video post's own audio
+    // automatically becomes a reusable Sound (discoverable via SoundPicker's "From Videos" tab)
+    // UNLESS the creator explicitly attached a different sound of their own via the picker — an
+    // explicit choice always wins, and no separate video-sound is created in that case.
+    if (videoUrl && videoPublicId && !sound) {
+      try {
+        const videoSoundId = await saveSoundFromVideo(videoUrl, videoPublicId, uid, displayName, handle ?? uid, ref.id);
+        await updateDoc(ref, {
+          soundId: videoSoundId,
+          soundUrl: audioUrlFromVideo(videoUrl),
+          soundTitle: `Sound by @${handle ?? displayName}`,
+          soundSource: "video_upload",
+        });
+      } catch (error) {
+        await logError(error, { operation: "creatorFeed.createPost.autoSound", uid });
+      }
+    }
+
     await updateLastActive(uid);
     return ref.id;
   } catch (error) {

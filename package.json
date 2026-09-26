@@ -7,8 +7,7 @@
     "build": "cross-env NEXT_TELEMETRY_DISABLED=1 next build",
     "start": "next start",
     "lint": "next lint",
-    "seed:admin": "node scripts/seed-admin.js",
-    "seed:sounds": "node scripts/seed-sounds.js"
+    "seed:admin": "node scripts/seed-admin.js"
   },
   "dependencies": {
     "@livekit/components-react": "^2.9.24",

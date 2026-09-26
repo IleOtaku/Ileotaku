@@ -843,19 +843,25 @@ service cloud.firestore {
     }
 
     // ---------------------------- sounds ----------------------------
-    // The shared library (source:"library", seeded by scripts/seed-sounds.js) and every
-    // creator's own uploads live in the same collection — readable by anyone (the sound picker
-    // and Explore's Trending Sounds need to work for signed-out visitors too), but only the
-    // uploader may edit or delete their own creator sound. Library sounds have no `uploadedBy`,
-    // so update covers the one case that DOES need to be open to any signed-in user:
-    // incrementSoundUsage()'s usageCount bump when someone attaches a library sound to a post.
+    // Beta feedback: "Clean up the sound library and build creator-driven sound uploads." Every
+    // sound now has a real owner (`uploadedBy` — whoever uploaded the file, or whoever posted the
+    // video its audio was extracted from) — the old library-with-no-owner branch this used to need
+    // is gone along with the seeded library itself. Readable by anyone (the sound picker and
+    // Explore's Trending Sounds need to work for signed-out visitors too).
     match /sounds/{soundId} {
       allow read: if true;
-      allow create: if isSignedIn();
-      allow update: if isSignedIn()
-        && (resource.data.uploadedBy == request.auth.uid
-          || !("uploadedBy" in resource.data)
-          || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["usageCount"]));
+      allow create: if isSignedIn() && request.resource.data.uploadedBy == request.auth.uid;
+      allow update: if isSignedIn() && (
+        // Owner: rename, or (harmlessly) re-bump their own sound's usage/duration.
+        (resource.data.uploadedBy == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["title", "titleLower", "usageCount", "duration"]))
+        // Anyone else attaching this sound to their own post — incrementSoundUsage() (lib/sounds.ts).
+        || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["usageCount"])
+        // Anyone else's <audio> element is the first to report a duration — setSoundDuration()
+        // (lib/sounds.ts) — only while it's still unset, so this can never overwrite a known value.
+        || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(["duration"])
+          && resource.data.get("duration", null) == null)
+      );
       allow delete: if isSignedIn() && (resource.data.uploadedBy == request.auth.uid || isAdmin());
     }
 

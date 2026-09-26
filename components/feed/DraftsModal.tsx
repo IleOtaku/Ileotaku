@@ -14,11 +14,14 @@ export interface DraftsModalProps {
   uid: string;
   /** Loads a draft back into the composer for editing/publishing. */
   onResume: (draft: CreatorPost) => void;
+  /** The composer this opens from renders its own overlay above the rest of the page (z-[210]) —
+   * this needs to sit above THAT, or it renders invisibly behind it. See PostComposer.tsx. */
+  zIndex?: number;
 }
 
 /** Lists a creator's saved drafts (from users/{uid}/drafts) with a resume-editing action and a
  * delete action — opened from the composer's "Drafts" button. */
-export default function DraftsModal({ open, onClose, uid, onResume }: DraftsModalProps) {
+export default function DraftsModal({ open, onClose, uid, onResume, zIndex }: DraftsModalProps) {
   const [drafts, setDrafts] = useState<CreatorPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -44,7 +47,7 @@ export default function DraftsModal({ open, onClose, uid, onResume }: DraftsModa
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Drafts">
+    <Modal open={open} onClose={onClose} zIndex={zIndex} title="Drafts">
       {loading ? (
         <div className="flex flex-col gap-2">
           {[0, 1].map((i) => (

@@ -1186,6 +1186,10 @@ export interface CreatorPost {
   /** Seconds. */
   videoDuration?: number;
   videoResolution?: "480p" | "720p" | "1080p" | "2k" | "4k";
+  /** Cloudinary public_id of the uploaded video — only ever persisted on a DRAFT (see saveDraft in
+   * lib/creatorFeed.ts), so resuming one still has what createPost needs to derive its
+   * saveSoundFromVideo audio URL when it's actually published. Never set on a live/published post. */
+  videoPublicId?: string;
   imageResolution?: "standard" | "hd" | "2k" | "4k";
   /** True while the post is a private draft (not yet published to the feed) — draft documents
    * live under `users/{uid}/drafts/` rather than the top-level `creatorFeed` collection, so a
@@ -1344,27 +1348,47 @@ export interface ListenSession {
 
 /* ---------------------------- Sounds ---------------------------- */
 
-/** "Manga Vibes" added per beta feedback — instrumental tracks suited to reading, seeded via
- * scripts/seed-sounds.js. */
+/** Legacy field kept only so old posts' already-denormalized `soundCategory` (from the seeded
+ * library, since removed — see BUGS_FIXED.md/git history for scripts/seed-sounds.js) still
+ * type-checks; nothing writes a new value into it anymore. */
 export type SoundCategory = "African Beats" | "Manga Vibes" | "Intense" | "Romantic" | "Chill" | "Epic";
-export type SoundSource = "library" | "creator" | "spotify";
+
+/** Beta feedback: "Clean up the sound library and build creator-driven sound uploads." Replaces
+ * the old curated/seeded library entirely — every sound now comes from a creator, either as the
+ * extracted audio of their own video post ("video_upload") or a file they uploaded directly to
+ * the shared library ("direct_upload"). */
+export type SoundSource = "video_upload" | "direct_upload";
 
 export interface Sound {
   id: string;
   title: string;
-  artist: string;
-  /** Seconds. */
-  duration: number;
+  /** Lowercased mirror of `title`, kept in sync on every write — powers searchSounds' client-side
+   * substring search (Firestore has no native "contains" query), same convention as
+   * UserProfile.displayNameLower. */
+  titleLower: string;
+  /** Seconds — null until a viewer's own <audio> element first reports it (see
+   * lib/sounds.ts's setSoundDuration), since neither upload path probes it server-side. */
+  duration: number | null;
   url: string;
   /** Cloudinary public_id for this file, needed to delete it (see deleteCreatorSound in
-   * lib/sounds.ts) — absent on library sounds (never deletable this way) and on any
-   * creator-uploaded sound saved before this field was tracked. */
+   * lib/sounds.ts) — only ever set on source:"direct_upload" (a video_upload sound has no
+   * Cloudinary asset of its own; it's a transformed URL onto the POST's own video). */
   publicId?: string;
-  category: SoundCategory;
   source: SoundSource;
   usageCount: number;
-  /** Set only on source:"creator" sounds — the uid of whoever uploaded it. */
-  uploadedBy?: string;
+  /** Every sound has an owner now — whoever uploaded the file, or whoever posted the video this
+   * sound's audio was extracted from. */
+  uploadedBy: string;
+  uploaderName: string;
+  uploaderHandle: string;
+  /** Always true today (there's no private/unlisted sound concept yet) — kept as an explicit field
+   * rather than assumed so a future "private sound" toggle doesn't need a schema migration. */
+  isPublic: boolean;
+  /** source:"video_upload" only — the video this sound's audio came from, and which feed post
+   * carries it, so SoundPicker's "From Videos" tab can link back to the original post. */
+  originalVideoUrl?: string;
+  videoPublicId?: string;
+  postId?: string;
   createdAt: string;
 }
 

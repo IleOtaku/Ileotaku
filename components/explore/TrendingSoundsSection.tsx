@@ -3,10 +3,11 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { Music, Pause, Play } from "lucide-react";
-import { SOUND_CATEGORY_COLORS } from "@/lib/sounds";
+import { stringToColor } from "@/lib/utils";
 import type { Sound } from "@/types";
 
-function formatDuration(seconds: number): string {
+function formatDuration(seconds: number | null): string {
+  if (seconds == null) return "--:--";
   const m = Math.floor(seconds / 60);
   const s = Math.round(seconds % 60);
   return `${m}:${String(s).padStart(2, "0")}`;
@@ -16,10 +17,11 @@ export interface TrendingSoundsSectionProps {
   sounds: Sound[];
 }
 
-/** Explore page's "Trending Sounds" grid — the top 6 most-used sounds this week. Each card
- * previews with a play button and links to /feed?sound={id}, which filters the Creator Feed
- * down to posts using that exact sound — the same viral-sound-loop pattern TikTok's sound
- * pages use, just routed through the feed's own sound filter rather than a separate page. */
+/** Explore page's "Trending Sounds" grid — the top sounds by usage, all creator-uploaded (either
+ * extracted from a video post or uploaded directly). Each card previews with a play button and
+ * links to /feed?sound={id}, which filters the Creator Feed down to posts using that exact
+ * sound — the same viral-sound-loop pattern TikTok's sound pages use, just routed through the
+ * feed's own sound filter rather than a separate page. */
 export default function TrendingSoundsSection({ sounds }: TrendingSoundsSectionProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [previewingId, setPreviewingId] = useState<string | null>(null);
@@ -52,7 +54,8 @@ export default function TrendingSoundsSection({ sounds }: TrendingSoundsSectionP
             type="button"
             onClick={() => togglePreview(sound)}
             aria-label={previewingId === sound.id ? "Pause preview" : "Play preview"}
-            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-colors ${SOUND_CATEGORY_COLORS[sound.category]}`}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white transition-colors"
+            style={{ background: stringToColor(sound.uploadedBy) }}
           >
             {previewingId === sound.id ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
           </button>
@@ -61,10 +64,10 @@ export default function TrendingSoundsSection({ sounds }: TrendingSoundsSectionP
               {sound.title}
             </p>
             <p className="truncate font-noto text-xs text-muted">
-              {sound.artist} · {formatDuration(sound.duration)}
+              @{sound.uploaderHandle} · {formatDuration(sound.duration)}
             </p>
             <p className="mt-1 font-noto text-[11px] text-clay2">
-              Used in {sound.usageCount.toLocaleString()} posts
+              {sound.usageCount.toLocaleString()} {sound.usageCount === 1 ? "use" : "uses"}
             </p>
           </Link>
         </div>
@@ -78,7 +81,7 @@ export function TrendingSoundsEmpty() {
     <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-muted2 bg-bg2 px-6 py-10 text-center">
       <Music className="h-6 w-6 text-muted" />
       <p className="font-noto text-sm text-muted">
-        No sounds have been used yet — be the first to add one to a post.
+        No sounds yet — be the first creator to upload one!
       </p>
     </div>
   );

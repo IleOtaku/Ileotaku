@@ -2,40 +2,24 @@
 
 import { useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
-import {
-  Check,
-  Loader2,
-  Music,
-  Music2,
-  Pause,
-  Play,
-  Search,
-  Trash2,
-  Upload,
-  X,
-} from "lucide-react";
+import { Check, Loader2, Music, Music2, Pause, Pencil, Play, Search, Trash2, Upload, X } from "lucide-react";
 import { Modal } from "@/components/ui";
 import { useAuth } from "@/hooks/useAuth";
+import { cn, stringToColor } from "@/lib/utils";
 import {
   deleteCreatorSound,
   getCreatorSounds,
-  getSoundLibrary,
+  getTrendingSounds,
+  getVideoSounds,
+  renameSound,
   searchSounds,
-  uploadCreatorSound,
+  setSoundDuration,
+  uploadSoundToLibrary,
 } from "@/lib/sounds";
-import type { Sound, SoundCategory } from "@/types";
+import type { Sound } from "@/types";
 
-const CATEGORIES: (SoundCategory | "All")[] = [
-  "All",
-  "African Beats",
-  "Manga Vibes",
-  "Intense",
-  "Romantic",
-  "Chill",
-  "Epic",
-];
-
-function formatDuration(seconds: number): string {
+function formatDuration(seconds: number | null): string {
+  if (seconds == null) return "--:--";
   const m = Math.floor(seconds / 60);
   const s = Math.round(seconds % 60);
   return `${m}:${String(s).padStart(2, "0")}`;
@@ -46,35 +30,51 @@ export interface SoundPickerProps {
   onClose: () => void;
   selected: Sound | null;
   onSelect: (sound: Sound | null) => void;
+  /** The composer this opens from renders its own overlay above the rest of the page (z-[210]) —
+   * this needs to sit above THAT, or it renders invisibly behind it. See PostComposer.tsx. */
+  zIndex?: number;
 }
 
-type PickerTab = "library" | "mySounds";
+type PickerTab = "all" | "videos" | "mine";
 
-/** Sound-selection modal opened from the post composer's "🎵 Add Sound" button. Two tabs: the
- * shared library and the signed-in creator's own uploads. Each tab's "Select" hands a
- * Sound-shaped object back to the caller via onSelect.
+const TABS: { value: PickerTab; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "videos", label: "From Videos" },
+  { value: "mine", label: "My Sounds" },
+];
+
+/**
+ * Sound-selection modal opened from the post composer's "🎵 Add Sound" button.
  *
- * Beta feedback: "The select button for spotify sounds still doesnt work. The songs say no
- * preview available" — Spotify deprecated `preview_url` for virtually every third-party app in
- * Nov 2024, so this tab's core feature (a 30-second preview) was permanently broken by Spotify's
- * own API, not a bug here. Rather than leave a Spotify tab whose search never has anything
- * playable to offer, it's removed outright — the Now Playing feature on profiles (a different,
- * still-working integration) is untouched. */
-export default function SoundPicker({ open, onClose, selected, onSelect }: SoundPickerProps) {
-  const { user } = useAuth();
-  const [tab, setTab] = useState<PickerTab>("library");
+ * Beta feedback: "Clean up the sound library and build creator-driven sound uploads." The old
+ * curated/seeded library (5 genre categories, SoundHelix placeholder tracks) is gone entirely —
+ * every sound here is creator-uploaded, either extracted from a video post's own audio ("From
+ * Videos") or uploaded directly to the library ("My Sounds"). The library starts empty and
+ * self-curates purely from usageCount as creators actually use sounds; there's no "Spotify" tab —
+ * that was already removed in an earlier round (Spotify killed third-party preview_url access in
+ * Nov 2024, so a search tab with nothing playable had nothing left to offer).
+ */
+export default function SoundPicker({ open, onClose, selected, onSelect, zIndex }: SoundPickerProps) {
+  const { user, profile } = useAuth();
+  const [tab, setTab] = useState<PickerTab>("all");
 
-  // ---- Library tab state ----
-  const [category, setCategory] = useState<SoundCategory | "All">("All");
-  const [libSearch, setLibSearch] = useState("");
-  const [librarySounds, setLibrarySounds] = useState<Sound[]>([]);
-  const [libraryLoading, setLibraryLoading] = useState(true);
+  // ---- All tab state ----
+  const [allSearch, setAllSearch] = useState("");
+  const [allSounds, setAllSounds] = useState<Sound[]>([]);
+  const [allLoading, setAllLoading] = useState(true);
+  const [trending, setTrending] = useState<Sound[]>([]);
+
+  // ---- From Videos tab state ----
+  const [videoSounds, setVideoSounds] = useState<Sound[]>([]);
+  const [videoSoundsLoading, setVideoSoundsLoading] = useState(true);
 
   // ---- My Sounds tab state ----
   const [mySounds, setMySounds] = useState<Sound[]>([]);
   const [mySoundsLoading, setMySoundsLoading] = useState(true);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
 
   // ---- Shared audio preview ----
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -82,10 +82,21 @@ export default function SoundPicker({ open, onClose, selected, onSelect }: Sound
 
   useEffect(() => {
     if (!open) return;
-    setLibraryLoading(true);
-    getSoundLibrary()
-      .then(setLibrarySounds)
-      .finally(() => setLibraryLoading(false));
+    setAllLoading(true);
+    Promise.all([searchSounds(allSearch), getTrendingSounds(6)])
+      .then(([library, top]) => {
+        setAllSounds(library);
+        setTrending(top);
+      })
+      .finally(() => setAllLoading(false));
+  }, [open, allSearch]);
+
+  useEffect(() => {
+    if (!open) return;
+    setVideoSoundsLoading(true);
+    getVideoSounds()
+      .then(setVideoSounds)
+      .finally(() => setVideoSoundsLoading(false));
   }, [open]);
 
   useEffect(() => {
@@ -101,6 +112,7 @@ export default function SoundPicker({ open, onClose, selected, onSelect }: Sound
     if (!open) {
       previewAudioRef.current?.pause();
       setPreviewingId(null);
+      setRenamingId(null);
     }
   }, [open]);
 
@@ -110,40 +122,33 @@ export default function SoundPicker({ open, onClose, selected, onSelect }: Sound
     };
   }, []);
 
-  function togglePreview(id: string, url: string) {
+  function togglePreview(sound: Sound) {
     let audio = previewAudioRef.current;
     if (!audio) {
       audio = new Audio();
-      audio.addEventListener("ended", () => setPreviewingId(null));
       previewAudioRef.current = audio;
     }
-    if (previewingId === id) {
+    audio.onended = () => setPreviewingId(null);
+    if (previewingId === sound.id) {
       audio.pause();
       setPreviewingId(null);
       return;
     }
-    audio.src = url;
+    audio.src = sound.url;
     audio.currentTime = 0;
-    audio.play().catch(() => toast.error("Couldn't play this preview."));
-    setPreviewingId(id);
-  }
-
-  async function runLibraryFilter() {
-    setLibraryLoading(true);
-    try {
-      const base = libSearch.trim() ? await searchSounds(libSearch.trim()) : await getSoundLibrary();
-      setLibrarySounds(category === "All" ? base : base.filter((s) => s.category === category));
-    } finally {
-      setLibraryLoading(false);
+    // Beta feedback: "duration: null, populated client-side after load" — the first viewer to
+    // ever preview a sound with no known duration backfills it (firestore.rules only allows this
+    // while it's still unset, so it can never overwrite an already-known value).
+    if (sound.duration == null) {
+      audio.onloadedmetadata = () => {
+        if (Number.isFinite(audio!.duration)) setSoundDuration(sound.id, Math.round(audio!.duration)).catch(() => {});
+      };
+    } else {
+      audio.onloadedmetadata = null;
     }
+    audio.play().catch(() => toast.error("Couldn't play this preview."));
+    setPreviewingId(sound.id);
   }
-
-  useEffect(() => {
-    if (!open) return;
-    const handle = setTimeout(runLibraryFilter, 300);
-    return () => clearTimeout(handle);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [category, libSearch, open]);
 
   function handleSelectSound(sound: Sound) {
     onSelect(sound);
@@ -163,7 +168,14 @@ export default function SoundPicker({ open, onClose, selected, onSelect }: Sound
     if (!file || !user) return;
     setUploadProgress(0);
     try {
-      await uploadCreatorSound(user.uid, file, file.name.replace(/\.[^.]+$/, ""), setUploadProgress);
+      await uploadSoundToLibrary(
+        user.uid,
+        file,
+        file.name.replace(/\.[^.]+$/, ""),
+        profile?.displayName ?? "A creator",
+        profile?.handle ?? user.uid,
+        setUploadProgress
+      );
       toast.success("Sound uploaded!");
       const fresh = await getCreatorSounds(user.uid);
       setMySounds(fresh);
@@ -184,75 +196,157 @@ export default function SoundPicker({ open, onClose, selected, onSelect }: Sound
     }
   }
 
-  function SoundCard({
-    sound,
-    onDelete,
-  }: {
-    sound: Sound;
-    onDelete?: () => void;
-  }) {
+  function startRename(sound: Sound) {
+    setRenamingId(sound.id);
+    setRenameDraft(sound.title);
+  }
+
+  async function commitRename(sound: Sound) {
+    const next = renameDraft.trim();
+    setRenamingId(null);
+    if (!next || next === sound.title) return;
+    try {
+      await renameSound(sound.id, next);
+      setMySounds((prev) => prev.map((s) => (s.id === sound.id ? { ...s, title: next, titleLower: next.toLowerCase() } : s)));
+    } catch {
+      toast.error("Couldn't rename this sound.");
+    }
+  }
+
+  function SoundCard({ sound, onDelete }: { sound: Sound; onDelete?: () => void }) {
     const isSelected = selected?.id === sound.id;
     const isPreviewing = previewingId === sound.id;
+    const isRenaming = renamingId === sound.id;
     return (
       <div
-        className={`flex items-center gap-3 rounded-xl border p-3 transition-colors ${
-          isSelected ? "border-clay bg-clay/10" : "border-bg4 bg-bg2"
-        }`}
+        onClick={() => !isRenaming && handleSelectSound(sound)}
+        className={cn(
+          "group flex cursor-pointer items-center gap-3 rounded-xl p-3 transition-colors hover:bg-white/[0.04]",
+          isSelected && "bg-clay/10"
+        )}
       >
-        <button
-          type="button"
-          onClick={() => togglePreview(sound.id, sound.url)}
-          aria-label={isPreviewing ? "Pause preview" : "Play preview"}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-bg3 text-xl"
+        <div
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white"
+          style={{ background: stringToColor(sound.uploadedBy) }}
         >
-          {isPreviewing ? <Pause className="h-4 w-4 text-clay2" /> : <Music className="h-4 w-4 text-muted" />}
-        </button>
+          <Music className="h-4 w-4" />
+        </div>
+
         <div className="min-w-0 flex-1">
-          <p className="truncate font-syne text-sm font-semibold text-text">{sound.title}</p>
+          {isRenaming ? (
+            <input
+              autoFocus
+              value={renameDraft}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => setRenameDraft(e.target.value)}
+              onBlur={() => commitRename(sound)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                if (e.key === "Escape") setRenamingId(null);
+              }}
+              className="input-base py-1 text-sm"
+            />
+          ) : (
+            <p className="truncate font-syne text-sm font-semibold text-text">{sound.title}</p>
+          )}
           <p className="truncate font-noto text-xs text-muted">
-            {sound.artist} · {formatDuration(sound.duration)}
-            {sound.source === "library" && ` · Used in ${sound.usageCount.toLocaleString()} posts`}
+            @{sound.uploaderHandle} · {sound.usageCount.toLocaleString()} {sound.usageCount === 1 ? "use" : "uses"} ·{" "}
+            {formatDuration(sound.duration)}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
+
+        {onDelete && !isRenaming && (
           <button
             type="button"
-            onClick={() => togglePreview(sound.id, sound.url)}
-            aria-label={isPreviewing ? "Pause" : "Play"}
-            className="flex h-8 w-8 items-center justify-center rounded-full text-muted hover:bg-bg3 hover:text-clay2"
+            onClick={(e) => {
+              e.stopPropagation();
+              startRename(sound);
+            }}
+            aria-label="Rename sound"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted opacity-0 transition-opacity hover:bg-bg3 hover:text-text group-hover:opacity-100"
           >
-            {isPreviewing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+            <Pencil className="h-3.5 w-3.5" />
           </button>
-          {onDelete && (
-            <button
-              type="button"
-              onClick={onDelete}
-              aria-label="Delete sound"
-              className="flex h-8 w-8 items-center justify-center rounded-full text-muted hover:bg-clay/10 hover:text-clay2"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
+        )}
+        {onDelete && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            aria-label="Delete sound"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted opacity-0 transition-opacity hover:bg-clay/10 hover:text-clay2 group-hover:opacity-100"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
+
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            togglePreview(sound);
+          }}
+          aria-label={isPreviewing ? "Pause preview" : "Play preview"}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 opacity-0 transition-opacity group-hover:opacity-100"
+        >
+          {isPreviewing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+        </button>
+
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            handleSelectSound(sound);
+          }}
+          className={cn(
+            "shrink-0 rounded-full px-3 py-1.5 font-noto text-xs",
+            isSelected ? "bg-clay text-white" : "bg-white/10 text-muted hover:text-text"
           )}
-          <button
-            type="button"
-            onClick={() => handleSelectSound(sound)}
-            className={isSelected ? "btn-ghost px-3 py-1.5 text-xs" : "btn-primary px-3 py-1.5 text-xs"}
-          >
-            {isSelected ? (
-              <>
-                <Check className="h-3.5 w-3.5" /> Selected
-              </>
-            ) : (
-              "Select"
-            )}
-          </button>
+        >
+          {isSelected ? (
+            <span className="flex items-center gap-1">
+              <Check className="h-3 w-3" /> Selected
+            </span>
+          ) : (
+            "Use"
+          )}
+        </button>
+      </div>
+    );
+  }
+
+  function TrendingRow() {
+    if (trending.length === 0) return null;
+    return (
+      <div className="flex flex-col gap-2">
+        <p className="font-syne text-xs font-semibold text-muted">🔥 Trending</p>
+        <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+          {trending.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => handleSelectSound(s)}
+              className="flex w-32 shrink-0 flex-col items-start gap-1.5 rounded-xl border border-bg4 bg-bg2 p-2.5 text-left hover:border-clay"
+            >
+              <div
+                className="flex h-8 w-8 items-center justify-center rounded-full text-white"
+                style={{ background: stringToColor(s.uploadedBy) }}
+              >
+                <Music className="h-3.5 w-3.5" />
+              </div>
+              <p className="w-full truncate font-noto text-xs font-semibold text-text">{s.title}</p>
+              <p className="w-full truncate font-noto text-[10px] text-muted">@{s.uploaderHandle}</p>
+            </button>
+          ))}
         </div>
       </div>
     );
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Add Sound">
+    <Modal open={open} onClose={onClose} zIndex={zIndex} title="Add Sound">
       {/* No nested max-h/overflow-y-auto wrapper here — the Modal's own content area is
           already the one scroll container (see components/ui/index.tsx). Nesting a second
           scrolling region inside it fights the outer one over which actually scrolls, and in
@@ -264,12 +358,7 @@ export default function SoundPicker({ open, onClose, selected, onSelect }: Sound
       <div className="flex flex-col gap-4">
         <div className="sticky -top-4 z-10 -mx-6 -mt-4 flex justify-center bg-bg2/95 px-6 pb-3 pt-4 backdrop-blur">
           <div className="inline-flex rounded-full border border-muted2 bg-bg3 p-1">
-            {(
-              [
-                { value: "library", label: "Library" },
-                { value: "mySounds", label: "My Sounds" },
-              ] as { value: PickerTab; label: string }[]
-            ).map((t) => (
+            {TABS.map((t) => (
               <button
                 key={t.value}
                 type="button"
@@ -284,116 +373,125 @@ export default function SoundPicker({ open, onClose, selected, onSelect }: Sound
           </div>
         </div>
 
-        <div>
-          {tab === "library" && (
-            <div className="flex flex-col gap-3">
-              {selected && (
-                <button
-                  type="button"
-                  onClick={handleClearSound}
-                  className="flex items-center gap-1.5 self-start rounded-full border border-clay/40 bg-clay/5 px-3 py-1 font-noto text-xs text-clay2 hover:bg-clay/10"
-                >
-                  <X className="h-3 w-3" /> Clear sound
-                </button>
-              )}
+        {selected && (
+          <button
+            type="button"
+            onClick={handleClearSound}
+            className="flex items-center gap-1.5 self-start rounded-full border border-clay/40 bg-clay/5 px-3 py-1 font-noto text-xs text-clay2 hover:bg-clay/10"
+          >
+            <X className="h-3 w-3" /> Clear sound
+          </button>
+        )}
 
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-                <input
-                  value={libSearch}
-                  onChange={(e) => setLibSearch(e.target.value)}
-                  placeholder="Search title or artist..."
-                  className="input-base pl-9"
-                />
+        {tab === "all" && (
+          <div className="flex flex-col gap-3">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+              <input
+                value={allSearch}
+                onChange={(e) => setAllSearch(e.target.value)}
+                placeholder="Search title or @handle..."
+                className="input-base pl-9"
+              />
+            </div>
+
+            {!allSearch.trim() && <TrendingRow />}
+
+            {allLoading ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="h-5 w-5 animate-spin text-muted" />
               </div>
-
-              <div className="flex flex-wrap gap-1.5">
-                {CATEGORIES.map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    onClick={() => setCategory(c)}
-                    className={`rounded-full border px-3 py-1 font-noto text-xs transition-colors ${
-                      category === c
-                        ? "border-clay bg-clay/15 text-clay2"
-                        : "border-muted2 bg-bg3 text-muted hover:border-clay"
-                    }`}
-                  >
-                    {c}
-                  </button>
+            ) : allSounds.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 py-10 text-center">
+                <Music2 className="h-6 w-6 text-muted" />
+                <p className="font-syne text-sm font-semibold text-text">No sounds yet</p>
+                <p className="max-w-xs font-noto text-xs text-muted">
+                  Be the first creator to upload one, or post a video — its audio joins the library automatically.
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-1">
+                {allSounds.map((s) => (
+                  <SoundCard key={s.id} sound={s} />
                 ))}
               </div>
+            )}
+          </div>
+        )}
 
-              {libraryLoading ? (
-                <div className="flex justify-center py-8">
-                  <Loader2 className="h-5 w-5 animate-spin text-muted" />
-                </div>
-              ) : librarySounds.length === 0 ? (
-                <p className="py-8 text-center font-noto text-sm text-muted">No sounds found.</p>
+        {tab === "videos" && (
+          <div className="flex flex-col gap-3">
+            {videoSoundsLoading ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="h-5 w-5 animate-spin text-muted" />
+              </div>
+            ) : videoSounds.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 py-10 text-center">
+                <Music2 className="h-6 w-6 text-muted" />
+                <p className="font-syne text-sm font-semibold text-text">No video sounds yet</p>
+                <p className="max-w-xs font-noto text-xs text-muted">
+                  Every video post&apos;s own audio shows up here automatically, for other creators to reuse.
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-1">
+                {videoSounds.map((s) => (
+                  <SoundCard key={s.id} sound={s} />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === "mine" && (
+          <div className="flex flex-col gap-3">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploadProgress !== null}
+              className="btn-ghost w-full justify-center text-sm disabled:opacity-60"
+            >
+              {uploadProgress !== null ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Uploading... {uploadProgress}%
+                </>
               ) : (
-                <div className="flex flex-col gap-2">
-                  {librarySounds.map((s) => (
-                    <SoundCard key={s.id} sound={s} />
-                  ))}
-                </div>
+                <>
+                  <Upload className="h-4 w-4" /> Upload sound (MP3/WAV/OGG/M4A, under 10MB)
+                </>
               )}
-            </div>
-          )}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".mp3,.wav,.ogg,.m4a,audio/mpeg,audio/wav,audio/x-wav,audio/ogg,audio/mp4,audio/x-m4a"
+              onChange={handleUpload}
+              className="hidden"
+            />
 
-          {tab === "mySounds" && (
-            <div className="flex flex-col gap-3">
-              <p className="rounded-lg border border-dashed border-muted2 bg-bg3 p-2.5 text-center font-noto text-[11px] text-muted">
-                🎧 Spotify integration coming soon.
-              </p>
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploadProgress !== null}
-                className="btn-ghost w-full justify-center text-sm disabled:opacity-60"
-              >
-                {uploadProgress !== null ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" /> Uploading... {uploadProgress}%
-                  </>
-                ) : (
-                  <>
-                    <Upload className="h-4 w-4" /> Upload sound (MP3/WAV/OGG, under 5MB)
-                  </>
-                )}
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".mp3,.wav,.ogg,audio/mpeg,audio/wav,audio/x-wav,audio/ogg"
-                onChange={handleUpload}
-                className="hidden"
-              />
-
-              {mySoundsLoading ? (
-                <div className="flex justify-center py-8">
-                  <Loader2 className="h-5 w-5 animate-spin text-muted" />
-                </div>
-              ) : mySounds.length === 0 ? (
-                <div className="flex flex-col items-center gap-2 py-10 text-center">
-                  <Music2 className="h-6 w-6 text-muted" />
-                  <p className="font-syne text-sm font-semibold text-text">
-                    Upload your original music or voice notes
-                  </p>
-                  <p className="max-w-xs font-noto text-xs text-muted">
-                    Sounds you upload here are private to you and appear only when you attach them
-                    to a post.
-                  </p>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  {mySounds.map((s) => (
-                    <SoundCard key={s.id} sound={s} onDelete={() => handleDeleteSound(s)} />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+            {mySoundsLoading ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="h-5 w-5 animate-spin text-muted" />
+              </div>
+            ) : mySounds.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 py-10 text-center">
+                <Music2 className="h-6 w-6 text-muted" />
+                <p className="font-syne text-sm font-semibold text-text">
+                  Upload your original music or voice notes
+                </p>
+                <p className="max-w-xs font-noto text-xs text-muted">
+                  Sounds you upload appear here, and any video you post adds its own audio here too.
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-1">
+                {mySounds.map((s) => (
+                  <SoundCard key={s.id} sound={s} onDelete={() => handleDeleteSound(s)} />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </Modal>
   );

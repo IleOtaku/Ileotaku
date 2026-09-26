@@ -273,6 +273,7 @@ export default function PostComposer({ onPosted, open, onOpenChange }: PostCompo
         videoPosterUrl: mediaKind === "video" ? video?.posterUrl : undefined,
         videoDuration: mediaKind === "video" ? video?.duration : undefined,
         videoResolution: mediaKind === "video" ? videoResolution : undefined,
+        videoPublicId: mediaKind === "video" ? video?.publicId : undefined,
         editingApp: mediaKind === "video" ? (editingApp || null) : undefined,
         forYouEligible,
       };
@@ -325,6 +326,7 @@ export default function PostComposer({ onPosted, open, onOpenChange }: PostCompo
         videoPosterUrl: mediaKind === "video" ? video?.posterUrl : undefined,
         videoDuration: mediaKind === "video" ? video?.duration : undefined,
         videoResolution: mediaKind === "video" ? videoResolution : undefined,
+        videoPublicId: mediaKind === "video" ? video?.publicId : undefined,
         editingApp: mediaKind === "video" ? (editingApp || null) : undefined,
         forYouEligible,
       });
@@ -346,19 +348,30 @@ export default function PostComposer({ onPosted, open, onOpenChange }: PostCompo
     setImageResolution(draft.imageResolution ?? "standard");
     setEditingApp(draft.editingApp ?? "");
     setVideoResolution(draft.videoResolution ?? "480p");
-    setVideo(draft.videoUrl ? { url: draft.videoUrl, posterUrl: draft.videoPosterUrl ?? "", duration: draft.videoDuration ?? 0 } : null);
+    setVideo(
+      draft.videoUrl
+        ? { url: draft.videoUrl, posterUrl: draft.videoPosterUrl ?? "", duration: draft.videoDuration ?? 0, publicId: draft.videoPublicId ?? "" }
+        : null
+    );
     setMediaKind(draft.mediaType === "video" ? "video" : draft.mediaType === "image" || draft.mediaType === "images" ? "photo" : "none");
+    // Reconstructed from the draft's own denormalized soundXxx fields, not a fresh lookup — good
+    // enough to publish with (createPost only ever reads id/title/url/source/duration off this),
+    // even though a couple of fields here are best-effort filler rather than the real Sound doc.
     setSound(
       draft.soundId
         ? ({
             id: draft.soundId,
             title: draft.soundTitle ?? "",
-            artist: draft.soundArtist ?? "",
+            titleLower: (draft.soundTitle ?? "").toLowerCase(),
             url: draft.soundUrl ?? "",
-            duration: draft.soundDuration ?? 0,
-            source: draft.soundSource ?? "library",
-            category: draft.soundCategory ?? "Chill",
+            duration: draft.soundDuration ?? null,
+            source: draft.soundSource ?? "direct_upload",
             usageCount: 0,
+            uploadedBy: draft.uid,
+            uploaderName: draft.displayName,
+            uploaderHandle: draft.handle ?? draft.uid,
+            isPublic: true,
+            createdAt: draft.createdAt,
           } as Sound)
         : null
     );
@@ -480,7 +493,7 @@ export default function PostComposer({ onPosted, open, onOpenChange }: PostCompo
                   <div className="mt-3 flex items-center gap-2 self-start rounded-full border border-clay/40 bg-clay/10 py-1 pl-1 pr-3">
                     <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-clay/20 text-xs">🎵</span>
                     <span className="min-w-0 truncate font-noto text-xs text-text">
-                      {sound.title} <span className="text-muted">— {sound.artist}</span>
+                      {sound.title} <span className="text-muted">— @{sound.uploaderHandle}</span>
                     </span>
                     <button type="button" onClick={() => setSound(null)} aria-label="Remove sound" className="shrink-0 text-muted hover:text-clay2">
                       <X className="h-3.5 w-3.5" />
@@ -614,7 +627,11 @@ export default function PostComposer({ onPosted, open, onOpenChange }: PostCompo
         )}
       </AnimatePresence>
 
-      <SoundPicker open={soundPickerOpen} onClose={() => setSoundPickerOpen(false)} selected={sound} onSelect={setSound} />
+      {/* Beta feedback bug: "Sound picker z-index" — the composer's own overlay is z-[210]; both
+          of these used the shared Modal's z-100 default, so they rendered BEHIND it and were
+          untappable. Same z-[130]/[131]-vs-Modal-z-100 issue found and fixed elsewhere this
+          session (see ReportGroupModal.tsx). */}
+      <SoundPicker open={soundPickerOpen} onClose={() => setSoundPickerOpen(false)} selected={sound} onSelect={setSound} zIndex={220} />
       <DraftsModal
         open={draftsOpen}
         onClose={() => {
@@ -623,6 +640,7 @@ export default function PostComposer({ onPosted, open, onOpenChange }: PostCompo
         }}
         uid={user.uid}
         onResume={handleResumeDraft}
+        zIndex={220}
       />
     </>
   );
