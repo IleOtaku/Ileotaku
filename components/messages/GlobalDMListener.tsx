@@ -27,7 +27,12 @@ const CONVERSATIONS = "conversations";
  * conversations-list update.
  */
 export default function GlobalDMListener() {
-  const { user } = useAuth();
+  // `user?.uid` rather than the whole `user` object as the effect's dependency — confirmed live
+  // that Firebase hands out a NEW User object reference on token refresh even for the same signed-
+  // in account, which would otherwise tear down and restart this subscription (resetting its
+  // "seen" baseline) for no actual auth change, occasionally landing right as a real update comes
+  // in and playing the sound twice for one message.
+  const uid = useAuth((s) => s.user?.uid);
   const activeConversationId = useDMStore((s) => s.activeConversationId);
   const activeConversationIdRef = useRef(activeConversationId);
   const lastSeenRef = useRef<Map<string, string>>(new Map());
@@ -38,43 +43,39 @@ export default function GlobalDMListener() {
   }, [activeConversationId]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!uid) return;
     lastSeenRef.current = new Map();
     hasLoadedOnceRef.current = false;
-    console.log("[GlobalDMListener] subscribing for uid", user.uid);
 
-    const q = query(collection(db, CONVERSATIONS), where("participants", "array-contains", user.uid));
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        console.log("[GlobalDMListener] snapshot, docs:", snap.docs.length, "hasLoadedOnce:", hasLoadedOnceRef.current);
-        snap.docs.forEach((d) => {
-          const convo = d.data() as Conversation;
-          const conversationId = d.id;
-          const lastMessageAt = convo.lastMessageAt;
-          if (!lastMessageAt) return;
+    const q = query(collection(db, CONVERSATIONS), where("participants", "array-contains", uid));
+    const unsub = onSnapshot(q, (snap) => {
+      snap.docs.forEach((d) => {
+        const convo = d.data() as Conversation;
+        const conversationId = d.id;
+        const lastMessageAt = convo.lastMessageAt;
+        if (!lastMessageAt) return;
 
-          const previouslySeen = lastSeenRef.current.get(conversationId);
-          lastSeenRef.current.set(conversationId, lastMessageAt);
+        const previouslySeen = lastSeenRef.current.get(conversationId);
+        lastSeenRef.current.set(conversationId, lastMessageAt);
 
-          if (!hasLoadedOnceRef.current) return;
-          if (previouslySeen === lastMessageAt) return;
-          console.log("[GlobalDMListener] change detected", { conversationId, lastMessageAt, previouslySeen, lastSenderId: convo.lastSenderId, active: activeConversationIdRef.current });
-          if (convo.lastSenderId === user.uid || convo.lastSenderId === "system") return;
-          if (conversationId === activeConversationIdRef.current) return;
+        // Seeding pass (initial snapshot, or right after a fresh sign-in) — never plays a sound
+        // for a conversation's EXISTING last message, only for one that changes after this.
+        if (!hasLoadedOnceRef.current) return;
+        if (previouslySeen === lastMessageAt) return;
+        // Own message (sent from elsewhere, e.g. another device) and system messages ("X joined
+        // the group") never get a sound.
+        if (convo.lastSenderId === uid || convo.lastSenderId === "system") return;
+        // MessagesClient's own subscription already plays message.mp3 for whichever conversation
+        // is actually open right now — this listener is only for every OTHER conversation.
+        if (conversationId === activeConversationIdRef.current) return;
 
-          console.log("[GlobalDMListener] playing notification sound");
-          playNotificationSound();
-        });
-        hasLoadedOnceRef.current = true;
-      },
-      (error) => {
-        console.error("[GlobalDMListener] onSnapshot error:", error);
-      }
-    );
+        playNotificationSound();
+      });
+      hasLoadedOnceRef.current = true;
+    });
 
     return unsub;
-  }, [user]);
+  }, [uid]);
 
   return null;
 }
