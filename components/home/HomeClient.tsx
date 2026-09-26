@@ -93,9 +93,7 @@ export default function HomeClient({ trendingSlot, africanOriginals }: HomeClien
     <div className="relative mx-auto max-w-7xl px-4 py-12 sm:px-6">
       <StoriesBar />
 
-      {/* bottom-LEFT, not right — BetaFeedback's floating pill already occupies bottom-right at
-          these same offsets (and is itself draggable on mobile), so this sits on the opposite
-          side to avoid ever overlapping it. */}
+      {/* bottom-left, matching the fixed offsets other floating action buttons in the app use. */}
       <button
         type="button"
         onClick={() => setCreateStoryOpen(true)}

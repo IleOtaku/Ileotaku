@@ -2,7 +2,6 @@ import type { Metadata, Viewport } from "next";
 import { Toaster } from "react-hot-toast";
 import AuthProvider from "@/components/layout/AuthProvider";
 import BannedGate from "@/components/layout/BannedGate";
-import BetaFeedback from "@/components/layout/BetaFeedback";
 import ErrorBoundary from "@/components/layout/ErrorBoundary";
 import InstallPrompt from "@/components/layout/InstallPrompt";
 import MaintenanceGate from "@/components/layout/MaintenanceGate";
@@ -100,7 +99,6 @@ export default function RootLayout({
         <Preloader />
         <ErrorBoundary>
           <AuthProvider>
-            <BetaFeedback />
             <FeedAudioProvider>
               <MaintenanceGate>
                 <BannedGate>

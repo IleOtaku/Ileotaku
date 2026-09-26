@@ -471,6 +471,41 @@ export async function createPost(input: CreatePostInput): Promise<string> {
     reachConsistent = true;
   }
 
+  const createdAt = new Date().toISOString();
+  const isVerified = badges.isVerified ?? false;
+  const isPlatinum = badges.isPlatinum ?? false;
+  const isFoundingCreator = badges.isFoundingCreator ?? false;
+  const isFounder = badges.isFounder ?? false;
+  const verifiedType = badges.verifiedType ?? null;
+  const isAdmin = badges.isAdmin ?? false;
+  // Beta feedback (verify feed algorithm): a brand new post used to be written with a hardcoded
+  // forYouScore of 0 — indistinguishable, under `orderBy("forYouScore", "desc")`, from a truly
+  // stale post with zero engagement, and missing the recencyBonus calculateForYouScore would
+  // otherwise give anything under 6 hours old. Computing the real initial score here means a new
+  // post's recency/verification/quality terms count from the moment it's published, not only
+  // once its first like/view/comment triggers a recompute.
+  const forYouScore = calculateForYouScore({
+    uid,
+    likes: [],
+    commentCount: 0,
+    viewCount: 0,
+    watchTime: 0,
+    createdAt,
+    boostLevel: 0,
+    boostExpiresAt: undefined,
+    replayCount: 0,
+    profileVisitsFromPost: 0,
+    shareCount: 0,
+    bookmarkCount: 0,
+    isVerified,
+    isFoundingCreator,
+    isPlatinum,
+    mediaType,
+    isFounder,
+    isAdmin,
+    verifiedType,
+  });
+
   try {
     const ref = await addDoc(collection(db, FEED), {
       uid,
@@ -483,13 +518,13 @@ export async function createPost(input: CreatePostInput): Promise<string> {
       attachments: attachments.slice(0, 4),
       likes: [],
       commentCount: 0,
-      isVerified: badges.isVerified ?? false,
-      isPlatinum: badges.isPlatinum ?? false,
-      isFoundingCreator: badges.isFoundingCreator ?? false,
+      isVerified,
+      isPlatinum,
+      isFoundingCreator,
       isPublisher: badges.isPublisher ?? false,
-      isFounder: badges.isFounder ?? false,
-      verifiedType: badges.verifiedType ?? null,
-      isAdmin: badges.isAdmin ?? false,
+      isFounder,
+      verifiedType,
+      isAdmin,
       disableDownloads: badges.disableDownloads ?? false,
       authorBirthday: badges.birthday ?? null,
       ...(sound
@@ -518,11 +553,11 @@ export async function createPost(input: CreatePostInput): Promise<string> {
       reachConsistent,
       boostLevel: 0,
       boostExpiresAt: null,
-      forYouScore: 0,
+      forYouScore,
       viewCount: 0,
       watchTime: 0,
       forYouEligible,
-      createdAt: new Date().toISOString(),
+      createdAt,
     });
     // Fire-and-forget — a missed usage-count bump shouldn't fail the post itself. Spotify
     // preview "sounds" aren't real `sounds` docs (their id is a synthetic `spotify:{trackId}`),

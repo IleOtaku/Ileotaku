@@ -1622,6 +1622,8 @@ export default function MessagesClient() {
                             isSenderPlatinum={profile?.isPlatinum === true}
                             isOtherOnline={!isGroup ? statusByUid[other]?.isOnline : undefined}
                             isGroup={isGroup}
+                            participants={c.participants}
+                            bubbleColor={c.participantColors?.[user.uid] ?? profile?.dmPreferences?.bubbleColor}
                             className="shrink-0"
                           />
                         )}
@@ -2306,6 +2308,8 @@ export default function MessagesClient() {
                                       isSenderPlatinum={profile?.isPlatinum === true}
                                       isOtherOnline={otherUid ? statusByUid[otherUid]?.isOnline : undefined}
                                       isGroup={isGroupThread}
+                                      participants={selected?.participants}
+                                      bubbleColor={bubbleColor}
                                     />
                                   )}
                                   {/* Kept-message bookmark: ONLY in chats with disappearing messages on, never anywhere
