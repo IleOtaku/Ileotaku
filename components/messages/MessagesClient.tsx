@@ -236,6 +236,15 @@ export default function MessagesClient() {
   // initial snapshot when a conversation is first opened/switched.
   const lastSeenMessageIdRef = useRef<string | null>(null);
   const messagesLoadedOnceRef = useRef(false);
+  // Beta feedback bug fix: "DM sound playing when opening an old conversation." Belt-and-suspenders
+  // alongside messagesLoadedOnceRef/lastSeenMessageIdRef above: this subscription effect depends on
+  // `[selectedId, user]`, and `user` (from useAuth) gets a genuinely new object reference on every
+  // Firebase token refresh — which tears down and resubscribes this same effect mid-session,
+  // resetting the "loaded once" gate. That alone can only ever SUPPRESS a sound, never falsely
+  // trigger one, but a message's own createdAt timestamp is a second, independent signal (id/flag
+  // state vs. wall-clock time) that costs nothing to also check — a message can only ever play a
+  // sound if it's actually newer than the moment this conversation was opened.
+  const conversationOpenedAtRef = useRef<number>(0);
   // Beta feedback bug fix: "view-once deletes too fast." Every view-once (or exhausted multi_view)
   // message revealed during THIS visit to the open conversation goes in here (see
   // ViewControlledMedia's onRevealed) rather than expiring the instant it's opened — the cleanup
@@ -433,6 +442,7 @@ export default function MessagesClient() {
   useEffect(() => {
     lastSeenMessageIdRef.current = null;
     messagesLoadedOnceRef.current = false;
+    conversationOpenedAtRef.current = Date.now();
     if (!selectedId) {
       setMessages([]);
       return;
@@ -447,7 +457,14 @@ export default function MessagesClient() {
       selectedId,
       (msgs) => {
         const newest = msgs[msgs.length - 1];
-        if (messagesLoadedOnceRef.current && newest && newest.id !== lastSeenMessageIdRef.current && !newest.isSystem) {
+        const newestIsAfterOpen = !!newest && new Date(newest.createdAt).getTime() >= conversationOpenedAtRef.current;
+        if (
+          messagesLoadedOnceRef.current &&
+          newest &&
+          newest.id !== lastSeenMessageIdRef.current &&
+          !newest.isSystem &&
+          newestIsAfterOpen
+        ) {
           // This subscription only ever exists for the conversation currently open on screen, so
           // both the "active thread" and "from conversation" args are always this same
           // `selectedId` — an own message here plays message-out.mp3 (this fires on Firestore's

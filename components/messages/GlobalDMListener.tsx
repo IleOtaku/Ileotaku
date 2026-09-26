@@ -37,6 +37,13 @@ export default function GlobalDMListener() {
   const activeConversationIdRef = useRef(activeConversationId);
   const lastSeenRef = useRef<Map<string, string>>(new Map());
   const hasLoadedOnceRef = useRef(false);
+  // Beta feedback bug fix: "DM sound playing when opening an old conversation" (this listener has
+  // the same class of risk — opening the app cold, or this effect resubscribing on sign-in, should
+  // never play a sound for a conversation's pre-existing last message). hasLoadedOnceRef/
+  // previouslySeen above already guarantee that on their own; this is a second, independent
+  // signal — a conversation's lastMessageAt can only ever trigger a sound if it's actually newer
+  // than the moment THIS subscription started.
+  const subscribedAtRef = useRef(0);
 
   useEffect(() => {
     activeConversationIdRef.current = activeConversationId;
@@ -46,6 +53,7 @@ export default function GlobalDMListener() {
     if (!uid) return;
     lastSeenRef.current = new Map();
     hasLoadedOnceRef.current = false;
+    subscribedAtRef.current = Date.now();
 
     const q = query(collection(db, CONVERSATIONS), where("participants", "array-contains", uid));
     const unsub = onSnapshot(q, (snap) => {
@@ -62,6 +70,7 @@ export default function GlobalDMListener() {
         // for a conversation's EXISTING last message, only for one that changes after this.
         if (!hasLoadedOnceRef.current) return;
         if (previouslySeen === lastMessageAt) return;
+        if (new Date(lastMessageAt).getTime() < subscribedAtRef.current) return;
         // Own message (sent from elsewhere, e.g. another device) and system messages ("X joined
         // the group") never get a sound.
         if (convo.lastSenderId === uid || convo.lastSenderId === "system") return;
