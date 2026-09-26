@@ -12,12 +12,10 @@ import {
   type UserCredential,
 } from "firebase/auth";
 import { collection, deleteDoc, doc, getDocs, limit, query, where, writeBatch } from "firebase/firestore";
-import { appleProvider, auth, db, googleProvider, twitterProvider } from "./firebase";
+import { auth, db, googleProvider } from "./firebase";
 import { logError } from "./errorLogger";
 import { getUserProfile, updateLastActive, updateUserPrefs, upsertUserProfile } from "./firestore";
 import { setOffline } from "./onlineStatus";
-
-export type SocialProviderName = "google" | "apple" | "twitter";
 
 /** Creates an email/password account, sets the Auth display name, and seeds the Firestore profile. */
 export async function signUpEmail(
@@ -81,16 +79,9 @@ export async function signInEmail(email: string, password: string): Promise<User
   return cred;
 }
 
-/** Signs in via Google, Apple or X (Twitter) popup and seeds/merges the Firestore profile. */
-export async function signInSocial(providerName: SocialProviderName): Promise<UserCredential> {
-  const provider =
-    providerName === "google"
-      ? googleProvider
-      : providerName === "apple"
-        ? appleProvider
-        : twitterProvider;
-
-  const cred = await signInWithPopup(auth, provider);
+/** Signs in via Google popup and seeds/merges the Firestore profile. */
+export async function signInSocial(): Promise<UserCredential> {
+  const cred = await signInWithPopup(auth, googleProvider);
 
   // Only seed defaults on first sign-in — an existing profile's coins, role, follows and
   // flags must never be clobbered back to defaults on a returning user's later logins.
@@ -196,10 +187,10 @@ async function deleteAllDocs(colRef: ReturnType<typeof collection>): Promise<voi
  * side, their account and data are gone either way, which is what actually matters; the orphan
  * Auth record with no matching profile is inert and harmless left behind.
  */
-/** Whether the signed-in user has a password on file at all — social-only accounts (Google/
- * Apple/Twitter) can't reauthenticate with a password, so deleteMyAccount()'s pre-emptive reauth
- * step only applies when this is true. Used by SettingsTab's delete-confirmation modal to decide
- * whether to even show a password field. */
+/** Whether the signed-in user has a password on file at all — a Google-only account can't
+ * reauthenticate with a password, so deleteMyAccount()'s pre-emptive reauth step only applies
+ * when this is true. Used by SettingsTab's delete-confirmation modal to decide whether to even
+ * show a password field. */
 export function hasPasswordProvider(): boolean {
   return auth.currentUser?.providerData.some((p) => p.providerId === "password") ?? false;
 }
