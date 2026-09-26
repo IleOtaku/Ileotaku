@@ -18,6 +18,7 @@ import {
   Copy,
   Download,
   Eye,
+  EyeOff,
   Forward,
   ImagePlus,
   Loader2,
@@ -88,6 +89,7 @@ import {
   keepMessage,
   markAllMessagesSeen,
   markDMRead,
+  markViewOnceExpired,
   removeReaction,
   sendDM,
   setTyping,
@@ -220,6 +222,11 @@ export default function MessagesClient() {
   // new incoming message, never for the initial snapshot when a conversation is first opened/switched.
   const lastSeenMessageIdRef = useRef<string | null>(null);
   const messagesLoadedOnceRef = useRef(false);
+  // Beta feedback bug fix: "view-once deletes too fast." Every view-once (or exhausted multi_view)
+  // message revealed during THIS visit to the open conversation goes in here (see
+  // ViewControlledMedia's onRevealed) rather than expiring the instant it's opened — the cleanup
+  // effect below flushes markViewOnceExpired for each of them once the viewer actually leaves.
+  const pendingViewOnceRef = useRef<Set<string>>(new Set());
   // uid -> currently-playing, for the sidebar's green dot. Deliberately a plain poll (not a
   // real-time listener) — a conversation list can show many contacts at once, and this only
   // needs to be roughly fresh, not instant.
@@ -458,6 +465,25 @@ export default function MessagesClient() {
     );
     if (user) markDMRead(selectedId, user.uid).catch(() => {});
     return unsub;
+  }, [selectedId, user]);
+
+  // Beta feedback bug fix: "view-once deletes too fast — before the user even sees it. The correct
+  // behavior... deletion happens when the user navigates away." This effect's cleanup is that
+  // trigger: it fires right as `selectedId` is about to change (switching to another conversation,
+  // deselecting, or leaving the page entirely) — never on the reveal-tap itself — using THIS
+  // conversation's own id/uid, captured fresh on every run so the flush always targets the
+  // conversation being left, not whichever one is open next.
+  useEffect(() => {
+    const conversationId = selectedId;
+    const uid = user?.uid;
+    return () => {
+      if (!conversationId || !uid || pendingViewOnceRef.current.size === 0) return;
+      const messageIds = Array.from(pendingViewOnceRef.current);
+      pendingViewOnceRef.current = new Set();
+      messageIds.forEach((messageId) => {
+        markViewOnceExpired(conversationId, messageId, uid).catch(() => {});
+      });
+    };
   }, [selectedId, user]);
 
   // Beta feedback: "Only mark seen if the conversation is actively visible (not minimized)" —
@@ -2168,11 +2194,26 @@ export default function MessagesClient() {
                         >
                           {isGroupThread && !isOwn && <Avatar uid={m.senderId} photoURL={senderPhoto} displayName={senderName} size={32} />}
                           <div className="max-w-[75%] rounded-2xl bg-bg3 px-4 py-2 font-noto text-sm italic text-muted">
-                            {/* recordMessageView (lib/dms.ts) sets this exact text for an expired
+                            {/* markViewOnceExpired (lib/dms.ts) sets this exact text for an expired
                                 view-once/multi-view message — everything else that sets isDeleted
                                 ("delete for everyone") leaves text alone, so this still falls back
                                 correctly. */}
                             {m.text === "This message has expired" ? m.text : "This message was deleted"}
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // Beta feedback: "Group view-once: delete per viewer, not for everyone." Once
+                    // THIS viewer has left the chat having opened it, they're in viewSettings.hiddenFor
+                    // — the message itself is still very much alive for anyone else who hasn't opened
+                    // it yet, so it's only hidden for this one viewer, never touching m.isDeleted.
+                    if (!isOwn && m.viewSettings?.hiddenFor?.includes(user.uid)) {
+                      return (
+                        <div key={m.id} id={`message-${m.id}`} className={`flex items-end gap-2 ${isOwn ? "justify-end" : "justify-start"}`}>
+                          <div className="flex items-center gap-1.5 rounded-2xl bg-bg3 px-4 py-2 font-noto text-sm italic text-muted opacity-40">
+                            <EyeOff className="h-3.5 w-3.5 shrink-0" />
+                            You&apos;ve viewed this message
                           </div>
                         </div>
                       );
@@ -2276,6 +2317,7 @@ export default function MessagesClient() {
                                   conversationId={selectedId!}
                                   viewerUid={user.uid}
                                   onForward={m.mediaType ? () => setForwardingMessage(m) : undefined}
+                                  onRevealed={(messageId) => pendingViewOnceRef.current.add(messageId)}
                                 />
                                 {m.text && !captionInMedia && (
                                   isSearchOpen && searchQuery.trim() ? (

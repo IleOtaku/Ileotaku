@@ -1091,6 +1091,12 @@ export interface DMMessage {
     /** Every open, by every viewer — 'daily' mode checks each viewer's own last entry here;
      * 'view_once' checks whether the current viewer has any entry at all. */
     viewedBy?: { uid: string; viewedAt: string }[];
+    /** Group chats only — a 'view_once' (or exhausted 'multi_view') message doesn't delete outright
+     * the moment ANY one member leaves it having viewed it; it disappears for THAT member alone
+     * (this array), while everyone else who hasn't opened it yet still sees it normally. Only once
+     * every participant is in here does lib/dms.ts's markViewOnceExpired mark the message itself
+     * isDeleted. Absent/unused in 1:1 chats, which still delete for everyone on that same trigger. */
+    hiddenFor?: string[];
   };
 }
 

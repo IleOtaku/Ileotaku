@@ -44,11 +44,22 @@ function CountdownBadge({ expiresAt }: { expiresAt: string }) {
  * Beta feedback: "WHERE'S THE VIEW ONCE INTEGRATION? FOR IMAGES, VIDEOS, TEXTS THAT WAS
  * REQUESTED!?" Wraps DMMediaContent for any message carrying `viewSettings`: shows a blurred,
  * locked card (never the real content) until tapped, at which point it calls recordMessageView
- * and reveals it for the rest of this session — re-checking isMessageViewable on every fresh
- * render so a genuinely expired message shows "This message has expired" instead. The sender
- * always sees their own content unlocked; the gate is for recipients only.
+ * and reveals it — staying revealed for as long as this component instance stays mounted, i.e.
+ * for as long as this chat stays open, however long that is. The message itself isn't actually
+ * marked expired until the viewer leaves (see recordMessageView/markViewOnceExpired in lib/dms.ts),
+ * so re-checking isMessageViewable on every fresh mount (a genuinely already-spent message, from a
+ * PRIOR visit) still correctly shows "This message has expired" instead. The sender always sees
+ * their own content unlocked; the gate is for recipients only.
  */
-export default function ViewControlledMedia({ message: m, isOwn, accentColor, conversationId, viewerUid, onForward }: DMMediaContentProps & { conversationId: string; viewerUid: string }) {
+export default function ViewControlledMedia({
+  message: m,
+  isOwn,
+  accentColor,
+  conversationId,
+  viewerUid,
+  onForward,
+  onRevealed,
+}: DMMediaContentProps & { conversationId: string; viewerUid: string; onRevealed?: (messageId: string) => void }) {
   const [revealed, setRevealed] = useState(false);
   const settings = m.viewSettings;
 
@@ -67,6 +78,10 @@ export default function ViewControlledMedia({ message: m, isOwn, accentColor, co
         onClick={() => {
           setRevealed(true);
           recordMessageView(conversationId, m.id, viewerUid, m).catch(() => {});
+          // Beta feedback bug fix: "view-once deletes too fast." Actual expiry is deferred until
+          // the viewer leaves this chat — see MessagesClient's pendingViewOnceRef, which is what
+          // this notifies, and lib/dms.ts's markViewOnceExpired for what runs at that point.
+          onRevealed?.(m.id);
         }}
         className="relative mb-1 flex h-40 w-56 flex-col items-center justify-center gap-2 overflow-hidden rounded-xl bg-black/40 text-ivory"
       >

@@ -1167,8 +1167,10 @@ export function isMessageViewable(message: Pick<DMMessage, "viewSettings">, view
 
   switch (mode) {
     case "view_once":
-      // Viewable only for whoever hasn't opened it yet — once ANYONE has (a group could have
-      // several members), it's spent for everyone else too; see recordMessageView's isDeleted set.
+      // Viewable only for whoever hasn't opened it yet. In a DM, once the one other participant
+      // has, markViewOnceExpired (fired when they leave the chat — see its own doc comment) marks
+      // the whole message isDeleted; in a group it's per-viewer instead (viewSettings.hiddenFor),
+      // so THIS check is about "have I personally opened it", not "has anyone".
       return !viewerRecord;
 
     case "timed": {
@@ -1180,7 +1182,8 @@ export function isMessageViewable(message: Pick<DMMessage, "viewSettings">, view
 
     case "multi_view":
       // The rule is N views TOTAL across everyone, not N per person (a 1:1's "view once" already
-      // covers the per-person case) — recordMessageView marks it deleted once this trips.
+      // covers the per-person case) — markViewOnceExpired marks it deleted once this trips AND the
+      // viewer who spent the last view has left, so they still get to see it in full first.
       return (viewCount ?? 0) < (maxViews ?? 1);
 
     case "daily":
@@ -1195,9 +1198,17 @@ export function isMessageViewable(message: Pick<DMMessage, "viewSettings">, view
 }
 
 /**
- * Records `viewerUid` opening a view-controlled message, and — for view_once/multi_view — marks
- * it expired for everyone the instant that trips. Callers must check isMessageViewable() BEFORE
- * calling this (it doesn't re-check), since opening the media is what "spends" a view.
+ * Records `viewerUid` opening a view-controlled message. Callers must check isMessageViewable()
+ * BEFORE calling this (it doesn't re-check), since opening the media is what "spends" a view.
+ *
+ * Beta feedback bug: "view-once deletes too fast — before the user even sees it." This used to
+ * also mark a spent view_once/multi_view message isDeleted right here, in the same call — but
+ * every client subscribed to this conversation (the viewer who just opened it included) gets that
+ * update via onSnapshot almost immediately, which flips their OWN message list over to the
+ * "message was deleted" branch before they've actually seen the content they just tapped to
+ * reveal. Expiry is now deferred entirely to markViewOnceExpired, fired only once the viewer
+ * actually leaves the chat (see MessagesClient's pendingViewOnceRef) — the same timing WhatsApp
+ * uses for view-once.
  */
 export async function recordMessageView(
   conversationId: string,
@@ -1221,9 +1232,46 @@ export async function recordMessageView(
     }
   }
   await updateDoc(ref, updates);
+}
 
-  const newTotalViews = (settings.viewCount ?? 0) + 1;
-  if (settings.mode === "view_once" || (settings.mode === "multi_view" && newTotalViews >= (settings.maxViews ?? 1))) {
+/**
+ * Finalizes a view_once (or an exhausted multi_view) message once the viewer who opened it during
+ * this visit actually leaves the chat — see recordMessageView's own doc comment for why this is
+ * deferred rather than instant, and MessagesClient's pendingViewOnceRef for what calls this and
+ * when. No-ops for anything else (a message with no viewSettings, one already deleted, or one
+ * that isn't actually spent yet — e.g. a multi_view with views still remaining).
+ *
+ * In a 1:1 chat this deletes the message for everyone, exactly as before, just later. In a group
+ * it instead only hides it for THIS viewer (viewSettings.hiddenFor) — other members who haven't
+ * opened it yet keep seeing it completely normally — and only actually deletes the message once
+ * every participant has been added to hiddenFor.
+ */
+export async function markViewOnceExpired(conversationId: string, messageId: string, viewerUid: string): Promise<void> {
+  const ref = doc(db, CONVERSATIONS, conversationId, "messages", messageId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  const message = snap.data() as DMMessage;
+  const settings = message.viewSettings;
+  if (!settings || message.isDeleted) return;
+
+  const spent =
+    settings.mode === "view_once" || (settings.mode === "multi_view" && (settings.viewCount ?? 0) >= (settings.maxViews ?? 1));
+  if (!spent) return;
+
+  const now = new Date().toISOString();
+  const convoSnap = await getDoc(doc(db, CONVERSATIONS, conversationId));
+  const convo = convoSnap.data() as Conversation | undefined;
+
+  if (convo?.type !== "group") {
     await updateDoc(ref, { isDeleted: true, deletedAt: now, text: "This message has expired" });
+    return;
+  }
+
+  const hiddenFor = Array.from(new Set([...(settings.hiddenFor ?? []), viewerUid]));
+  const allViewed = (convo.participants ?? []).length > 0 && convo.participants.every((uid) => hiddenFor.includes(uid));
+  if (allViewed) {
+    await updateDoc(ref, { isDeleted: true, deletedAt: now, text: "This message has expired" });
+  } else {
+    await updateDoc(ref, { "viewSettings.hiddenFor": arrayUnion(viewerUid) });
   }
 }
