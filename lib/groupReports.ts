@@ -41,13 +41,20 @@ async function lastMessages(
     query(collection(db, CONVERSATIONS, conversationId, "messages"), orderBy("createdAt", "desc"), limit(take))
   );
   return snap.docs
-    .map((d) => d.data() as DMMessage)
+    .map((d) => ({ ...(d.data() as DMMessage), id: d.id }))
     .reverse()
     .map((m) => ({
       id: m.id,
       senderId: m.senderId,
       senderName: m.senderId === "system" ? "System" : participantNames?.[m.senderId] ?? m.senderId,
-      text: m.isDeleted ? "[deleted]" : m.text,
+      // Beta feedback bug (from error logs): "setDoc() called with invalid data. Unsupported field
+      // value: undefined." `m.id` used to come straight off `d.data() as DMMessage` — the document
+      // itself never stores its own id as a field, so that cast silently produced `undefined` and
+      // every group report submission failed outright. Also guards `text` here for the same
+      // reason: a message doc genuinely missing `text` (never possible via sendDM, but not
+      // something this snapshot should trust blindly) would otherwise smuggle another undefined
+      // into the array.
+      text: m.isDeleted ? "[deleted]" : (m.text ?? ""),
       createdAt: m.createdAt,
     }));
 }

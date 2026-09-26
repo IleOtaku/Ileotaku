@@ -1008,6 +1008,16 @@ export interface DMMessage {
   deletedFor?: string[];
   reactions?: MessageReaction[];
   replyTo?: MessageReplyTo;
+  /** Beta feedback: "Forwarded message indicator." Set when this message is a forward (of a
+   * forward, potentially) — `forwardCount` carries over and increments from the ORIGINAL
+   * message's own forwardedFrom.forwardCount (or starts at 1 for a first forward), so a chain of
+   * re-forwards keeps counting up instead of resetting. */
+  forwardedFrom?: {
+    originalSenderName: string;
+    originalSenderUid: string;
+    forwardCount: number;
+    originalConversationId?: string;
+  };
   /** Beta feedback: "On join, it should show in grey faded text who joined and how (via link,
    * someone added)." A system message has `senderId: "system"` and no media/reactions of its
    * own — the thread renders it centered and muted instead of as a bubble, same convention

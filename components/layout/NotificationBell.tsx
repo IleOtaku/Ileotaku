@@ -36,7 +36,7 @@ import {
 import { Modal } from "@/components/ui";
 import { useAuth } from "@/hooks/useAuth";
 import { markAllAsRead, markAsRead, subscribeToNotifications } from "@/lib/notifications";
-import { playNotificationSound } from "@/lib/notificationSound";
+import { playNotificationSound } from "@/lib/notificationSounds";
 import { formatPostTimestamp } from "@/lib/utils";
 import { NotificationType, type AppNotification } from "@/types";
 
@@ -153,7 +153,7 @@ export default function NotificationBell() {
     }
     return subscribeToNotifications(user.uid, (snapshot) => {
       const newestId = snapshot.notifications[0]?.id ?? null;
-      // A call has its own ringtone (lib/ringtone.ts) — the notification chime is for everything else.
+      // A call has its own ringtone (lib/notificationSounds.ts) — the notification chime is for everything else.
       if (hasLoadedOnceRef.current && newestId && newestId !== lastSeenIdRef.current && snapshot.notifications[0]?.type !== NotificationType.INCOMING_CALL) {
         playNotificationSound();
       }

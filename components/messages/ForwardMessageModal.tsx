@@ -16,9 +16,23 @@ export interface ForwardMessageModalProps {
   currentUid: string;
 }
 
+/** Beta feedback: "Forwarded message indicator." If `m` was already a forward, the ORIGINAL
+ * sender/conversation carry over unchanged and only the count increments — a forward of a
+ * forward still points at the true original, not the person who happened to re-forward it. */
+function buildForwardedFrom(m: DMMessage, conversations: Conversation[]): NonNullable<DMMessage["forwardedFrom"]> {
+  if (m.forwardedFrom) return { ...m.forwardedFrom, forwardCount: m.forwardedFrom.forwardCount + 1 };
+  const convo = conversations.find((c) => c.id === m.conversationId);
+  return {
+    originalSenderName: convo?.participantNames?.[m.senderId] ?? "Someone",
+    originalSenderUid: m.senderId,
+    forwardCount: 1,
+    originalConversationId: m.conversationId,
+  };
+}
+
 /** Carries over everything a forward should keep — the text/media/share payload — but never the
  * original's reply-quote, reactions, or edit history; a forwarded message starts fresh. */
-function toForwardOptions(m: DMMessage): SendDMOptions {
+function toForwardOptions(m: DMMessage, conversations: Conversation[]): SendDMOptions {
   return {
     mediaType: m.mediaType,
     mediaUrl: m.mediaUrl,
@@ -36,6 +50,7 @@ function toForwardOptions(m: DMMessage): SendDMOptions {
     sharedPostAuthorName: m.sharedPostAuthorName,
     sharedPostPreviewText: m.sharedPostPreviewText,
     sharedPostMediaUrl: m.sharedPostMediaUrl,
+    forwardedFrom: buildForwardedFrom(m, conversations),
   };
 }
 
@@ -65,7 +80,7 @@ export default function ForwardMessageModal({ open, onClose, message, conversati
     if (!message || sendingTo) return;
     setSendingTo(targetConversationId);
     try {
-      await sendDM(targetConversationId, currentUid, message.text, toForwardOptions(message));
+      await sendDM(targetConversationId, currentUid, message.text, toForwardOptions(message, conversations));
       toast.success("Message forwarded.");
       onClose();
     } catch (error) {

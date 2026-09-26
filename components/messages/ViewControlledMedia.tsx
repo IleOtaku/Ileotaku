@@ -48,11 +48,11 @@ function CountdownBadge({ expiresAt }: { expiresAt: string }) {
  * render so a genuinely expired message shows "This message has expired" instead. The sender
  * always sees their own content unlocked; the gate is for recipients only.
  */
-export default function ViewControlledMedia({ message: m, isOwn, accentColor, conversationId, viewerUid }: DMMediaContentProps & { conversationId: string; viewerUid: string }) {
+export default function ViewControlledMedia({ message: m, isOwn, accentColor, conversationId, viewerUid, onForward }: DMMediaContentProps & { conversationId: string; viewerUid: string }) {
   const [revealed, setRevealed] = useState(false);
   const settings = m.viewSettings;
 
-  if (!settings || isOwn) return <DMMediaContent message={m} isOwn={isOwn} accentColor={accentColor} />;
+  if (!settings || isOwn) return <DMMediaContent message={m} isOwn={isOwn} accentColor={accentColor} onForward={onForward} />;
 
   const viewable = revealed || isMessageViewable(m, viewerUid);
   if (!viewable) {
@@ -84,7 +84,7 @@ export default function ViewControlledMedia({ message: m, isOwn, accentColor, co
 
   return (
     <div className="relative">
-      <DMMediaContent message={m} isOwn={isOwn} accentColor={accentColor} />
+      <DMMediaContent message={m} isOwn={isOwn} accentColor={accentColor} onForward={onForward} />
       {settings.mode === "timed" && settings.expiresAt && <CountdownBadge expiresAt={settings.expiresAt} />}
     </div>
   );

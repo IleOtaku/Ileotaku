@@ -1,6 +1,10 @@
 "use client";
 
+import { useEffect } from "react";
 import { usePathname } from "next/navigation";
+import { useAuth } from "@/hooks/useAuth";
+import { subscribeToUnreadDMCount } from "@/lib/dms";
+import { updateAppBadge } from "@/lib/notifications";
 import Footer from "./Footer";
 import Navbar from "./Navbar";
 
@@ -24,6 +28,20 @@ import Navbar from "./Navbar";
  */
 export default function SiteChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { user } = useAuth();
+
+  // Beta feedback: "PWA app icon notification dot." Lives here (not just in Navbar) because
+  // Navbar itself is unmounted on the immersive routes below — /messages most of all, which is
+  // exactly where an unread count is most likely to be actively changing — so this needs its own
+  // subscription to keep the badge current no matter which route is showing.
+  useEffect(() => {
+    if (!user) {
+      updateAppBadge(0);
+      return;
+    }
+    return subscribeToUnreadDMCount(user.uid, (count) => updateAppBadge(count));
+  }, [user]);
+
   const isImmersiveRoute =
     pathname?.startsWith("/auth") ||
     pathname?.startsWith("/reader") ||

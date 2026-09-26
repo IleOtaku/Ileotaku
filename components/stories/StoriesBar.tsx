@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Play, Plus } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { VerificationBadge } from "@/components/ui/VerificationBadge";
 import { useAuth } from "@/hooks/useAuth";
+import { playStorySound } from "@/lib/notificationSounds";
 import { MAX_ACTIVE_STORIES, subscribeToStories } from "@/lib/stories";
 import type { Story } from "@/types";
 import StoryCreateModal from "./StoryCreateModal";
@@ -18,10 +19,28 @@ export default function StoriesBar() {
   const [grouped, setGrouped] = useState<Map<string, Story[]>>(new Map());
   const [createOpen, setCreateOpen] = useState(false);
   const [viewingUid, setViewingUid] = useState<string | null>(null);
+  // Beta feedback: "New notification sounds... New story -> playStorySound()." Tracks story ids
+  // already seen so the shimmer only plays for a genuinely new story from someone you FOLLOW —
+  // never for the initial snapshot on load, and never for your own upload.
+  const seenStoryIdsRef = useRef<Set<string> | null>(null);
 
   useEffect(() => {
-    return subscribeToStories(setGrouped);
-  }, []);
+    return subscribeToStories((g) => {
+      const allIds = new Set<string>();
+      let hasNewFromOthers = false;
+      g.forEach((stories, uid) => {
+        for (const s of stories) {
+          allIds.add(s.id);
+          if (seenStoryIdsRef.current && !seenStoryIdsRef.current.has(s.id) && uid !== user?.uid) {
+            hasNewFromOthers = true;
+          }
+        }
+      });
+      if (hasNewFromOthers) playStorySound();
+      seenStoryIdsRef.current = allIds;
+      setGrouped(g);
+    });
+  }, [user?.uid]);
 
   if (!user) return null;
 

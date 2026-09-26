@@ -6,6 +6,7 @@ import { Maximize2, Mic, MicOff, Phone, PhoneOff, Volume2, VolumeX } from "lucid
 import { Avatar } from "@/components/ui/Avatar";
 import { useActiveCall } from "@/hooks/useActiveCall";
 import { useRingtone } from "@/hooks/useRingtone";
+import { playCallEndedSound } from "@/lib/notificationSounds";
 import { checkMicrophonePermission } from "@/lib/webrtc";
 
 /** How long an unanswered outgoing call rings before it's ended as "missed". */
@@ -34,7 +35,7 @@ export default function CallUI() {
   const [micReady, setMicReady] = useState(false);
   const connectedAtRef = useRef<number | null>(null);
 
-  // Our own ringtone (lib/ringtone.ts): the melody for an incoming call, a softer ringback for the caller.
+  // Our own ringtone (lib/notificationSounds.ts): a deep rhythmic pulse for an incoming call, a softer ringback for the caller.
   useRingtone(status === "ringing" && !minimized ? (direction === "incoming" ? "incoming" : "outgoing") : null);
 
   useEffect(() => {
@@ -44,6 +45,7 @@ export default function CallUI() {
     setMicReady(call.micReady);
     call.onMicReady(() => setMicReady(true));
     call.onCallEnded(() => {
+      playCallEndedSound();
       toast("Call ended.");
       reset();
     });

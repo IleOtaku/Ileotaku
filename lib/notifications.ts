@@ -130,6 +130,21 @@ export async function deleteNotification(uid: string, notifId: string): Promise<
   await deleteDoc(doc(db, "users", uid, "notifications", notifId));
 }
 
+/** Beta feedback: "PWA app icon notification dot" — the Badging API shows a plain dot (never a
+ * number) on the installed app's icon, same "something's new" signal as the navbar's breathing
+ * dot rather than a numeric count. Support is spotty (mainly Android Chrome; iOS Safari only
+ * partially) — `'setAppBadge' in navigator` is the feature check, and a rejected promise (denied,
+ * unsupported context, etc.) is swallowed since this is a bonus indicator, never load-bearing. */
+export async function updateAppBadge(count: number): Promise<void> {
+  if (!("setAppBadge" in navigator)) return;
+  try {
+    if (count > 0) await (navigator as unknown as { setAppBadge: (n?: number) => Promise<void> }).setAppBadge(1);
+    else await (navigator as unknown as { clearAppBadge: () => Promise<void> }).clearAppBadge();
+  } catch {
+    // Unsupported/denied — badge is a bonus, never required.
+  }
+}
+
 export interface NotificationsSnapshot {
   notifications: AppNotification[];
   unreadCount: number;

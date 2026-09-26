@@ -348,6 +348,50 @@ body {
     }
   }
 
+  /* Beta feedback: "Tap replied message to scroll to original" + in-chat search result jumps —
+   * both briefly flash the target bubble via this class (see MessagesClient.tsx's
+   * scrollToMessage) so it's obvious which message the jump landed on. */
+  @keyframes message-highlight {
+    0% {
+      background-color: transparent;
+    }
+    20% {
+      background-color: #d4a84320;
+    }
+    80% {
+      background-color: #d4a84320;
+    }
+    100% {
+      background-color: transparent;
+    }
+  }
+
+  .message-highlight {
+    animation: message-highlight 2s ease;
+    border-radius: 0.75rem;
+  }
+
+  /* Beta feedback: "Navbar breathing dot for new messages" + the PWA app-icon badge — a small
+   * purple dot rather than a numeric count, so unread DMs read as "something's new" without a
+   * number nagging for attention. */
+  @keyframes breathe {
+    0%,
+    100% {
+      opacity: 1;
+      transform: scale(1);
+      box-shadow: 0 0 0 0 #9ecfef60;
+    }
+    50% {
+      opacity: 0.8;
+      transform: scale(1.2);
+      box-shadow: 0 0 0 6px #9ecfef00;
+    }
+  }
+
+  .animate-breathe {
+    animation: breathe 2s ease-in-out infinite;
+  }
+
   /* DM Feature Overhaul (Part C): 10 selectable message-bubble shapes, Platinum-exclusive (see
    * components/messages/BubbleStylePicker.tsx). Applied to the SENDER's own bubbles as seen by
    * everyone — MessagesClient reads the sender's users/{uid}.dmPreferences (or a chat-specific

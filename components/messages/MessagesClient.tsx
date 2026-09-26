@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -11,7 +11,9 @@ import {
   ArrowLeft,
   Bookmark,
   Check,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   Clock,
   Copy,
   Download,
@@ -65,6 +67,7 @@ import MediaPreviewModal, { type MediaPreviewResult } from "./MediaPreviewModal"
 import ForwardMessageModal from "./ForwardMessageModal";
 import type { ViewSettingsChoice } from "./ViewSettingsPicker";
 import { downloadMediaDirect } from "@/lib/videoDownload";
+import { playMessageSound } from "@/lib/notificationSounds";
 import PendingBubble, { type PendingSend } from "./PendingBubble";
 import { VoiceMicButton, VoicePreviewBar, VoiceRecordingBar } from "./VoiceNoteBars";
 import { useVoiceNote, type VoiceDraft } from "@/hooks/useVoiceNote";
@@ -212,6 +215,11 @@ export default function MessagesClient() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const handledWithParam = useRef(false);
   const handledOpenParam = useRef<string | null>(null);
+  // Beta feedback: "New notification sounds... DM message received -> playMessageSound()." Tracks
+  // the newest message id already seen in the OPEN thread so the thud only plays for a genuinely
+  // new incoming message, never for the initial snapshot when a conversation is first opened/switched.
+  const lastSeenMessageIdRef = useRef<string | null>(null);
+  const messagesLoadedOnceRef = useRef(false);
   // uid -> currently-playing, for the sidebar's green dot. Deliberately a plain poll (not a
   // real-time listener) — a conversation list can show many contacts at once, and this only
   // needs to be roughly fresh, not instant.
@@ -250,6 +258,13 @@ export default function MessagesClient() {
   const [forwardingMessage, setForwardingMessage] = useState<DMMessage | null>(null);
   const [reactionViewer, setReactionViewer] = useState<{ emoji: string; uids: string[] } | null>(null);
   const [seenByFor, setSeenByFor] = useState<DMMessage | null>(null);
+  // Beta feedback: "Tap the reply quote to scroll to the original message" + in-chat search
+  // (below). Both jump to a message by id and flash it briefly — `highlightedMessageId` drives
+  // the `.message-highlight` CSS animation (see globals.css) on whichever bubble it names.
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [currentResultIndex, setCurrentResultIndex] = useState(0);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressFiredRef = useRef(false);
 
@@ -395,6 +410,8 @@ export default function MessagesClient() {
   }, [user, searchParams]);
 
   useEffect(() => {
+    lastSeenMessageIdRef.current = null;
+    messagesLoadedOnceRef.current = false;
     if (!selectedId) {
       setMessages([]);
       return;
@@ -408,6 +425,19 @@ export default function MessagesClient() {
     const unsub = subscribeToConversation(
       selectedId,
       (msgs) => {
+        const newest = msgs[msgs.length - 1];
+        if (
+          messagesLoadedOnceRef.current &&
+          newest &&
+          newest.id !== lastSeenMessageIdRef.current &&
+          newest.senderId !== user?.uid &&
+          !newest.isSystem
+        ) {
+          playMessageSound();
+        }
+        messagesLoadedOnceRef.current = true;
+        lastSeenMessageIdRef.current = newest?.id ?? null;
+
         setMessages(msgs);
         if (user) markDMRead(selectedId, user.uid).catch(() => {});
         // Beta feedback: "Where's the platinum members read receipts feature?" Auto-marks seen —
@@ -1266,7 +1296,7 @@ export default function MessagesClient() {
     if (!user) return;
     setReplyingTo({
       messageId: m.id,
-      senderName: m.senderId === user.uid ? "You" : otherNameOf(m),
+      senderName: senderNameOf(m),
       preview: truncate(m.text, 80),
     });
     closeMenu();
@@ -1317,13 +1347,93 @@ export default function MessagesClient() {
     toast.success("Sticker saved!");
   }
 
-  // `otherName` (the derived thread-header value below) isn't in scope this early in the
-  // component — this small helper exists just so handleReply above can label a reply's
-  // "senderName" without duplicating that lookup.
-  function otherNameOf(m: DMMessage): string {
+  // Beta feedback bug: "The replied-message preview in group chats shows the wrong sender name."
+  // The old version resolved "the other participant" in the conversation regardless of who
+  // actually sent `m` — in a group that's whichever non-self uid happened to be found first, so
+  // every reply showed the same wrong name. This resolves the name from `m.senderId` itself
+  // (via the SAME nickname-then-participantName lookup the message bubbles already render with),
+  // so it's correct for both 1:1 and group threads and for whichever member's message was tapped.
+  function senderNameOf(m: DMMessage): string {
+    if (user && m.senderId === user.uid) return "You";
     const convo = conversations.find((c) => c.id === m.conversationId);
-    const other = convo?.participants.find((id) => id !== user?.uid);
-    return (other && convo?.participantNames?.[other]) || "Reader";
+    return (user && convo?.nicknames?.[user.uid]?.[m.senderId]) ?? convo?.participantNames?.[m.senderId] ?? "Reader";
+  }
+
+  // Beta feedback: "Tap replied message to scroll to original" + in-chat search result jumps —
+  // both funnel through here so the highlight/scroll behavior is identical either way.
+  function scrollToMessage(messageId: string) {
+    const element = document.getElementById(`message-${messageId}`);
+    if (!element) return;
+    element.scrollIntoView({ behavior: "smooth", block: "center" });
+    setHighlightedMessageId(messageId);
+    setTimeout(() => setHighlightedMessageId((cur) => (cur === messageId ? null : cur)), 2000);
+  }
+
+  // Beta feedback: "Search in active chats." Matches plain-text messages in the OPEN thread only
+  // (case-insensitive substring) — media captions/system messages aren't searched, same as most
+  // chat apps. Ordered oldest-to-newest so "next"/"prev" read the same direction as the thread.
+  const searchResults = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [];
+    return messages.filter((m) => !m.isSystem && !m.isDeleted && m.text?.toLowerCase().includes(q)).map((m) => m.id);
+  }, [messages, searchQuery]);
+
+  useEffect(() => {
+    setCurrentResultIndex(0);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    if (searchResults.length === 0) return;
+    const id = searchResults[Math.min(currentResultIndex, searchResults.length - 1)];
+    scrollToMessage(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentResultIndex, searchResults]);
+
+  function nextResult() {
+    if (searchResults.length === 0) return;
+    setCurrentResultIndex((i) => (i + 1) % searchResults.length);
+  }
+  function prevResult() {
+    if (searchResults.length === 0) return;
+    setCurrentResultIndex((i) => (i - 1 + searchResults.length) % searchResults.length);
+  }
+  function closeSearch() {
+    setIsSearchOpen(false);
+    setSearchQuery("");
+    setCurrentResultIndex(0);
+  }
+
+  useEffect(() => {
+    if (!isSearchOpen) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") closeSearch();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSearchOpen]);
+
+  // Switching threads with search open would otherwise search the NEW thread's messages under a
+  // stale query, or land a highlight/scroll from the old one — closing it is the simplest correct
+  // reset, same as most chat apps do on thread switch.
+  useEffect(() => {
+    closeSearch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
+
+  function highlightText(content: string, query: string) {
+    if (!query) return content;
+    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const parts = content.split(new RegExp(`(${escaped})`, "gi"));
+    return parts.map((part, i) =>
+      part.toLowerCase() === query.toLowerCase() ? (
+        <mark key={i} className="rounded-sm bg-gold/30 text-inherit">
+          {part}
+        </mark>
+      ) : (
+        part
+      )
+    );
   }
 
   if (authLoading || !user) {
@@ -1638,37 +1748,54 @@ export default function MessagesClient() {
                   <ArrowLeft className="h-5 w-5" />
                 </button>
                 {isGroupThread ? (
-                  <button
-                    type="button"
-                    onClick={() => setGroupInfoOpen(true)}
-                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                  >
-                    {otherPhoto ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img loading="lazy" src={otherPhoto} alt={otherName} className="h-8 w-8 shrink-0 rounded-full object-cover" />
-                    ) : (
-                      <div
-                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full font-syne text-[10px] font-bold text-white"
-                        style={{ background: stringToColor(otherName) }}
-                      >
-                        {initials(otherName)}
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setGroupInfoOpen(true)}
+                      className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                    >
+                      {otherPhoto ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img loading="lazy" src={otherPhoto} alt={otherName} className="h-8 w-8 shrink-0 rounded-full object-cover" />
+                      ) : (
+                        <div
+                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full font-syne text-[10px] font-bold text-white"
+                          style={{ background: stringToColor(otherName) }}
+                        >
+                          {initials(otherName)}
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <span className="flex min-w-0 items-center gap-1 font-syne text-sm font-semibold text-text">
+                          <span className="truncate">{otherName}</span>
+                          {selected?.verifiedGroup && <BadgeCheck data-testid="group-verified-badge" aria-label="Verified group" className="h-3.5 w-3.5 shrink-0 text-plat" />}
+                        </span>
+                        <span className="font-noto text-xs text-muted">
+                          {typingUids.length > 0
+                            ? typingUids.length === 1
+                              ? `${selected?.participantNames?.[typingUids[0]] ?? "Someone"} is typing...`
+                              : `${typingUids.length} people are typing...`
+                            : `${(selected?.participants ?? []).length} members`}
+                        </span>
                       </div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <span className="flex min-w-0 items-center gap-1 font-syne text-sm font-semibold text-text">
-                        <span className="truncate">{otherName}</span>
-                        {selected?.verifiedGroup && <BadgeCheck data-testid="group-verified-badge" aria-label="Verified group" className="h-3.5 w-3.5 shrink-0 text-plat" />}
-                      </span>
-                      <span className="font-noto text-xs text-muted">
-                        {typingUids.length > 0
-                          ? typingUids.length === 1
-                            ? `${selected?.participantNames?.[typingUids[0]] ?? "Someone"} is typing...`
-                            : `${typingUids.length} people are typing...`
-                          : `${(selected?.participants ?? []).length} members`}
-                      </span>
-                    </div>
-                    <ChevronRight className="h-4 w-4 shrink-0 text-muted" />
-                  </button>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsSearchOpen((s) => !s)}
+                      aria-label="Search messages"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted hover:bg-bg4 hover:text-text"
+                    >
+                      <Search className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setGroupInfoOpen(true)}
+                      aria-label="Group info"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted hover:bg-bg4 hover:text-text"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </>
                 ) : (
                   <>
                     <div className="relative shrink-0">
@@ -1727,6 +1854,14 @@ export default function MessagesClient() {
                         <Phone className="h-4 w-4" />
                       </button>
                     )}
+                    <button
+                      type="button"
+                      onClick={() => setIsSearchOpen((s) => !s)}
+                      aria-label="Search messages"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted hover:bg-bg4 hover:text-text"
+                    >
+                      <Search className="h-4 w-4" />
+                    </button>
                     {/* Beta feedback: "Add the same pattern for direct messages" — groups' own
                         chevron opens GroupInfoPanel; this is the 1:1 equivalent, opening
                         ContactInfoPanel (which now also owns Block/Report, moved out of the
@@ -1836,6 +1971,38 @@ export default function MessagesClient() {
                   )}
                 </div>
               </div>
+
+              {/* Beta feedback: "Search in active chats." Slides down below the header; works the
+                  same in direct and group threads since it's keyed off `messages` (the open
+                  thread's own list), not anything group/1:1-specific. */}
+              {isSearchOpen && (
+                <div className="flex shrink-0 items-center gap-3 border-b border-bg4 bg-bg2 px-4 py-2">
+                  <Search className="h-4 w-4 shrink-0 text-muted" />
+                  <input
+                    autoFocus
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search messages..."
+                    className="flex-1 bg-transparent font-noto text-sm text-text placeholder:text-muted outline-none"
+                  />
+                  {searchQuery.trim() && (
+                    <div className="flex shrink-0 items-center gap-2 font-noto text-xs text-muted">
+                      <span>
+                        {searchResults.length === 0 ? 0 : currentResultIndex + 1} of {searchResults.length}
+                      </span>
+                      <button type="button" onClick={prevResult} aria-label="Previous result" disabled={searchResults.length === 0} className="hover:text-text disabled:opacity-40">
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      </button>
+                      <button type="button" onClick={nextResult} aria-label="Next result" disabled={searchResults.length === 0} className="hover:text-text disabled:opacity-40">
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
+                  <button type="button" onClick={closeSearch} aria-label="Close search" className="shrink-0 text-muted hover:text-text">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
 
               {/* Group voice calls: a call is running in this group and I'm not on it. */}
               {isGroupThread && liveGroupCall && myGroupCallId !== liveGroupCall.callId && (
@@ -1992,7 +2159,11 @@ export default function MessagesClient() {
 
                     if (m.isDeleted) {
                       return (
-                        <div key={m.id} className={`flex items-end gap-2 ${isOwn ? "justify-end" : "justify-start"}`}>
+                        <div
+                          key={m.id}
+                          id={`message-${m.id}`}
+                          className={`flex items-end gap-2 ${isOwn ? "justify-end" : "justify-start"} ${highlightedMessageId === m.id ? "message-highlight" : ""}`}
+                        >
                           {isGroupThread && !isOwn && <Avatar uid={m.senderId} photoURL={senderPhoto} displayName={senderName} size={32} />}
                           <div className="max-w-[75%] rounded-2xl bg-bg3 px-4 py-2 font-noto text-sm italic text-muted">
                             {/* recordMessageView (lib/dms.ts) sets this exact text for an expired
@@ -2006,7 +2177,11 @@ export default function MessagesClient() {
                     }
 
                     return (
-                      <div key={m.id} className={`group relative flex items-end gap-2 ${isOwn ? "justify-end" : "justify-start"}`}>
+                      <div
+                        key={m.id}
+                        id={`message-${m.id}`}
+                        className={`group relative flex items-end gap-2 ${isOwn ? "justify-end" : "justify-start"} ${highlightedMessageId === m.id ? "message-highlight" : ""}`}
+                      >
                         {isGroupThread && !isOwn && (
                           <Avatar uid={m.senderId} photoURL={senderPhoto} displayName={senderName} size={32} className="mb-1" />
                         )}
@@ -2019,6 +2194,16 @@ export default function MessagesClient() {
                                   {selected.memberTags[m.senderId]}
                                 </span>
                               )}
+                            </span>
+                          )}
+                          {/* Beta feedback: "Forwarded message indicator." 5+ forwards shows the
+                              generic label instead of the original sender's name — WhatsApp's own
+                              threshold, so a heavily-reforwarded message doesn't misleadingly point
+                              at whoever it happened to be forwarded from most recently. */}
+                          {m.forwardedFrom && (
+                            <span className="mb-0.5 ml-1 flex items-center gap-1.5 font-noto text-xs italic text-muted opacity-60">
+                              <Forward className="h-2.5 w-2.5" />
+                              {m.forwardedFrom.forwardCount >= 5 ? "Forwarded many times" : `Forwarded from ${m.forwardedFrom.originalSenderName}`}
                             </span>
                           )}
                           <div
@@ -2037,7 +2222,16 @@ export default function MessagesClient() {
                           >
                             {m.replyTo && (
                               <div
-                                className={`mb-1.5 border-l-2 pl-2 text-xs ${
+                                role="button"
+                                tabIndex={0}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  scrollToMessage(m.replyTo!.messageId);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") scrollToMessage(m.replyTo!.messageId);
+                                }}
+                                className={`mb-1.5 cursor-pointer border-l-2 pl-2 text-xs transition-opacity hover:opacity-80 ${
                                   // Beta feedback bug: bubble-color contrast. `text-ivory`/
                                   // `border-ivory` assumed every "own" bubble is dark — once a
                                   // light bubbleColor is picked, the outer bubble's own text
@@ -2079,8 +2273,15 @@ export default function MessagesClient() {
                                   accentColor={bubbleColor && bubbleColor.startsWith("#") ? bubbleColor : undefined}
                                   conversationId={selectedId!}
                                   viewerUid={user.uid}
+                                  onForward={m.mediaType ? () => setForwardingMessage(m) : undefined}
                                 />
-                                {m.text && !captionInMedia && <MentionText text={m.text} />}
+                                {m.text && !captionInMedia && (
+                                  isSearchOpen && searchQuery.trim() ? (
+                                    <p className="whitespace-pre-wrap">{highlightText(m.text, searchQuery.trim())}</p>
+                                  ) : (
+                                    <MentionText text={m.text} />
+                                  )
+                                )}
                                 {/* Beta feedback: "Links should be clickable, show the preview
                                     and should be formatted to be shorter." Clickable+shortened is
                                     MentionText's own job above; this is the preview itself. */}

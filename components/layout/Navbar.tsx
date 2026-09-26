@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
@@ -39,6 +39,12 @@ export default function Navbar() {
   const mobileOpen = mobilePanel === "menu";
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [unreadDMs, setUnreadDMs] = useState(0);
+  // Beta feedback: "Navbar breathing dot for new messages... When user opens the dropdown, the dot
+  // pulses once then stops until new messages arrive." The dot itself stays visible the whole time
+  // unreadDMs > 0 — only the looping animation stops once they've seen the dropdown, and resumes
+  // the moment unreadDMs ticks UP again (a genuinely new message, not just this same batch).
+  const [dotSettled, setDotSettled] = useState(false);
+  const prevUnreadRef = useRef(0);
 
   useEffect(() => {
     if (!user) {
@@ -47,6 +53,15 @@ export default function Navbar() {
     }
     return subscribeToUnreadDMCount(user.uid, setUnreadDMs);
   }, [user]);
+
+  useEffect(() => {
+    if (unreadDMs > prevUnreadRef.current) setDotSettled(false);
+    prevUnreadRef.current = unreadDMs;
+  }, [unreadDMs]);
+
+  useEffect(() => {
+    if (dropdownOpen && unreadDMs > 0) setDotSettled(true);
+  }, [dropdownOpen, unreadDMs]);
 
   const isPlatinum = profile?.isPlatinum === true;
   const isAdmin = profile?.isAdmin === true;
@@ -133,12 +148,21 @@ export default function Navbar() {
                 onClick={() => setDropdownOpen((o) => !o)}
                 className="flex items-center gap-2 rounded-full border border-muted2 bg-bg3 py-1.5 pl-1.5 pr-3 transition-colors hover:border-gold"
               >
-                <Avatar
-                  uid={user.uid}
-                  photoURL={avatarURL}
-                  displayName={profile?.displayName ?? user.displayName ?? user.email ?? "U"}
-                  size={32}
-                />
+                <div className="relative">
+                  <Avatar
+                    uid={user.uid}
+                    photoURL={avatarURL}
+                    displayName={profile?.displayName ?? user.displayName ?? user.email ?? "U"}
+                    size={32}
+                  />
+                  {unreadDMs > 0 && (
+                    <span
+                      aria-label="Unread messages"
+                      className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-bg bg-plat animate-breathe"
+                      style={dotSettled ? { animationIterationCount: 1 } : undefined}
+                    />
+                  )}
+                </div>
                 {/* Beta feedback bug: "the profile preview/dropdown on navbar shows my previous
                     display name" — user.displayName is Firebase Auth's copy, which only updates on
                     an explicit updateProfile() call and never after an Edit Profile save (that only

@@ -142,6 +142,8 @@ export interface SendDMOptions {
   /** View-once/timed/multi-view/daily — see ViewSettingsPicker and DMMessage's own doc comment.
    * Media/voice notes only; `viewCount` is always sent as 0 (nobody's opened it yet). */
   viewSettings?: DMMessage["viewSettings"];
+  /** Set by ForwardMessageModal — see DMMessage.forwardedFrom's own doc comment. */
+  forwardedFrom?: DMMessage["forwardedFrom"];
 }
 
 /**
