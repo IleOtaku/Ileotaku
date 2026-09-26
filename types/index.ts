@@ -161,6 +161,12 @@ export interface UserProfile {
      * still sends receipts normally. */
     sendReadReceipts?: boolean;
   };
+  /** Beta feedback: "Shake to Report." Firestore mirror of the 'ileotaku-shake-feedback'
+   * localStorage flag — ShakeReporter's fallback source of truth when localStorage has been
+   * cleared (a new browser, private mode, etc.), synced from Profile → Settings' toggle. Absent
+   * entirely for an account that's never touched the toggle (never asked, or asked and dismissed
+   * without a Firestore session available yet) — ShakeReporter treats that the same as false. */
+  shakeReportEnabled?: boolean;
   /** DM overhaul (Part B, "My Uploads" tab): this account's own uploaded wallpaper images
    * (Cloudinary URLs, under wallpapers/{uid}/), most-recently-added last. Kept on the profile
    * rather than a subcollection since it's a short, simple list with no per-item metadata. */

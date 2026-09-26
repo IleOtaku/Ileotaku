@@ -13,6 +13,7 @@ import SuspensionBanner from "@/components/layout/SuspensionBanner";
 import IncomingCallListener from "@/components/messages/IncomingCallListener";
 import GroupCallHost from "@/components/messages/GroupCallHost";
 import GiftPopup from "@/components/layout/GiftPopup";
+import ShakeReporter from "@/components/feedback/ShakeReporter";
 import { FeedAudioProvider } from "@/lib/audioContext";
 import "./globals.css";
 
@@ -111,6 +112,7 @@ export default function RootLayout({
               <IncomingCallListener />
               <GroupCallHost />
               <GiftPopup />
+              <ShakeReporter />
             </FeedAudioProvider>
           </AuthProvider>
         </ErrorBoundary>

@@ -28,6 +28,7 @@ import {
   UserX,
 } from "lucide-react";
 import { Modal, Select, Skeleton, Toggle } from "@/components/ui";
+import FeedbackModal, { BETA_FEEDBACK_CUTOFF } from "@/components/feedback/FeedbackModal";
 import { SpotifyGlyph } from "@/components/spotify/NowPlayingCard";
 import VerificationApplicationSection from "./VerificationApplicationSection";
 import BubbleStylePicker from "@/components/messages/BubbleStylePicker";
@@ -121,6 +122,9 @@ export default function SettingsTab() {
   // DM Feature Overhaul (Part G).
   const [bubbleStylePickerOpen, setBubbleStylePickerOpen] = useState(false);
   const [bubbleColorPickerOpen, setBubbleColorPickerOpen] = useState(false);
+  // Beta feedback: "Add feedback via profile settings and shake-to-report."
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [shakeEnabled, setShakeEnabled] = useState(false);
 
   const prefs = profile?.preferences ?? DEFAULT_PREFS;
   const notifPrefs: NotificationCategoryPreferences = profile?.notificationPreferences ?? {};
@@ -152,6 +156,19 @@ export default function SettingsTab() {
     setTaglineDraft(profile?.platinumTagline ?? "");
     setReminderDraft(profile?.reminderTime ?? "");
   }, [profile?.platinumTagline, profile?.reminderTime]);
+
+  // Beta feedback: "Shake to Report" toggle — localStorage is the immediate source of truth (same
+  // one ShakeReporter itself reads); this account's own Firestore doc is only consulted as a
+  // fallback, matching ShakeReporter's own layering, for a browser where localStorage was cleared.
+  useEffect(() => {
+    let saved: string | null = null;
+    try {
+      saved = localStorage.getItem("ileotaku-shake-feedback");
+    } catch {
+      // Inaccessible localStorage — fall through to the Firestore value below.
+    }
+    setShakeEnabled(saved !== null ? saved === "true" : profile?.shakeReportEnabled === true);
+  }, [profile?.shakeReportEnabled]);
 
   // Real-time: unblocking (from this list, a profile page, or a DM header) removes the row
   // immediately without a manual refetch. Each blocked uid's profile is fetched once per id
@@ -377,6 +394,29 @@ export default function SettingsTab() {
       toast.error("Couldn't unblock this user.");
     } finally {
       setUnblockingUid(null);
+    }
+  }
+
+  // Beta feedback: "Sync shake setting across Profile Settings" — updates localStorage (what
+  // ShakeReporter itself reads on this device), dispatches 'shake-preference-changed' so the
+  // already-mounted, page-wide ShakeReporter picks it up immediately with no reload, and mirrors
+  // it onto this account's own profile so a different browser/device (or a cleared localStorage)
+  // still knows the preference via ShakeReporter's Firestore fallback.
+  async function handleShakeToggle(v: boolean) {
+    setShakeEnabled(v);
+    try {
+      localStorage.setItem("ileotaku-shake-feedback", v ? "true" : "false");
+      localStorage.setItem("ileotaku-shake-asked", "true");
+    } catch {
+      // Best-effort — the toggle below and the Firestore write still work regardless.
+    }
+    window.dispatchEvent(new CustomEvent("shake-preference-changed", { detail: { enabled: v } }));
+    if (!user) return;
+    try {
+      await updateUserPrefs(user.uid, { shakeReportEnabled: v });
+      await refreshProfile();
+    } catch {
+      toast.error("Couldn't save that setting.");
     }
   }
 
@@ -1093,6 +1133,39 @@ export default function SettingsTab() {
           </div>
         )}
       </section>
+
+      {/* Beta feedback: "Add feedback via profile settings and shake-to-report." Hidden entirely
+          past the beta cutoff, same rule the footer's own feedback link and ShakeReporter use. */}
+      {new Date() < BETA_FEEDBACK_CUTOFF && (
+        <section>
+          <h3 className="mb-4 flex items-center gap-2 font-syne text-sm font-semibold text-text">
+            <MessageCircle className="h-4 w-4 text-gold" /> Beta Feedback
+          </h3>
+          <div className="flex flex-col gap-4 rounded-2xl border border-bg4 bg-bg2 p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="font-noto text-sm font-semibold text-text">Send Feedback</p>
+                <p className="mt-0.5 font-noto text-xs text-muted">Having issues or ideas? We read everything.</p>
+              </div>
+              <button type="button" onClick={() => setFeedbackOpen(true)} className="btn-ghost shrink-0 px-3 py-1.5 text-sm text-clay2">
+                Open →
+              </button>
+            </div>
+            <div className="flex items-center justify-between gap-3 border-t border-bg4 pt-4">
+              <div className="flex items-center gap-2">
+                <Smartphone className="h-4 w-4 shrink-0 text-muted" />
+                <div>
+                  <p className="font-noto text-sm text-text">Shake to Report</p>
+                  <p className="mt-0.5 font-noto text-xs text-muted">Shake your phone anywhere to open feedback</p>
+                </div>
+              </div>
+              <Toggle checked={shakeEnabled} onChange={handleShakeToggle} />
+            </div>
+          </div>
+        </section>
+      )}
+
+      <FeedbackModal open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
 
       <section>
         <h3 className="mb-4 font-syne text-sm font-semibold text-clay2">Danger Zone</h3>
