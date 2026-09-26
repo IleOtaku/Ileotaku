@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import toast from "react-hot-toast";
 import { AnimatePresence, motion } from "framer-motion";
@@ -52,6 +52,10 @@ export interface ContactInfoPanelProps {
   onBlocked: () => void;
   onUnblocked: () => void;
 }
+
+/** Drag the sheet down past this many pixels and releasing dismisses it; short of that, it snaps
+ * back to resting. Mobile bottom-sheet only — the desktop right-side panel never sees this. */
+const DISMISS_THRESHOLD_PX = 80;
 
 const MUTE_OPTIONS: { label: string; ms: number | null }[] = [
   { label: "8 hours", ms: 8 * 60 * 60 * 1000 },
@@ -110,6 +114,40 @@ export default function ContactInfoPanel({
   const [muteMenuOpen, setMuteMenuOpen] = useState(false);
   const [followersOpen, setFollowersOpen] = useState(false);
   const [followingOpen, setFollowingOpen] = useState(false);
+
+  // Beta feedback: "Add swipe-down-to-dismiss gesture to ContactInfoPanel bottom sheet on
+  // mobile... onTouchStart saves initial Y, onTouchMove translates the panel, onTouchEnd checks
+  // distance and either dismisses or snaps back." Kept as plain state + a CSS transform/transition
+  // on an inner wrapper — deliberately NOT on the same element framer-motion's own y-animation
+  // already drives (the mount/exit slide below), so the two never fight over the same transform.
+  const touchStartY = useRef<number | null>(null);
+  const [dragY, setDragY] = useState(0);
+  const [dragging, setDragging] = useState(false);
+
+  function handleTouchStart(e: React.TouchEvent) {
+    if (window.matchMedia("(min-width: 640px)").matches) return; // desktop panel doesn't drag
+    touchStartY.current = e.touches[0].clientY;
+    setDragging(true);
+  }
+  function handleTouchMove(e: React.TouchEvent) {
+    if (touchStartY.current === null) return;
+    const delta = e.touches[0].clientY - touchStartY.current;
+    // Only downward — dragging up just holds it at the top, it doesn't stretch past resting.
+    setDragY(Math.max(0, delta));
+  }
+  function handleTouchEnd() {
+    if (touchStartY.current === null) return;
+    touchStartY.current = null;
+    setDragging(false);
+    if (dragY > DISMISS_THRESHOLD_PX) {
+      // The exit animation below (spring, y: "100%") takes it the rest of the way — this only
+      // needs to trigger it. Reset immediately so the sheet isn't left mid-drag if it's reopened.
+      onClose();
+      setDragY(0);
+    } else {
+      setDragY(0); // the transition (disabled above while `dragging`) is what makes this a snap, not a jump
+    }
+  }
 
   const otherName = otherProfile?.displayName ?? "Reader";
   const currentNickname = user ? conversation.nicknames?.[user.uid]?.[otherUid] : undefined;
@@ -196,15 +234,29 @@ export default function ContactInfoPanel({
             transition={{ type: "spring", damping: 30, stiffness: 300 }}
             className="fixed inset-x-0 bottom-0 z-[131] flex max-h-[90vh] flex-col overflow-hidden rounded-t-2xl bg-bg2 shadow-2xl sm:inset-y-0 sm:left-auto sm:right-0 sm:top-0 sm:h-full sm:max-h-none sm:w-full sm:max-w-sm sm:rounded-none"
           >
-            <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-bg4 sm:hidden" />
-            <div className="sticky top-0 z-10 flex shrink-0 items-center justify-between border-b border-bg4 bg-bg2 px-4 py-3">
-              <p className="font-syne text-sm font-semibold text-text">Contact info</p>
-              <button type="button" onClick={onClose} aria-label="Close" className="text-muted hover:text-text">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
+            {/* Plain (non-motion) wrapper for the swipe-down-to-dismiss drag offset — kept separate
+                from the motion.div above so this transform never fights the mount/exit spring's own
+                y-animation. Touch handlers live on the handle bar + header; touchmove/touchend keep
+                firing here even once the finger moves elsewhere in the sheet. */}
+            <div
+              className="flex min-h-0 flex-1 flex-col"
+              style={{
+                transform: dragY ? `translateY(${dragY}px)` : undefined,
+                transition: dragging ? "none" : "transform 0.3s cubic-bezier(0.32, 0.72, 0, 1)",
+              }}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+            >
+              <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-bg4 sm:hidden" />
+              <div className="sticky top-0 z-10 flex shrink-0 items-center justify-between border-b border-bg4 bg-bg2 px-4 py-3">
+                <p className="font-syne text-sm font-semibold text-text">Contact info</p>
+                <button type="button" onClick={onClose} aria-label="Close" className="text-muted hover:text-text">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
 
-            <div className="flex-1 overflow-y-auto">
+              <div className="flex-1 overflow-y-auto">
               {/* ---- Header: avatar, name, badges, status, Now Playing, Follow ---- */}
               <div className="flex flex-col items-center gap-2 border-b border-bg4 px-4 py-6 text-center">
                 <AvatarLightbox uid={otherUid} photoURL={otherProfile?.photoURL} displayName={otherName} size={96} />
@@ -432,6 +484,7 @@ export default function ContactInfoPanel({
                 >
                   <Trash2 className="h-4 w-4" /> Delete Conversation
                 </button>
+              </div>
               </div>
             </div>
           </motion.div>
